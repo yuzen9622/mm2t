@@ -5,15 +5,18 @@ public enum Alignment {
     /// A pause longer than this starts a new utterance even when the speaker does not change.
     static let maxPause: TimeInterval = 1.5
 
-    /// Mic words are always `.me`. Each remote word goes to the segment it overlaps most,
-    /// or the nearest segment when it falls in a gap.
+    /// Each remote word goes to the segment it overlaps most, or the nearest segment when it falls
+    /// in a gap. Mic words go to `micSegments` the same way, and are all `.me` when there are none.
+    /// `overlaps` are the remote track's, so only its speakers are marked with them.
     public static func utterances(
         me: [TimedWord],
         remote: [TimedWord],
         segments: [SpeakerSegment],
-        overlaps: [TimeRange]
+        overlaps: [TimeRange],
+        micSegments: [SpeakerSegment] = []
     ) -> [Utterance] {
-        let mine = group(me.map { (SpeakerID.me, $0) })
+        let mine = group(me.map { (speaker(for: $0.range, in: micSegments) ?? .me, $0) })
+        let remoteSpeakers = Set(segments.map(\.speaker)).subtracting([.me])
         let theirs = group(remote.compactMap { word in
             speaker(for: word.range, in: segments).map { ($0, word) }
         })
@@ -23,10 +26,48 @@ public enum Alignment {
                 id: UtteranceID("u\(index + 1)"),
                 speaker: draft.speaker,
                 range: draft.range,
-                isOverlapping: draft.speaker != .me && overlaps.contains { $0.intersects(draft.range) },
+                isOverlapping: remoteSpeakers.contains(draft.speaker) && overlaps.contains { $0.intersects(draft.range) },
                 text: joined(draft.words),
                 words: draft.words)
         }
+    }
+
+    /// A run this long of mic words that the remote track also has, each within `repeatWindow` of
+    /// its twin, is the call coming out of the speakers too quietly for the echo removal to notice.
+    static let repeatRun = 4
+    static let repeatWindow: TimeInterval = 1
+
+    /// `mic` without the stretches that repeat `remote`. Punctuation neither counts toward a run nor breaks one.
+    static func dropping(repeatsOf remote: [TimedWord], from mic: [TimedWord]) -> [TimedWord] {
+        func spoken(_ word: TimedWord) -> String? {
+            let text = word.text.trimmingCharacters(in: .whitespaces.union(.punctuationCharacters).union(.symbols)).lowercased()
+            return text.isEmpty ? nil : text
+        }
+        var heard: [String: [TimeInterval]] = [:]
+        for word in remote {
+            if let text = spoken(word) { heard[text, default: []].append(word.range.start) }
+        }
+        guard !heard.isEmpty else { return mic }
+        var dropped = Set<Int>(), run: [Int] = [], length = 0
+        func close() {
+            if length >= repeatRun { dropped.formUnion(run) }
+            run = []
+            length = 0
+        }
+        for (index, word) in mic.enumerated() {
+            guard let text = spoken(word) else {
+                if !run.isEmpty { run.append(index) }
+                continue
+            }
+            if heard[text]?.contains(where: { abs($0 - word.range.start) <= repeatWindow }) == true {
+                run.append(index)
+                length += 1
+            } else {
+                close()
+            }
+        }
+        close()
+        return mic.enumerated().filter { !dropped.contains($0.offset) }.map(\.element)
     }
 
     private struct Draft {

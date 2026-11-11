@@ -22,12 +22,87 @@ public struct Diarization: Sendable {
     public let overlaps: [TimeRange]
     /// One or more vectors per cluster.
     public let embeddings: [ClusterID: [Embedding]]
+    /// Vectors of clusters that spoke too little for a voiceprint worth keeping. Good enough to
+    /// tell whether such a cluster is the user; never stored.
+    public let briefEmbeddings: [ClusterID: [Embedding]]
 
-    public init(segments: [Segment], overlaps: [TimeRange], embeddings: [ClusterID: [Embedding]]) {
+    public init(segments: [Segment], overlaps: [TimeRange], embeddings: [ClusterID: [Embedding]],
+                briefEmbeddings: [ClusterID: [Embedding]] = [:]) {
         self.segments = segments
         self.overlaps = overlaps
         self.embeddings = embeddings
+        self.briefEmbeddings = briefEmbeddings
     }
+}
+
+// MARK: Echo
+
+/// How loud each short stretch of the mic track was before and after the speakers' echo of the
+/// remote track was taken out of it.
+public struct EchoProfile: Hashable, Sendable {
+    /// A stretch that lost this much of its energy was the speakers, not someone in the room: 5 dB.
+    /// On the user's two test recordings echo-only stretches lost 8 to 24 dB and room speech about 1.
+    static let echoRatio: Float = 3.16
+    /// Words are short, so the stretch judged reaches this far past each end.
+    static let margin: TimeInterval = 0.15
+
+    public let frameDuration: TimeInterval
+    /// Mean square per frame.
+    public let before: [Float]
+    public let after: [Float]
+
+    public init(frameDuration: TimeInterval, before: [Float], after: [Float]) {
+        precondition(before.count == after.count, "EchoProfile needs both loudness tracks the same length")
+        self.frameDuration = frameDuration
+        self.before = before
+        self.after = after
+    }
+
+    /// Whether what the mic heard over `range` was mostly the remote track played back.
+    public func isEcho(_ range: TimeRange) -> Bool {
+        guard frameDuration > 0, !before.isEmpty else { return false }
+        let first = max(0, Int((range.start - Self.margin) / frameDuration))
+        let last = min(before.count - 1, Int((range.end + Self.margin) / frameDuration))
+        guard first <= last else { return false }
+        let heard = before[first...last].reduce(0, +), left = after[first...last].reduce(0, +)
+        return heard > 0 && heard >= Self.echoRatio * left
+    }
+
+    /// Whether a voice heard over all of `ranges` was the remote track played back: a person next
+    /// to the mic lost 1 to 2 dB of their speech to the removal there, the speakers 8 to 17 dB.
+    public func isEcho(_ ranges: [TimeRange]) -> Bool {
+        guard frameDuration > 0 else { return false }
+        var heard: Float = 0, left: Float = 0
+        for range in ranges {
+            let first = max(0, Int(range.start / frameDuration)), last = min(before.count, Int((range.end / frameDuration).rounded(.up)))
+            guard first < last else { continue }
+            heard += before[first..<last].reduce(0, +)
+            left += after[first..<last].reduce(0, +)
+        }
+        return heard > 0 && heard >= Self.echoRatio * left
+    }
+
+    /// `other` placed `time` seconds in; the gap before it counts as no echo.
+    public func appending(_ other: EchoProfile, at time: TimeInterval) -> EchoProfile {
+        let gap = [Float](repeating: 0, count: max(0, Int((time / frameDuration).rounded()) - before.count))
+        return EchoProfile(frameDuration: frameDuration,
+                           before: before + gap + other.before, after: after + gap + other.after)
+    }
+}
+
+/// A mic track with the speakers' echo removed. The caller deletes `audio` when done.
+public struct CleanedMic: Sendable {
+    public let audio: URL
+    public let echo: EchoProfile
+    public init(audio: URL, echo: EchoProfile) {
+        self.audio = audio
+        self.echo = echo
+    }
+}
+
+public protocol MicCleaner: Sendable {
+    /// nil when the remote track is silent, so the mic heard no echo of it.
+    func clean(mic: URL, remote: URL) throws -> CleanedMic?
 }
 
 public protocol Diarizer: Sendable {

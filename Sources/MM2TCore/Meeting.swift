@@ -19,7 +19,8 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     public let audio: RecordingAudio
     public let highlights: [Highlight]
 
-    /// Remote-track speakers only; the mic speaker is always `SpeakerID.me` and has no record.
+    /// Everyone but the user, who is `SpeakerID.me` and has no record: the remote track's speakers,
+    /// then anyone else the mic heard in the room.
     public internal(set) var speakers: [RemoteSpeaker] = []
     /// Speakers removed by a merge, mapped to the speaker they were merged into.
     public internal(set) var mergedSpeakers: [SpeakerID: SpeakerID] = [:]
@@ -27,6 +28,9 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     /// The track `speakers` and `remoteSegments` describe. nil means the remote track; `.me` when
     /// nothing was heard on the remote track, so the room's voices on the mic were separated instead.
     public internal(set) var separatedTrack: Track?
+    /// Who spoke when on the mic track of a call where it heard more than the user: the user as
+    /// `.me`, anyone else in the room as one of `speakers`. nil when every mic word is the user's.
+    public internal(set) var micSegments: [SpeakerSegment]?
     public internal(set) var attribution: SpeakerAttribution?
     public internal(set) var transcription: Transcription?
     public internal(set) var utterances: [Utterance] = []

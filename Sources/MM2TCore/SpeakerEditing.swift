@@ -92,6 +92,9 @@ public struct SpeakerEditing: Sendable {
         meeting.remoteSegments = meeting.remoteSegments.map {
             $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range) : $0
         }
+        meeting.micSegments = meeting.micSegments?.map {
+            $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range) : $0
+        }
         meeting.suggestions.items.removeAll { $0.speaker == from.id || (person != nil && $0.speaker == into.id) }
         meeting.suggestions.isStale = true
         let outputs = meeting.outputs

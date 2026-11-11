@@ -21,6 +21,9 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Whether the two tracks are transcribed at once, and name inference and the three generated
     /// views written at once. Right for hosted services; an on-device model has one set of weights.
     public let runsConcurrently: Bool
+    /// Removes the speakers' echo of the remote track from the mic track before it is transcribed
+    /// and separated. nil leaves the mic as recorded.
+    public let micCleaner: (any MicCleaner)?
 
     public init(
         library: MeetingLibrary,
@@ -32,9 +35,11 @@ public struct MeetingProcessingPipeline: Sendable {
         llm: any LLMProvider,
         thresholds: MatchThresholds,
         vocabulary: [String],
-        runsConcurrently: Bool = false
+        runsConcurrently: Bool = false,
+        micCleaner: (any MicCleaner)? = nil
     ) {
         self.runsConcurrently = runsConcurrently
+        self.micCleaner = micCleaner
         self.library = library
         self.voiceprints = voiceprints
         self.diarizer = diarizer
@@ -149,18 +154,23 @@ public struct MeetingProcessingPipeline: Sendable {
             let names = await voiceprints.spokenNames()
             let hints = names + vocabulary.filter { !names.contains($0) }
             let micURL = await library.audioURL(meeting, track: .me), remoteURL = await library.audioURL(meeting, track: .remote)
-            let remote: TrackTranscript, me: TrackTranscript
+            let cleaned = try? micCleaner?.clean(mic: micURL, remote: remoteURL)
+            defer { if let cleaned { try? FileManager.default.removeItem(at: cleaned.audio) } }
+            let heardURL = cleaned?.audio ?? micURL
+            let remote: TrackTranscript
+            var me: TrackTranscript
             if runsConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
                 async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
-                async let meTask = transcription.transcribe(audio: micURL, hints: hints, labelSpeakers: true)
+                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: true)
                 (remote, me) = try await (remoteTask, meTask)
             } else {
                 remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
                 // A silent remote track means the meeting happened in the room, so the mic holds every
                 // voice and is the track whose speakers need telling apart.
-                me = try await transcription.transcribe(audio: micURL, hints: hints, labelSpeakers: remote.words.isEmpty)
+                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: remote.words.isEmpty)
             }
+            if let echo = cleaned?.echo { me = me.dropping(echo) }
             meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)
 
         case .diarize:
@@ -263,6 +273,56 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.speakers = [RemoteSpeaker(id: id, label: Self.label(0), person: nil, embeddings: [])]
             meeting.remoteSegments = [SpeakerSegment(speaker: id, range: TimeRange(start: first.range.start, end: last.range.end))]
         }
+        meeting.micSegments = nil
+        if track == .remote, !transcription.me.words.isEmpty { await separateMic(&meeting) }
+    }
+
+    /// On a call the mic is the user's own, but in a shared room it hears the people next to them
+    /// and, without headphones, the call itself. A voice that mostly went away with the echo was the
+    /// speakers, and its words are dropped. Of the rest, those that do not sound like the enrolled
+    /// user become speakers of their own; one too short to tell stays the user's, as does the only
+    /// voice there is. Without a local model, or when it throws, every mic word stays the user's.
+    private func separateMic(_ meeting: inout Meeting) async {
+        guard let diarizer, let transcription = meeting.transcription else { return }
+        let enrolled = await voiceprints.user() != nil
+        let mic = await library.audioURL(meeting, track: .me), remote = await library.audioURL(meeting, track: .remote)
+        let cleaned = try? micCleaner?.clean(mic: mic, remote: remote)
+        defer { if let cleaned { try? FileManager.default.removeItem(at: cleaned.audio) } }
+        guard enrolled || cleaned != nil,
+              let heard = try? await diarizer.diarize(track: cleaned?.audio ?? mic) else { return }
+
+        var clusters: [ClusterID] = []
+        for segment in heard.segments.sorted(by: { $0.range.start < $1.range.start })
+        where !clusters.contains(segment.cluster) {
+            clusters.append(segment.cluster)
+        }
+        if let echo = cleaned?.echo {
+            let played = Set(clusters.filter { cluster in
+                echo.isEcho(heard.segments.filter { $0.cluster == cluster }.map(\.range))
+            })
+            if !played.isEmpty {
+                meeting.transcription = Transcription(
+                    me: transcription.me.keeping { word in
+                        let voice = heard.segments.max { $0.range.overlap(with: word) < $1.range.overlap(with: word) }
+                        return voice.map { $0.range.overlap(with: word) == 0 || !played.contains($0.cluster) } ?? true
+                    },
+                    remote: transcription.remote)
+                clusters.removeAll(where: played.contains)
+            }
+        }
+        guard enrolled, clusters.count > 1 else { return }
+        var others: [ClusterID: SpeakerID] = [:]
+        for cluster in clusters {
+            let vectors = heard.embeddings[cluster] ?? heard.briefEmbeddings[cluster] ?? []
+            guard let similarity = await voiceprints.similarityToUser(vectors), similarity < thresholds.suggest else { continue }
+            let id = SpeakerID.remote(meeting.speakers.count + 1)
+            meeting.speakers.append(RemoteSpeaker(
+                id: id, label: Self.label(meeting.speakers.count), person: nil, embeddings: heard.embeddings[cluster] ?? []))
+            others[cluster] = id
+        }
+        guard !others.isEmpty else { return }
+        meeting.micSegments = heard.segments.filter { clusters.contains($0.cluster) }
+            .map { SpeakerSegment(speaker: others[$0.cluster] ?? .me, range: $0.range) }
     }
 
     private func separation(of remote: TrackTranscript, track: URL) async
@@ -334,10 +394,18 @@ public struct MeetingProcessingPipeline: Sendable {
         guard let transcription = meeting.transcription else { preconditionFailure("align before transcribe") }
         let separatesMic = meeting.separatedTrack == .me
         meeting.utterances = Alignment.utterances(
-            me: separatesMic ? [] : transcription.me.words,
+            me: separatesMic ? [] : Alignment.dropping(repeatsOf: transcription.remote.words, from: transcription.me.words),
             remote: separatesMic ? transcription.me.words : transcription.remote.words,
             segments: meeting.remoteSegments,
-            overlaps: meeting.attribution?.overlaps ?? [])
+            overlaps: meeting.attribution?.overlaps ?? [],
+            micSegments: meeting.micSegments ?? [])
+        // Someone the mic heard whose every word turned out to be echo said nothing.
+        let speaking = Set(meeting.utterances.map(\.speaker))
+        let micOnly = Set((meeting.micSegments ?? []).map(\.speaker)).subtracting(meeting.remoteSegments.map(\.speaker))
+        meeting.speakers = meeting.speakers.filter { !micOnly.contains($0.id) || speaking.contains($0.id) }
+            .enumerated().map { index, speaker in
+                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+            }
     }
 
     private func apply(_ segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]], to meeting: inout Meeting) {
@@ -379,5 +447,21 @@ public struct MeetingProcessingPipeline: Sendable {
     static func label(_ index: Int) -> String {
         let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
         return index < letters.count ? String(letters[index]) : "S\(index + 1)"
+    }
+}
+
+extension TrackTranscript {
+    /// Without the words the mic only heard because the speakers played them.
+    public func dropping(_ echo: EchoProfile) -> TrackTranscript {
+        keeping { !echo.isEcho($0) }
+    }
+
+    func keeping(_ isKept: (TimeRange) -> Bool) -> TrackTranscript {
+        switch content {
+        case .unlabeled(let words):
+            TrackTranscript(source: source, content: .unlabeled(words.filter { isKept($0.range) }))
+        case .labeled(let words):
+            TrackTranscript(source: source, content: .labeled(words.filter { isKept($0.word.range) }))
+        }
     }
 }

@@ -60,11 +60,32 @@ struct ScriptedDiarizer: Diarizer {
     let result: Diarization
     let calls = Box(0)
     let fails = Box(false)
+    /// What is heard on the mic of a call, which is diarized after its remote track. nil is the
+    /// usual call: one voice, the user's.
+    let micOnCall = Box<Diarization?>(nil)
+    private let heardRemote = Box(false)
     init(_ result: Diarization = Script.diarization) { self.result = result }
     func diarize(track: URL) async throws -> Diarization {
         calls.update { $0 += 1 }
         if fails.get { throw LocalModelError() }
-        return result
+        guard track.lastPathComponent.hasPrefix("mic"), heardRemote.get else {
+            heardRemote.update { $0 = !track.lastPathComponent.hasPrefix("mic") }
+            return result
+        }
+        return micOnCall.get ?? Diarization(
+            segments: [.init(cluster: ClusterID("m1"), range: TimeRange(start: 50, end: 51))], overlaps: [], embeddings: [:])
+    }
+}
+
+/// Marks as echo whatever the mic heard in `echo`.
+struct ScriptedCleaner: MicCleaner {
+    let echo: TimeRange
+    func clean(mic: URL, remote: URL) throws -> CleanedMic? {
+        let url = mic.deletingLastPathComponent().appending(path: "mic-clean-\(UUID().uuidString).caf")
+        try Data("clean mic audio".utf8).write(to: url)
+        let frames = 600
+        let after = (0..<frames).map { echo.intersects(TimeRange(start: Double($0) / 10, end: Double($0 + 1) / 10)) ? Float(0.01) : 1 }
+        return CleanedMic(audio: url, echo: EchoProfile(frameDuration: 0.1, before: [Float](repeating: 1, count: frames), after: after))
     }
 }
 
@@ -192,6 +213,7 @@ struct World {
     let localModel: LocalSpeakerModel
     let diarizationOrder: [DiarizationSource]?
     let runsConcurrently = Box(false)
+    let micCleaner = Box<(any MicCleaner)?>(nil)
     let selfHosted = FakeSTT(.unreachable)
     let cloud = FakeSTT(labels: Script.remoteLabels)
     let local = FakeSTT()
@@ -222,13 +244,13 @@ struct World {
             return MeetingProcessingPipeline(
                 library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
                 transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"],
-                runsConcurrently: runsConcurrently.get)
+                runsConcurrently: runsConcurrently.get, micCleaner: micCleaner.get)
         }
         return MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
             diarizationOrder: diarizationOrder,
             transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"],
-                runsConcurrently: runsConcurrently.get)
+                runsConcurrently: runsConcurrently.get, micCleaner: micCleaner.get)
     }
 
     var editing: SpeakerEditing { SpeakerEditing(library: library, voiceprints: voiceprints) }
