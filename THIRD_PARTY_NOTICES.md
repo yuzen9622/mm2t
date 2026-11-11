@@ -37,3 +37,8 @@ FluidAudio includes these components, which the app links:
 - Source: https://huggingface.co/FluidInference/speaker-diarization-coreml (revision `df2625ac79a7ac6b65ad868fee6d80f320da4232`), a Core ML conversion of https://huggingface.co/pyannote/speaker-diarization-community-1
 - License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
 - Attribution: pyannote (pyannoteAI, Hervé Bredin), the WeSpeaker speaker-embedding model, the PLDA parameters from BUT Speech@FIT (also CC BY 4.0), and Fluid Inference for the Core ML conversion. The app uses the FBank and WeSpeaker embedding models to compute voiceprints. The conversion was not otherwise modified by mm2t.
+
+## Tabler Icons 3.51.0
+
+The interface icons in `App/MM2T/Icons/`. MIT License, Copyright (c) 2020-2026 Paweł Kuna.
+Source: https://github.com/tabler/tabler-icons. The license text ships in the app as `TABLER-LICENSE.txt`.

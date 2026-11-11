@@ -1,0 +1,77 @@
+import Foundation
+import MM2TCore
+import Observation
+
+/// Where the four LLM tasks run. `.local` is representable so a stored choice survives until the
+/// on-device model ships, but `PipelineSetup` reports it as not yet supported.
+public enum LLMLocation: String, Codable, Sendable, CaseIterable {
+    case cloud
+    case local
+}
+
+/// Everything the user configures except secrets, which live only in the Keychain.
+public struct AppSettings: Codable, Equatable, Sendable {
+    /// Tried in order; each one listed must be configured. The chain falls through only when a
+    /// source is unreachable, as `TranscriptionChain` defines.
+    public var transcriptionOrder: [TranscriptionSource] = [.cloud]
+    public var selfHostedURL: URL?
+    public var vocabulary: [String] = []
+    public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
+    public var llmLocation: LLMLocation = .cloud
+    public var hasCompletedOnboarding = false
+
+    public init() {}
+
+    /// Missing keys take their defaults, so a settings blob written by an older build still loads.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AppSettings()
+        transcriptionOrder = try c.decodeIfPresent([TranscriptionSource].self, forKey: .transcriptionOrder) ?? defaults.transcriptionOrder
+        selfHostedURL = try c.decodeIfPresent(URL.self, forKey: .selfHostedURL)
+        vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? defaults.vocabulary
+        diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
+        llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
+        hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case transcriptionOrder, selfHostedURL, vocabulary, diarizationOrder, llmLocation, hasCompletedOnboarding
+    }
+
+    /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
+    public static func selfHostedURL(from text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme), url.host() != nil else { return nil }
+        return url
+    }
+
+    /// One term per line or comma, blanks and duplicates dropped.
+    public static func vocabulary(from text: String) -> [String] {
+        var seen: Set<String> = []
+        return text.split(whereSeparator: { $0.isNewline || $0 == "," || $0 == "，" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}
+
+/// `AppSettings` persisted as one JSON value in UserDefaults; every change is saved immediately.
+@MainActor @Observable
+public final class SettingsStore {
+    public static let key = "settings.v1"
+
+    public var settings: AppSettings {
+        didSet { save() }
+    }
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        settings = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) } ?? AppSettings()
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: Self.key) }
+    }
+}

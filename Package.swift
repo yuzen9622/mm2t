@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "MM2TProviders", targets: ["MM2TProviders"]),
         .library(name: "MM2TSystem", targets: ["MM2TSystem"]),
         .library(name: "MM2TDiarization", targets: ["MM2TDiarization"]),
+        .library(name: "MM2TApp", targets: ["MM2TApp"]),
         .executable(name: "mm2t-probe", targets: ["mm2t-probe"]),
     ],
     dependencies: [
@@ -22,11 +23,13 @@ let package = Package(
         .target(
             name: "MM2TDiarization",
             dependencies: ["MM2TCore", .product(name: "FluidAudio", package: "FluidAudio")]),
+        .target(name: "MM2TApp", dependencies: ["MM2TCore", "MM2TProviders", "MM2TSystem", "MM2TDiarization"]),
         .executableTarget(name: "mm2t-probe", dependencies: ["MM2TSystem"]),
         .testTarget(name: "MM2TCoreTests", dependencies: ["MM2TCore"]),
         .testTarget(name: "MM2TProvidersTests", dependencies: ["MM2TProviders"]),
         .testTarget(name: "MM2TSystemTests", dependencies: ["MM2TSystem"]),
         .testTarget(name: "MM2TDiarizationTests", dependencies: ["MM2TDiarization", "MM2TCore"]),
+        .testTarget(name: "MM2TAppTests", dependencies: ["MM2TApp", "MM2TCore", "MM2TSystem", "MM2TProviders", "MM2TDiarization"]),
     ],
     swiftLanguageModes: [.v6]
 )
