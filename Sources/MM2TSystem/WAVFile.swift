@@ -68,6 +68,10 @@ public final class WAVWriter {
 public struct WAVAudio: Equatable, Sendable {
     public let sampleRate: Int
     public let samples: [Int16]
+    public init(sampleRate: Int, samples: [Int16]) {
+        self.sampleRate = sampleRate
+        self.samples = samples
+    }
     public var duration: TimeInterval { Double(samples.count) / Double(sampleRate) }
 }
 
@@ -84,6 +88,42 @@ public enum WAVFormat {
         let samples = data[layout.dataOffset ..< layout.dataOffset + layout.availableBytes / 2 * 2]
             .withUnsafeBytes { Array($0.bindMemory(to: Int16.self)).map(Int16.init(littleEndian:)) }
         return WAVAudio(sampleRate: layout.sampleRate, samples: samples)
+    }
+
+    /// How many frames are on disk now; a file still being recorded grows between calls.
+    public static func frameCount(_ url: URL) throws -> Int {
+        try growing(url).frames
+    }
+
+    /// Reads part of a file without loading the rest, so a recording in progress can be read in
+    /// pieces. `frames` is clamped to what is on disk.
+    public static func read(_ url: URL, frames: Range<Int>) throws -> WAVAudio {
+        let (layout, available) = try growing(url)
+        let range = max(0, frames.lowerBound) ..< min(available, frames.upperBound)
+        guard !range.isEmpty else { return WAVAudio(sampleRate: layout.sampleRate, samples: []) }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(layout.dataOffset + range.lowerBound * 2))
+        let data = try handle.read(upToCount: range.count * 2) ?? Data()
+        let samples = data.prefix(data.count / 2 * 2)
+            .withUnsafeBytes { Array($0.bindMemory(to: Int16.self)).map(Int16.init(littleEndian:)) }
+        return WAVAudio(sampleRate: layout.sampleRate, samples: samples)
+    }
+
+    public static func write(_ audio: WAVAudio, to url: URL) throws {
+        var data = header(sampleRate: audio.sampleRate, dataBytes: audio.samples.count * 2)
+        audio.samples.map(\.littleEndian).withUnsafeBufferPointer { data.append(Data(buffer: $0)) }
+        try data.write(to: url, options: .atomic)
+    }
+
+    /// The layout from the header and the frame count from the file's length, which is ahead of the
+    /// header's size field while the file is being written.
+    private static func growing(_ url: URL) throws -> (layout: Layout, frames: Int) {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let layout = try parse(try handle.read(upToCount: 4096) ?? Data())
+        let size = Int(try handle.seekToEnd())
+        return (layout, max(0, size - layout.dataOffset) / 2)
     }
 
     /// Rewrites the header sizes to match the audio actually on disk, dropping a torn final frame.
