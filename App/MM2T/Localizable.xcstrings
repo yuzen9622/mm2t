@@ -21,6 +21,16 @@
         }
       }
     },
+    "%@ signed you out. Connect it again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 已登出，請重新連結。"
+          }
+        }
+      }
+    },
     "%@ · %@": {
       "localizations": {
         "zh-Hant": {
@@ -41,22 +51,12 @@
         }
       }
     },
-    "%@ · All day": {
+    "%lld events": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ · 整天"
-          }
-        }
-      }
-    },
-    "%@ – %@": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ – %2$@"
+            "value": "%lld 個行程"
           }
         }
       }
@@ -77,6 +77,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "還有 %lld 項在各場會議裡"
+          }
+        }
+      }
+    },
+    "%lld open": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 項未完成"
           }
         }
       }
@@ -141,16 +151,6 @@
         }
       }
     },
-    "Add Google or Outlook calendars in System Settings › Internet Accounts.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "要加入 Google 或 Outlook 行事曆，請到「系統設定 › 網際網路帳號」。"
-          }
-        }
-      }
-    },
     "Add a name, product or term": {
       "localizations": {
         "zh-Hant": {
@@ -181,6 +181,16 @@
         }
       }
     },
+    "All day": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整天"
+          }
+        }
+      }
+    },
     "Allow microphone access to start recording": {
       "localizations": {
         "zh-Hant": {
@@ -207,6 +217,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "允許⋯"
+          }
+        }
+      }
+    },
+    "Already switched on? The switch may belong to an older build of mm2t. Select mm2t in the list, remove it with the − button, then add it again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已經打開了？那個開關可能屬於舊版的 mm2t。請在清單中選取 mm2t，按「−」移除後再重新加入。"
+          }
+        }
+      }
+    },
+    "Apple Calendar": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 行事曆"
           }
         }
       }
@@ -251,6 +281,16 @@
         }
       }
     },
+    "Bring in your calendar": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連結你的行事曆"
+          }
+        }
+      }
+    },
     "By person": {
       "localizations": {
         "zh-Hant": {
@@ -261,7 +301,7 @@
         }
       }
     },
-    "Calendar": {
+    "Calendars": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
@@ -341,12 +381,22 @@
         }
       }
     },
-    "Connect Calendar": {
+    "Connect": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "連結行事曆"
+            "value": "連結"
+          }
+        }
+      }
+    },
+    "Continue Setup": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繼續設定"
           }
         }
       }
@@ -387,6 +437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法修改說話者"
+          }
+        }
+      }
+    },
+    "Couldn't reach %@.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連上 %@。"
           }
         }
       }
@@ -461,6 +521,16 @@
         }
       }
     },
+    "Disconnect": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中斷連結"
+          }
+        }
+      }
+    },
     "Discussion points": {
       "localizations": {
         "zh-Hant": {
@@ -491,6 +561,16 @@
         }
       }
     },
+    "Done Reading": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唸完了"
+          }
+        }
+      }
+    },
     "Download": {
       "localizations": {
         "zh-Hant": {
@@ -517,6 +597,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "下載本機轉錄模型。"
+          }
+        }
+      }
+    },
+    "Download the speaker separation model first.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先下載說話者分群模型。"
           }
         }
       }
@@ -641,6 +731,16 @@
         }
       }
     },
+    "Finish setting up mm2t": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完成 mm2t 的設定"
+          }
+        }
+      }
+    },
     "Gemini API key": {
       "localizations": {
         "zh-Hant": {
@@ -657,6 +757,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "在這台 Mac 上產生"
+          }
+        }
+      }
+    },
+    "Google Calendar": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google 日曆"
+          }
+        }
+      }
+    },
+    "Google Calendar sign-in": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google 日曆登入"
           }
         }
       }
@@ -731,16 +851,6 @@
         }
       }
     },
-    "Later": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "稍後"
-          }
-        }
-      }
-    },
     "Licensed under AGPL-3.0.": {
       "localizations": {
         "zh-Hant": {
@@ -757,6 +867,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "授權聲明"
+          }
+        }
+      }
+    },
+    "Loading your calendar…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在載入行事曆…"
           }
         }
       }
@@ -861,6 +981,16 @@
         }
       }
     },
+    "Microsoft 365 or Outlook.com, read-only": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microsoft 365 或 Outlook.com，唯讀"
+          }
+        }
+      }
+    },
     "Model installed": {
       "localizations": {
         "zh-Hant": {
@@ -917,6 +1047,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要在這台 Mac 上安裝模型（%@）。"
+          }
+        }
+      }
+    },
+    "Next Month": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下個月"
           }
         }
       }
@@ -1001,6 +1141,26 @@
         }
       }
     },
+    "Not available in this build: it has no Google OAuth client ID.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個版本無法使用：尚未設定 Google OAuth 用戶端 ID。"
+          }
+        }
+      }
+    },
+    "Not available in this build: it has no Microsoft OAuth client ID.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個版本無法使用：尚未設定 Microsoft OAuth 用戶端 ID。"
+          }
+        }
+      }
+    },
     "Not generated yet.": {
       "localizations": {
         "zh-Hant": {
@@ -1061,12 +1221,12 @@
         }
       }
     },
-    "Nothing on your calendar today or tomorrow.": {
+    "Nothing scheduled.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "今天和明天沒有行程。"
+            "value": "這天沒有行程。"
           }
         }
       }
@@ -1127,6 +1287,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "請先開啟瀏覽器再授權。授權後 mm2t 才能讀取目前分頁的網址。"
+          }
+        }
+      }
+    },
+    "Outlook": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outlook"
+          }
+        }
+      }
+    },
+    "Outlook sign-in": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outlook 登入"
           }
         }
       }
@@ -1201,6 +1381,16 @@
         }
       }
     },
+    "Previous Month": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上個月"
+          }
+        }
+      }
+    },
     "Process": {
       "localizations": {
         "zh-Hant": {
@@ -1237,6 +1427,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "結束 mm2t"
+          }
+        }
+      }
+    },
+    "Read Again": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新唸一次"
+          }
+        }
+      }
+    },
+    "Read this aloud at your normal speaking voice. mm2t keeps a voiceprint of it on this Mac, so a meeting recorded in the room shows which speaker is you.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請用平常說話的聲音唸出下面這段話。mm2t 會把你的聲紋存在這台 Mac 上，之後在會議室現場錄音時，就能標出哪一位是你。"
           }
         }
       }
@@ -1441,12 +1651,12 @@
         }
       }
     },
-    "See today's meetings here and open their call links. mm2t reads the calendars this Mac already syncs.": {
+    "See each day's meetings here and join calls in one click. Connect as many as you use.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在這裡查看今天的會議並直接打開會議連結。mm2t 讀取的是這台 Mac 已經同步的行事曆。"
+            "value": "在這裡查看每天的會議，一鍵加入視訊。用到幾個就連結幾個。"
           }
         }
       }
@@ -1561,6 +1771,16 @@
         }
       }
     },
+    "Sign-in didn't finish. Try again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登入沒有完成，請再試一次。"
+          }
+        }
+      }
+    },
     "Sources are tried top to bottom. mm2t moves to the next one only when a source can't be reached.": {
       "localizations": {
         "zh-Hant": {
@@ -1657,6 +1877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "產生之後說話者已有變更，請重新產生以更新。"
+          }
+        }
+      }
+    },
+    "Start Reading": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始唸"
           }
         }
       }
@@ -1761,6 +1991,26 @@
         }
       }
     },
+    "That didn't sound like the passage. Read it once more; it doesn't have to be word for word.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聽起來不太像這段話。請再唸一次，不需要一字不差。"
+          }
+        }
+      }
+    },
+    "That was too short to learn your voice. Read the whole passage, a little closer to the microphone.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄到的聲音太短，還不足以記住你的聲音。請把整段唸完，並靠近麥克風一點。"
+          }
+        }
+      }
+    },
     "The first transcription after opening mm2t takes a few minutes while macOS prepares the model.": {
       "localizations": {
         "zh-Hant": {
@@ -1837,6 +2087,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "待辦事項"
+          }
+        }
+      }
+    },
+    "Today": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
+          }
+        }
+      }
+    },
+    "Today I am setting up my meeting notes. Whenever we meet in the same room, this is how the app will know which voice is mine.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天我要開始用這個工具記錄會議。之後大家在同一間會議室開會的時候，它會靠這段聲音認出哪一位是我。"
+          }
+        }
+      }
+    },
+    "Tomorrow": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "明天"
           }
         }
       }
@@ -1971,12 +2251,52 @@
         }
       }
     },
+    "Yesterday": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昨天"
+          }
+        }
+      }
+    },
+    "Your meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的會議"
+          }
+        }
+      }
+    },
+    "Your primary Google calendar, read-only": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的 Google 主要日曆，唯讀"
+          }
+        }
+      }
+    },
     "Your share of the talking": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "你的發言占比"
+          }
+        }
+      }
+    },
+    "Your voice": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的聲音"
           }
         }
       }
@@ -1997,6 +2317,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zoom 會議"
+          }
+        }
+      }
+    },
+    "days with meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天有開會"
+          }
+        }
+      }
+    },
+    "iCloud and the accounts this Mac already syncs": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 與這台 Mac 已同步的帳號"
+          }
+        }
+      }
+    },
+    "macOS isn't letting mm2t read calendars.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 不允許 mm2t 讀取行事曆。"
           }
         }
       }
@@ -2041,12 +2391,22 @@
         }
       }
     },
-    "mm2t isn't allowed to read your calendars. Allow it in System Settings.": {
+    "mm2t is connected. You can close this tab and go back to the app.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "mm2t 無法讀取你的行事曆。請到「系統設定」允許。"
+            "value": "mm2t 已連結。你可以關閉這個分頁，回到 App。"
+          }
+        }
+      }
+    },
+    "mm2t knows your voice": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 已經認得你的聲音"
           }
         }
       }
@@ -2057,6 +2417,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "mm2t 會特別留意這些詞，並照你的寫法寫出來。會議中聽到的專有名詞，以及你在逐字稿裡修正過的詞，也會自動加進來。"
+          }
+        }
+      }
+    },
+    "mm2t needs your permissions, your keys and a short reading in your own voice before it can take notes.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始記錄會議之前，mm2t 需要你授權、填入金鑰，並用自己的聲音唸一小段話。"
           }
         }
       }
@@ -2087,6 +2457,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "自架伺服器 Token"
+          }
+        }
+      }
+    },
+    "· Now": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "· 進行中"
           }
         }
       }
