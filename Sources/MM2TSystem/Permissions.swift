@@ -51,10 +51,11 @@ public enum Permissions {
 
     /// `TCCAccessPreflight` from the private TCC framework: the only way to read this permission
     /// without starting a tap. Missing symbol means `.unknown`, which is what the UI showed before.
-    private static let tccPreflight: (@convention(c) (CFString, CFDictionary?) -> Int)? = {
+    private static let tccPreflight: (@convention(c) (CFString, CFDictionary?) -> Int32)? = {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW),
               let symbol = dlsym(handle, "TCCAccessPreflight") else { return nil }
-        return unsafeBitCast(symbol, to: (@convention(c) (CFString, CFDictionary?) -> Int).self)
+        // The function returns a 32-bit enum; reading it wider would take in whatever the register held above it.
+        return unsafeBitCast(symbol, to: (@convention(c) (CFString, CFDictionary?) -> Int32).self)
     }()
 
     /// Accessibility has no "not determined" state; untrusted reads as denied.
