@@ -30,10 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         #endif
+        Updates.start()
         Task { await app.launch() }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
         WindowOpener.open(WindowID.main)
+        // The setup window introduces itself once. After that everything in it lives in Settings.
         if !app.settings.settings.hasCompletedOnboarding {
+            app.settings.settings.hasCompletedOnboarding = true
             WindowOpener.open(WindowID.onboarding)
         }
     }

@@ -11,6 +11,7 @@
 		A10000000000000000000102 /* MM2TCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000202 /* MM2TCore */; };
 		A10000000000000000000103 /* MM2TSystem in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000203 /* MM2TSystem */; };
 		A10000000000000000000104 /* MM2TProviders in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000204 /* MM2TProviders */; };
+		A10000000000000000000106 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000205 /* Sparkle */; };
 		A10000000000000000000105 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */; };
 /* End PBXBuildFile section */
 
@@ -33,6 +34,7 @@
 				A10000000000000000000102 /* MM2TCore in Frameworks */,
 				A10000000000000000000103 /* MM2TSystem in Frameworks */,
 				A10000000000000000000104 /* MM2TProviders in Frameworks */,
+				A10000000000000000000106 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,6 +83,7 @@
 				A10000000000000000000202 /* MM2TCore */,
 				A10000000000000000000203 /* MM2TSystem */,
 				A10000000000000000000204 /* MM2TProviders */,
+				A10000000000000000000205 /* Sparkle */,
 			);
 			productName = mm2t;
 			productReference = A10000000000000000000302 /* mm2t.app */;
@@ -108,6 +111,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A10000000000000000001001 /* XCLocalSwiftPackageReference ".." */,
+				A10000000000000000001002 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000602 /* Products */;
@@ -257,6 +261,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000001002 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		A10000000000000000000201 /* MM2TApp */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -273,6 +288,11 @@
 		A10000000000000000000204 /* MM2TProviders */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MM2TProviders;
+		};
+		A10000000000000000000205 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000001002 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

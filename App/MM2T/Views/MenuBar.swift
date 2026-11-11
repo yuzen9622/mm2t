@@ -9,9 +9,6 @@ struct MenuBarLabel: View {
     var body: some View {
         Image(systemName: symbol)
             .onAppear { WindowOpener.register(openWindow) }
-            .onChange(of: app?.queue.pendingSetup ?? []) { _, issues in
-                if !issues.isEmpty { openWindow(id: WindowID.onboarding) }
-            }
     }
 
     private var symbol: String {
@@ -43,6 +40,7 @@ struct MenuBarContent: View {
             Divider()
             Button("Meetings…") { openWindow(id: WindowID.main) }
             Button("Setup…") { openWindow(id: WindowID.onboarding) }
+            CheckForUpdatesButton()
             Button("Quit mm2t") { NSApp.terminate(nil) }
         }
         .padding()

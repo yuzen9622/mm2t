@@ -32,6 +32,11 @@
 	<string>mm2t 只錄下會議 App 播放的聲音，作為會議記錄中遠端與會者的音軌。</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>mm2t 會讀取瀏覽器目前分頁的網址，判斷你是否正在開 Google Meet、Teams、Zoom 或 Webex 網頁版會議。</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/yuzen9622/mm2t/releases/latest/download/appcast.xml</string>
+	<!-- PLACEHOLDER: replace with the public key printed by Sparkle's generate_keys (see docs/releasing.md). Builds keep updates off until it is a real key. -->
+	<key>SUPublicEDKey</key>
+	<string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>AGPL-3.0</string>
 </dict>

@@ -171,6 +171,16 @@
         }
       }
     },
+    "Check for Updates…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檢查更新⋯"
+          }
+        }
+      }
+    },
     "Checked when you record": {
       "localizations": {
         "zh-Hant": {
@@ -321,12 +331,42 @@
         }
       }
     },
+    "Download the on-device summary model.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下載本機摘要模型。"
+          }
+        }
+      }
+    },
+    "Download the on-device transcription model.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下載本機轉錄模型。"
+          }
+        }
+      }
+    },
     "Download the speaker separation model.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "請下載說話者分群模型。"
+          }
+        }
+      }
+    },
+    "Downloading %@": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在下載 %@"
           }
         }
       }
@@ -561,6 +601,16 @@
         }
       }
     },
+    "Model installed": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型已安裝"
+          }
+        }
+      }
+    },
     "Name": {
       "localizations": {
         "zh-Hant": {
@@ -587,6 +637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "在會議中為說話者命名後，聲紋會存在這台 Mac 上。"
+          }
+        }
+      }
+    },
+    "Needs a model on this Mac (%@).": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要在這台 Mac 上安裝模型（%@）。"
           }
         }
       }
@@ -691,6 +751,26 @@
         }
       }
     },
+    "Not recommended on a Mac with an Intel processor.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不建議在 Intel 處理器的 Mac 上使用。"
+          }
+        }
+      }
+    },
+    "Not recommended: needs at least %lld GB of memory.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不建議：至少需要 %lld GB 記憶體。"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "zh-Hant": {
@@ -717,26 +797,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "本機模型"
-          }
-        }
-      }
-    },
-    "On-device summaries are not available in this version yet.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "這個版本還不支援在本機產生摘要。"
-          }
-        }
-      }
-    },
-    "On-device transcription is not available in this version yet.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "這個版本還不支援本機轉錄。"
           }
         }
       }
@@ -1381,6 +1441,16 @@
         }
       }
     },
+    "The first transcription after opening mm2t takes a few minutes while macOS prepares the model.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每次開啟 mm2t 後的第一次轉錄，macOS 需要幾分鐘準備模型。"
+          }
+        }
+      }
+    },
     "The generated views will need regenerating.": {
       "localizations": {
         "zh-Hant": {
@@ -1497,16 +1567,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "請使用付費方案的 Gemini 金鑰。免費方案送出的內容可能被 Google 用於改進產品。"
-          }
-        }
-      }
-    },
-    "Verify": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "驗證"
           }
         }
       }
