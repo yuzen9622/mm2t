@@ -31,12 +31,52 @@
         }
       }
     },
+    "%@ · %lld meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$lld 場會議"
+          }
+        }
+      }
+    },
+    "%@ · All day": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 整天"
+          }
+        }
+      }
+    },
+    "%@ – %@": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ – %2$@"
+          }
+        }
+      }
+    },
     "%lld interrupted recordings were recovered.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "已救回 %lld 段中斷的錄音。"
+          }
+        }
+      }
+    },
+    "%lld more in your meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還有 %lld 項在各場會議裡"
           }
         }
       }
@@ -81,12 +121,62 @@
         }
       }
     },
+    "Action items from your meetings' summaries collect here.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會議摘要裡的待辦事項會集中在這裡。"
+          }
+        }
+      }
+    },
+    "Add": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增"
+          }
+        }
+      }
+    },
+    "Add Google or Outlook calendars in System Settings › Internet Accounts.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要加入 Google 或 Outlook 行事曆，請到「系統設定 › 網際網路帳號」。"
+          }
+        }
+      }
+    },
+    "Add a name, product or term": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增人名、產品名稱或術語"
+          }
+        }
+      }
+    },
     "Aligning words to speakers": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "對齊文字與說話者"
+          }
+        }
+      }
+    },
+    "All %lld": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部 %lld"
           }
         }
       }
@@ -117,6 +207,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "允許⋯"
+          }
+        }
+      }
+    },
+    "Auto-added %lld": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動新增 %lld"
           }
         }
       }
@@ -161,12 +261,32 @@
         }
       }
     },
+    "Calendar": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行事曆"
+          }
+        }
+      }
+    },
     "Cancel": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "取消"
+          }
+        }
+      }
+    },
+    "Characters transcribed": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已轉寫字數"
           }
         }
       }
@@ -221,6 +341,46 @@
         }
       }
     },
+    "Connect Calendar": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連結行事曆"
+          }
+        }
+      }
+    },
+    "Copied": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已複製"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製"
+          }
+        }
+      }
+    },
+    "Correction": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修正內容"
+          }
+        }
+      }
+    },
     "Couldn't change speakers": {
       "localizations": {
         "zh-Hant": {
@@ -237,6 +397,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "決議"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除"
           }
         }
       }
@@ -381,6 +551,16 @@
         }
       }
     },
+    "Edit": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯"
+          }
+        }
+      }
+    },
     "ElevenLabs (cloud)": {
       "localizations": {
         "zh-Hant": {
@@ -501,12 +681,52 @@
         }
       }
     },
+    "Home": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首頁"
+          }
+        }
+      }
+    },
+    "Hours in meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會議時數"
+          }
+        }
+      }
+    },
+    "Join": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入"
+          }
+        }
+      }
+    },
     "Key works": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "金鑰有效"
+          }
+        }
+      }
+    },
+    "Last 12 weeks": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近 12 週"
           }
         }
       }
@@ -541,6 +761,36 @@
         }
       }
     },
+    "Manually added %lld": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手動新增 %lld"
+          }
+        }
+      }
+    },
+    "Mark as done": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標示為已完成"
+          }
+        }
+      }
+    },
+    "Mark as not done": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標示為未完成"
+          }
+        }
+      }
+    },
     "Markdown…": {
       "localizations": {
         "zh-Hant": {
@@ -567,6 +817,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "會議"
+          }
+        }
+      }
+    },
+    "Meetings recorded": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已記錄的會議"
           }
         }
       }
@@ -617,6 +877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "名字"
+          }
+        }
+      }
+    },
+    "Name the speakers in a meeting and mm2t starts recognizing their voices.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在會議裡替說話者命名後，mm2t 就會開始認得他們的聲音。"
           }
         }
       }
@@ -687,6 +957,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "沒有符合的結果"
+          }
+        }
+      }
+    },
+    "No terms yet": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有詞彙"
           }
         }
       }
@@ -771,6 +1051,26 @@
         }
       }
     },
+    "Nothing learned yet": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有自動新增的詞彙"
+          }
+        }
+      }
+    },
+    "Nothing on your calendar today or tomorrow.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天和明天沒有行程。"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "zh-Hant": {
@@ -797,16 +1097,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "本機模型"
-          }
-        }
-      }
-    },
-    "One term per line": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每行一個詞"
           }
         }
       }
@@ -1151,6 +1441,16 @@
         }
       }
     },
+    "See today's meetings here and open their call links. mm2t reads the calendars this Mac already syncs.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這裡查看今天的會議並直接打開會議連結。mm2t 讀取的是這台 Mac 已經同步的行事曆。"
+          }
+        }
+      }
+    },
     "Self-hosted server": {
       "localizations": {
         "zh-Hant": {
@@ -1401,6 +1701,16 @@
         }
       }
     },
+    "Subtitles (.srt)…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕檔（.srt）⋯"
+          }
+        }
+      }
+    },
     "Summaries": {
       "localizations": {
         "zh-Hant": {
@@ -1437,6 +1747,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "系統音訊錄製"
+          }
+        }
+      }
+    },
+    "Terms from your vocabulary appear here once they come up in meetings.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞彙表裡的詞在會議中出現後，會顯示在這裡。"
           }
         }
       }
@@ -1507,6 +1827,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "這場會議還沒處理。"
+          }
+        }
+      }
+    },
+    "To-dos": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待辦事項"
           }
         }
       }
@@ -1591,6 +1921,16 @@
         }
       }
     },
+    "Voices you hear most": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最常聽到的聲音"
+          }
+        }
+      }
+    },
     "Waiting for microphone permission": {
       "localizations": {
         "zh-Hant": {
@@ -1627,6 +1967,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "撰寫摘要"
+          }
+        }
+      }
+    },
+    "Your share of the talking": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的發言占比"
+          }
+        }
+      }
+    },
+    "Your words": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的常用詞"
           }
         }
       }
@@ -1677,6 +2037,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "mm2t 無法啟動"
+          }
+        }
+      }
+    },
+    "mm2t isn't allowed to read your calendars. Allow it in System Settings.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 無法讀取你的行事曆。請到「系統設定」允許。"
+          }
+        }
+      }
+    },
+    "mm2t listens for these words and spells them your way. It also adds terms it hears in your meetings and the ones you correct in a transcript.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 會特別留意這些詞，並照你的寫法寫出來。會議中聽到的專有名詞，以及你在逐字稿裡修正過的詞，也會自動加進來。"
           }
         }
       }
