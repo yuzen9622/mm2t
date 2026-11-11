@@ -31,8 +31,9 @@ public actor NemotronDiarizer: MM2TCore.Diarizer {
         let turns = try Self.turns(of: audio, with: model)
         let segments = SpeakerTurns.bridgingGaps(turns, shorterThan: Self.gapBridging)
         // Voiceprints come from the unbridged turns, the spans the evaluation measured them on.
-        let embeddings = try await embedder.voiceprints(audio: audio, segments: turns)
-        return Diarization(segments: segments, overlaps: SpeakerTurns.overlaps(segments), embeddings: embeddings)
+        let voiceprints = try await embedder.voiceprints(audio: audio, segments: turns, includingBrief: true)
+        return Diarization(segments: segments, overlaps: SpeakerTurns.overlaps(segments),
+                           embeddings: voiceprints.kept, briefEmbeddings: voiceprints.brief)
     }
 
     /// Raw model turns before post-processing, clusters named `S1`, `S2`, ... in arrival order.

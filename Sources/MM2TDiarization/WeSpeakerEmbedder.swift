@@ -26,13 +26,17 @@ public actor WeSpeakerEmbedder: SpeakerEmbedder {
     public func embeddings(track: URL, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]] {
         let audio = try TrackAudio(converting: track)
         defer { audio.remove() }
-        return try await voiceprints(audio: audio, segments: segments)
+        return try await voiceprints(audio: audio, segments: segments, includingBrief: false).kept
     }
 
-    func voiceprints(audio: TrackAudio, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]] {
-        let pieces = SpeakerTurns.cleanPieces(segments, within: audio.duration)
-            .filter { $0.value.reduce(0) { $0 + $1.duration } >= minimumSpeech }
-        guard !pieces.isEmpty else { return [:] }
+    /// `kept` are the voiceprints; `brief` are the vectors of speakers with at least one clean piece
+    /// but under `minimumSpeech` of them, too unsteady to store or to name anyone by.
+    func voiceprints(audio: TrackAudio, segments: [Diarization.Segment], includingBrief: Bool) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]]) {
+        let clean = SpeakerTurns.cleanPieces(segments, within: audio.duration).filter { !$0.value.isEmpty }
+        let enough = Set(clean.filter { $0.value.reduce(0) { $0 + $1.duration } >= minimumSpeech }.keys)
+        let pieces = includingBrief ? clean : clean.filter { enough.contains($0.key) }
+        guard !pieces.isEmpty else { return ([:], [:]) }
 
         let owners = pieces.flatMap { cluster, ranges in ranges.map { (cluster, $0) } }
             .sorted { $0.1.start < $1.1.start }
@@ -47,8 +51,9 @@ public actor WeSpeakerEmbedder: SpeakerEmbedder {
             vectors += try await manager.embedSpans(audioSource: audio, spans: batch.map { $0.1.start..<$0.1.end })
             await Task.yield()
         }
-        return Dictionary(grouping: zip(owners.map(\.0), vectors), by: \.0)
+        let all = Dictionary(grouping: zip(owners.map(\.0), vectors), by: \.0)
             .compactMapValues { pairs in SpeakerTurns.centroid(pairs.map(\.1)).map { [Embedding($0)] } }
+        return (all.filter { enough.contains($0.key) }, all.filter { !enough.contains($0.key) })
     }
 
     private func loadedModels() async throws -> OfflineDiarizerModels {
