@@ -278,6 +278,9 @@ public actor AudioRecorder {
     }
 
     private func watchForSilence(_ level: AudioLevel, now: Double) {
+        // Recording the whole Mac, silence only means nothing is playing; some app always holds an
+        // output stream open, so "the target is playing" proves nothing there.
+        guard configuration.targetBundleID != nil else { return }
         guard level.peak == 0 else {
             remoteSilentSince = nil
             reportedSilence = false

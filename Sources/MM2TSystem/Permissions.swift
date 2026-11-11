@@ -39,9 +39,23 @@ public enum Permissions {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    /// System audio capture (TCC `kTCCServiceAudioCapture`) has no public status API. The recorder
-    /// reports `RecorderEvent.remoteSilentWhileTargetPlaying` instead, which is how a denial shows up.
-    public static var systemAudio: PermissionState { .unknown }
+    /// System audio capture (TCC `kTCCServiceAudioCapture`) has no public status API.
+    public static var systemAudio: PermissionState {
+        guard let preflight = tccPreflight else { return .unknown }
+        switch preflight("kTCCServiceAudioCapture" as CFString, nil) {
+        case 0: return .granted
+        case 1: return .denied
+        default: return .notDetermined
+        }
+    }
+
+    /// `TCCAccessPreflight` from the private TCC framework: the only way to read this permission
+    /// without starting a tap. Missing symbol means `.unknown`, which is what the UI showed before.
+    private static let tccPreflight: (@convention(c) (CFString, CFDictionary?) -> Int)? = {
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW),
+              let symbol = dlsym(handle, "TCCAccessPreflight") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) (CFString, CFDictionary?) -> Int).self)
+    }()
 
     /// Accessibility has no "not determined" state; untrusted reads as denied.
     public static var accessibility: PermissionState {
