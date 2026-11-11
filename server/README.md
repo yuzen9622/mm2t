@@ -16,7 +16,8 @@ mm2t 的第三種轉錄來源。這是在你自己的 GPU 主機上執行的 HTT
 
 ```bash
 cd server
-MM2T_SERVER_TOKEN=請換成一組長亂數 docker compose up -d --build
+cp .env.example .env
+docker compose up -d --build
 docker compose logs -f   # 第一次啟動會下載約 3.1 GB 模型，存放在 models volume
 curl http://localhost:8000/healthz
 ```
