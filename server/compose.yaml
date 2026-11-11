@@ -1,6 +1,8 @@
 services:
   mm2t-server:
-    build: .
+    build: 
+      context: .
+      network: host
     image: mm2t-server
     restart: unless-stopped
     ports:
