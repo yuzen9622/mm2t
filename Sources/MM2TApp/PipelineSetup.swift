@@ -1,6 +1,7 @@
 import Foundation
 import MM2TCore
 import MM2TProviders
+import MM2TSystem
 
 /// Something the user has to configure before a meeting can be processed. The UI routes each
 /// one to the setup screen that fixes it instead of letting processing fail midway.
@@ -115,7 +116,8 @@ public struct PipelineSetup: Sendable {
             diarizationOrder: settings.diarizationOrder,
             transcription: TranscriptionChain(routes), llm: llm,
             thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
-            runsConcurrently: settings.llmLocation == .cloud && !settings.transcriptionOrder.contains(.local)))
+            runsConcurrently: settings.llmLocation == .cloud && !settings.transcriptionOrder.contains(.local),
+            micCleaner: EchoRemover()))
     }
 
     private func nonEmpty(_ credential: Credential) throws -> Secret? {

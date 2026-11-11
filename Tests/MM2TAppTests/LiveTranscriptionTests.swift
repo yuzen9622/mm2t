@@ -71,6 +71,20 @@ struct PieceSTT: TranscriptionProvider {
         #expect(transcription.remote.words.map(\.text) == ["8s"])
     }
 
+    @Test func aPieceOfTheMicThatOnlyHeardTheSpeakersHasNoWords() async throws {
+        var state: UInt64 = 7
+        let played = (0..<8 * Self.rate).map { _ -> Int16 in
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Int16(truncatingIfNeeded: Int(state >> 48) - 32768) / 2
+        }
+        let heard = (0..<played.count).map { $0 >= 30 ? played[$0 - 30] / 3 : 0 }
+        let files = try recording(mic: heard, remote: played)
+        let transcription = try #require(await transcriber(files, PieceSTT()).finish(mic: files.mic, remote: files.remote))
+
+        #expect(transcription.me.words.isEmpty)
+        #expect(transcription.remote.words.map(\.text) == ["8s"])
+    }
+
     @Test func aFailedPieceMeansNoLiveTranscription() async throws {
         let files = try recording(mic: Self.tone(30), remote: Self.tone(30))
         let stt = PieceSTT()

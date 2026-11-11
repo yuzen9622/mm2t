@@ -91,7 +91,7 @@ public actor LiveTranscriber {
                 }
                 guard end > cut else { return }
                 let range = cut..<end
-                async let mine = transcribe(.me, mic, range, rate)
+                async let mine = transcribe(.me, mic, range, rate, echoOf: remote)
                 async let theirs = transcribe(.remote, remote, range, rate)
                 let (a, b) = try await (mine, theirs)
                 for (track, result) in [(Track.me, a), (.remote, b)] {
@@ -107,18 +107,25 @@ public actor LiveTranscriber {
         }
     }
 
-    /// The words of one piece of one track, timed from the start of the recording.
-    private nonisolated func transcribe(_ track: Track, _ url: URL, _ range: Range<Int>, _ rate: Int) async throws
+    /// The words of one piece of one track, timed from the start of the recording. The mic's piece
+    /// first loses the speakers' echo of the remote one, and then the words that were only that echo.
+    private nonisolated func transcribe(_ track: Track, _ url: URL, _ range: Range<Int>, _ rate: Int, echoOf played: URL? = nil) async throws
         -> (words: [TimedWord], source: TranscriptionSource?) {
-        let audio = try WAVFormat.read(url, frames: range)
+        var audio = try WAVFormat.read(url, frames: range)
         if QuietCut.isSilent(audio.samples) { return ([], nil) }
+        var echo: EchoProfile?
+        if let played, let cleaned = EchoCanceller.clean(
+            mic: audio.samples, remote: try WAVFormat.read(played, frames: range).samples, sampleRate: rate) {
+            audio = WAVAudio(sampleRate: rate, samples: cleaned.samples)
+            echo = cleaned.echo
+        }
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let file = scratch.appending(path: "\(track.rawValue)-\(range.lowerBound).wav")
         try WAVFormat.write(audio, to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         let transcript = try await chain.transcribe(audio: file, hints: hints, labelSpeakers: false)
         let offset = Double(range.lowerBound) / Double(rate)
-        let words = transcript.words.map {
+        let words = transcript.words.filter { echo?.isEcho($0.range) != true }.map {
             TimedWord(text: $0.text, range: TimeRange(start: $0.range.start + offset, end: $0.range.end + offset))
         }
         return (words, transcript.source)
