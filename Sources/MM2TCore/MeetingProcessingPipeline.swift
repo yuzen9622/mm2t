@@ -1,0 +1,282 @@
+import Foundation
+
+public enum SpeakerSeparationError: Error, Equatable {
+    /// Re-running separation needs a finished meeting; a failed one resumes with `process` instead.
+    case meetingNotCompleted(ProcessingStatus)
+}
+
+/// Turns a recorded meeting into a transcript with speakers and LLM outputs.
+/// Every step persists its result before the next starts, so a retry resumes at the failed step.
+public struct MeetingProcessingPipeline: Sendable {
+    public let library: MeetingLibrary
+    public let voiceprints: VoiceprintStore
+    public let diarizer: (any Diarizer)?
+    public let embedder: (any SpeakerEmbedder)?
+    /// Sources tried in order for the remote track's speaker turns.
+    public let diarizationOrder: [DiarizationSource]
+    public let transcription: TranscriptionChain
+    public let llm: any LLMProvider
+    public let thresholds: MatchThresholds
+    public let vocabulary: [String]
+
+    public init(
+        library: MeetingLibrary,
+        voiceprints: VoiceprintStore,
+        diarizer: (any Diarizer)?,
+        embedder: (any SpeakerEmbedder)?,
+        diarizationOrder: [DiarizationSource] = [.local, .transcription],
+        transcription: TranscriptionChain,
+        llm: any LLMProvider,
+        thresholds: MatchThresholds,
+        vocabulary: [String]
+    ) {
+        self.library = library
+        self.voiceprints = voiceprints
+        self.diarizer = diarizer
+        self.embedder = embedder
+        self.diarizationOrder = diarizationOrder
+        self.transcription = transcription
+        self.llm = llm
+        self.thresholds = thresholds
+        self.vocabulary = vocabulary
+    }
+
+    /// Runs from the meeting's resume step to the end. A step failure is recorded in
+    /// `meeting.status` and returned, not thrown; only persistence errors throw.
+    @discardableResult
+    public func process(
+        _ id: MeetingID,
+        progress: @Sendable (ProcessingStep) -> Void = { _ in }
+    ) async throws -> Meeting {
+        var meeting = try await library.meeting(id)
+        if case .failed(let step, _) = meeting.status {
+            meeting.status = .pending(next: step)
+            try await library.save(meeting)
+        }
+        while let step = meeting.status.resumeStep {
+            progress(step)
+            do {
+                try await run(step, on: &meeting)
+                meeting.status = step.next.map { .pending(next: $0) } ?? .completed
+            } catch {
+                meeting.status = .failed(step: step, reason: String(describing: error))
+                try await library.save(meeting)
+                return meeting
+            }
+            try await library.save(meeting)
+        }
+        return meeting
+    }
+
+    /// Re-runs name inference and the three generated views, e.g. after a merge made them stale.
+    @discardableResult
+    public func regenerateLLMOutputs(
+        _ id: MeetingID,
+        progress: @Sendable (ProcessingStep) -> Void = { _ in }
+    ) async throws -> Meeting {
+        var meeting = try await library.meeting(id)
+        if meeting.status.resumeStep.map({ $0 > .inferNames }) ?? true {
+            meeting.status = .pending(next: .inferNames)
+            try await library.save(meeting)
+        }
+        return try await process(id, progress: progress)
+    }
+
+    private func run(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
+        switch step {
+        case .transcribe:
+            let names = await voiceprints.allPersons().map(\.name)
+            let hints = names + vocabulary.filter { !names.contains($0) }
+            let me = try await transcription.transcribe(
+                audio: library.audioURL(meeting, track: .me), hints: hints, labelSpeakers: false)
+            let remote = try await transcription.transcribe(
+                audio: library.audioURL(meeting, track: .remote), hints: hints, labelSpeakers: true)
+            meeting.transcription = Transcription(me: me, remote: remote)
+
+        case .diarize:
+            await diarize(&meeting)
+
+        case .matchVoiceprints:
+            await matchVoiceprints(&meeting)
+
+        case .align:
+            align(&meeting)
+
+        case .inferNames:
+            let speaking = Set(meeting.utterances.map(\.speaker))
+            let unnamed = meeting.speakers.filter { $0.person == nil && speaking.contains($0.id) }.map(\.id)
+            let voiceprintSuggestions = meeting.suggestions.items.filter {
+                if case .voiceprint = $0.source { return unnamed.contains($0.speaker) }
+                return false
+            }
+            var inferred: [NameSuggestion] = []
+            if !unnamed.isEmpty {
+                let names = await voiceprints.names()
+                let known = meeting.speakers.reduce(into: [SpeakerID: String]()) { result, speaker in
+                    if let name = speaker.person.flatMap({ names[$0] }) { result[speaker.id] = name }
+                }
+                let guesses = try await llm.inferNames(NameInferenceRequest(
+                    transcript: llmTranscript(meeting), unnamedSpeakers: unnamed, knownNames: known))
+                inferred = guesses
+                    .filter { unnamed.contains($0.speaker) && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .map { NameSuggestion(speaker: $0.speaker, source: .inferred(name: $0.name, reason: $0.reason)) }
+            }
+            meeting.suggestions = NameSuggestions(items: voiceprintSuggestions + inferred)
+
+        case .cleanTranscript:
+            meeting.outputs.cleaned = try await llm.cleanTranscript(llmTranscript(meeting))
+
+        case .digestPerPerson:
+            meeting.outputs.digests = try await llm.digestPerPerson(llmTranscript(meeting))
+
+        case .summarize:
+            let transcript = llmTranscript(meeting)
+            meeting.outputs.summary = try await llm.summarize(SummaryRequest(
+                transcript: transcript,
+                prioritized: transcript.utterances.filter(\.isHighlighted)))
+            meeting.outputs.isStale = false
+        }
+    }
+
+    /// Re-runs speaker separation, voiceprint matching and alignment on the stored transcription,
+    /// e.g. after the local model is fixed. STT is not called again. Speakers are rebuilt, which
+    /// discards persons the user assigned and merges; LLM outputs and name suggestions were written
+    /// for the old speakers, so they become stale as after a merge. A run that still cannot separate
+    /// keeps the current speakers and outputs, and only refreshes an unseparated meeting's failure reason.
+    @discardableResult
+    public func reseparateSpeakers(_ id: MeetingID) async throws -> Meeting {
+        var meeting = try await library.meeting(id)
+        guard meeting.status == .completed else { throw SpeakerSeparationError.meetingNotCompleted(meeting.status) }
+        meeting.status = .pending(next: .diarize)
+        try await library.save(meeting)
+
+        var separated = meeting
+        await diarize(&separated)
+        if case .unseparated = separated.attribution {
+            if case .unseparated = meeting.attribution { meeting.attribution = separated.attribution }
+        } else {
+            await matchVoiceprints(&separated)
+            align(&separated)
+            separated.suggestions.isStale = true
+            let outputs = separated.outputs
+            if outputs.cleaned != nil || outputs.digests != nil || outputs.summary != nil {
+                separated.outputs.isStale = true
+            }
+            meeting = separated
+        }
+        meeting.status = .completed
+        try await library.save(meeting)
+        return meeting
+    }
+
+    /// Never fails: when every source is unavailable or throws, the meeting keeps its transcript
+    /// under one unnamed speaker and records why, so the user can re-run separation later.
+    private func diarize(_ meeting: inout Meeting) async {
+        guard let remote = meeting.transcription?.remote else { preconditionFailure("diarize before transcribe") }
+        let (segments, embeddings, attribution) = await separation(of: remote, track: library.audioURL(meeting, track: .remote))
+        apply(segments, embeddings: embeddings, to: &meeting)
+        meeting.mergedSpeakers = [:]
+        meeting.attribution = attribution
+        if meeting.remoteSegments.isEmpty, let first = remote.words.first, let last = remote.words.last {
+            // No source heard anyone but STT did; keep the words under one unnamed speaker.
+            let id = SpeakerID.remote(1)
+            meeting.speakers = [RemoteSpeaker(id: id, label: Self.label(0), person: nil, embeddings: [])]
+            meeting.remoteSegments = [SpeakerSegment(speaker: id, range: TimeRange(start: first.range.start, end: last.range.end))]
+        }
+    }
+
+    private func separation(of remote: TrackTranscript, track: URL) async
+        -> ([Diarization.Segment], [ClusterID: [Embedding]], SpeakerAttribution) {
+        var localFailure: String?
+        for source in diarizationOrder {
+            switch source {
+            case .local:
+                guard let diarizer else { continue }
+                do {
+                    let diarization = try await diarizer.diarize(track: track)
+                    return (diarization.segments, diarization.embeddings, .local(overlaps: diarization.overlaps))
+                } catch {
+                    localFailure = String(describing: error)
+                }
+            case .transcription:
+                guard let labeled = remote.content.labeledWords else { continue }
+                let segments = Self.segments(from: labeled)
+                guard let embedder else { return (segments, [:], .transcription(voiceprintsUnavailable: .noSource)) }
+                do {
+                    let embeddings = try await embedder.embeddings(track: track, segments: segments)
+                    return (segments, embeddings, .transcription(voiceprintsUnavailable: nil))
+                } catch {
+                    return (segments, [:], .transcription(voiceprintsUnavailable: .failed(reason: String(describing: error))))
+                }
+            }
+        }
+        return ([], [:], .unseparated(localFailure.map { .failed(reason: $0) } ?? .noSource))
+    }
+
+    private func matchVoiceprints(_ meeting: inout Meeting) async {
+        var suggestions: [NameSuggestion] = []
+        for index in meeting.speakers.indices {
+            let speaker = meeting.speakers[index]
+            switch await voiceprints.match(speaker.embeddings, thresholds: thresholds) {
+            case .autoName(let person, _):
+                meeting.speakers[index].person = person
+            case .suggest(let person, let similarity):
+                meeting.speakers[index].person = nil
+                suggestions.append(NameSuggestion(speaker: speaker.id, source: .voiceprint(person, similarity: similarity)))
+            case .none:
+                meeting.speakers[index].person = nil
+            }
+        }
+        meeting.suggestions = NameSuggestions(items: suggestions)
+    }
+
+    private func align(_ meeting: inout Meeting) {
+        guard let transcription = meeting.transcription else { preconditionFailure("align before transcribe") }
+        meeting.utterances = Alignment.utterances(
+            me: transcription.me.words,
+            remote: transcription.remote.words,
+            segments: meeting.remoteSegments,
+            overlaps: meeting.attribution?.overlaps ?? [])
+    }
+
+    private func apply(_ segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]], to meeting: inout Meeting) {
+        var order: [ClusterID] = []
+        for segment in segments.sorted(by: { $0.range.start < $1.range.start })
+        where !order.contains(segment.cluster) {
+            order.append(segment.cluster)
+        }
+        let ids = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, SpeakerID.remote($0 + 1)) })
+        meeting.speakers = order.enumerated().map { index, cluster in
+            RemoteSpeaker(id: ids[cluster]!, label: Self.label(index), person: nil,
+                          embeddings: embeddings[cluster] ?? [])
+        }
+        meeting.remoteSegments = segments.map { SpeakerSegment(speaker: ids[$0.cluster]!, range: $0.range) }
+    }
+
+    /// One segment per run of consecutive words sharing a label.
+    static func segments(from words: [LabeledWord]) -> [Diarization.Segment] {
+        var segments: [Diarization.Segment] = []
+        for labeled in words.sorted(by: { $0.word.range.start < $1.word.range.start }) {
+            if let last = segments.last, last.cluster == labeled.speaker {
+                segments[segments.count - 1] = .init(
+                    cluster: last.cluster,
+                    range: TimeRange(start: last.range.start, end: max(last.range.end, labeled.word.range.end)))
+            } else {
+                segments.append(.init(cluster: labeled.speaker, range: labeled.word.range))
+            }
+        }
+        return segments
+    }
+
+    private func llmTranscript(_ meeting: Meeting) -> LLMTranscript {
+        LLMTranscript(utterances: meeting.utterances.map {
+            LLMUtterance(id: $0.id, speaker: $0.speaker, range: $0.range, text: $0.text,
+                         isHighlighted: meeting.isHighlighted($0))
+        })
+    }
+
+    static func label(_ index: Int) -> String {
+        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        return index < letters.count ? String(letters[index]) : "S\(index + 1)"
+    }
+}
