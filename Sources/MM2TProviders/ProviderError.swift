@@ -5,12 +5,16 @@ public enum Service: String, Sendable, CaseIterable {
     case elevenLabs
     case selfHosted
     case gemini
+    case localTranscription
+    case localLLM
 
     var displayName: String {
         switch self {
         case .elevenLabs: "ElevenLabs"
         case .selfHosted: "自架轉錄伺服器"
         case .gemini: "Gemini"
+        case .localTranscription: "本機轉錄"
+        case .localLLM: "本機語言模型"
         }
     }
 
@@ -19,6 +23,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .elevenLabs: "ElevenLabs API Key"
         case .selfHosted: "自架伺服器 Token"
         case .gemini: "Gemini API Key"
+        case .localTranscription, .localLLM: displayName
         }
     }
 }
@@ -42,6 +47,8 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
         case malformedResponse
         case blocked
         case meetingTooLong
+        /// An on-device model is missing, incomplete, or failed to load.
+        case modelUnavailable
     }
 
     public let service: Service
@@ -67,7 +74,7 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
         case .unavailable:
             return "\(name) 暫時無法服務（忙碌或維護中），請稍後重試。"
         case .invalidCredential:
-            return "\(service.keyName) 無效或已過期。請到設定重新填入並按「驗證」。"
+            return "\(service.keyName) 無效或已過期。請到設定重新填入後儲存。"
         case .permissionDenied:
             return "\(service.keyName) 沒有這項功能的權限，或帳號／專案受到限制。請到 \(name) 後台檢查 Key 的權限與帳號狀態。"
         case .outOfCredit:
@@ -88,10 +95,12 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
             return "\(name) 因內容安全政策拒絕處理這場會議。"
         case .meetingTooLong:
             return "這場會議太長，超過 \(name) 單次能處理的上限。"
+        case .modelUnavailable:
+            return "\(name) 的模型尚未下載完整或無法載入。請到設定重新下載模型。"
         }
     }
 
-    var asTranscriptionError: TranscriptionError {
+    package var asTranscriptionError: TranscriptionError {
         isFallthrough ? .unreachable(description) : .failed(description)
     }
 }

@@ -78,7 +78,12 @@ private extension Data {
 enum AudioFile {
     static func read(_ url: URL, for service: Service) throws -> Data {
         do {
-            return try Data(contentsOf: url, options: .mappedIfSafe)
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            // A WAV that is only its 44-byte header holds no audio; services answer it with a bare 400.
+            guard data.count > 44 else { throw ProviderError(service, .audioUnreadable) }
+            return data
+        } catch let error as ProviderError {
+            throw error
         } catch {
             throw ProviderError(service, .audioUnreadable)
         }

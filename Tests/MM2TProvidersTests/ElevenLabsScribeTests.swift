@@ -24,6 +24,18 @@ import Testing
         #expect(request.bodyText.contains(#"name="file"; filename="remote.wav""#))
     }
 
+    @Test func aRecordingWithNoSamplesIsNeverUploaded() async throws {
+        let server = StubServer(status: 200, body: Fixture.scribe(diarized: false))
+        let empty = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).wav")
+        try silentWAV(seconds: 0).write(to: empty)
+        defer { try? FileManager.default.removeItem(at: empty) }
+
+        await #expect(throws: TranscriptionError.failed(ProviderError(.elevenLabs, .audioUnreadable).description)) {
+            try await provider(server).transcribe(audio: empty, hints: [], labelSpeakers: false)
+        }
+        #expect(server.requests.isEmpty)
+    }
+
     @Test func micTrackIsNotDiarized() async throws {
         let server = StubServer(status: 200, body: Fixture.scribe(diarized: false))
         let result = try await provider(server).transcribe(audio: try audioFile(), hints: [], labelSpeakers: false)

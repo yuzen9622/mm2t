@@ -3,7 +3,7 @@ import MM2TCore
 
 /// The four LLM tasks on Gemini `generateContent` with JSON-schema structured output.
 /// Docs: https://aistudio.google.com/docs/structured-output?generate-content=true
-public struct GeminiLLM: LLMProvider {
+public struct GeminiLLM: LLMProvider, StructuredGenerator {
     public static let defaultModel = "gemini-3.8-flash"
     static let base = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/")!
 
@@ -38,112 +38,14 @@ public struct GeminiLLM: LLMProvider {
 
     // MARK: Tasks
 
-    public func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess] {
-        guard !request.unnamedSpeakers.isEmpty, !request.transcript.utterances.isEmpty else { return [] }
-        try checkLength(request.transcript.utterances)
-        struct Output: Decodable {
-            struct Guess: Decodable { let speaker: String; let name: String; let reason: String }
-            let guesses: [Guess]
-        }
-        let output = try await whole(
-            Output.self, task: GeminiPrompts.inferNames, input: GeminiPrompts.nameRequest(request),
-            schema: GeminiPrompts.nameSchema(request.unnamedSpeakers))
-        let unnamed = Set(request.unnamedSpeakers)
-        return output.guesses.compactMap { guess in
-            let name = guess.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let speaker = SpeakerID(guess.speaker)
-            guard unnamed.contains(speaker), !name.isEmpty else { return nil }
-            return NameGuess(speaker: speaker, name: name, reason: guess.reason)
-        }
+    private var tasks: LLMTasks {
+        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters, cleanConcurrency: 4)
     }
 
-    /// Cleans the transcript in chunks of whole utterances, because the output is as long as the input.
-    /// A chunk whose output still hits the token cap is split in half and retried.
-    public func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript {
-        var paragraphs: [CleanedTranscript.Paragraph] = []
-        for chunk in Self.chunks(transcript.utterances, maxCharacters: limits.cleanChunkCharacters) {
-            paragraphs += try await clean(chunk)
-        }
-        return CleanedTranscript(paragraphs: paragraphs)
-    }
-
-    private func clean(_ chunk: [LLMUtterance]) async throws -> [CleanedTranscript.Paragraph] {
-        struct Output: Decodable {
-            struct Paragraph: Decodable { let speaker: String; let text: String; let sources: [String] }
-            let paragraphs: [Paragraph]
-        }
-        let speakers = Self.speakers(in: chunk)
-        do {
-            let output = try await generate(
-                Output.self, task: GeminiPrompts.cleanTranscript,
-                input: "逐字稿：\n" + GeminiPrompts.render(chunk), schema: GeminiPrompts.cleanSchema(speakers))
-            let ids = Set(chunk.map(\.id))
-            return try output.paragraphs.map {
-                CleanedTranscript.Paragraph(
-                    speaker: try Self.known($0.speaker, in: speakers), text: $0.text,
-                    sources: Self.sources($0.sources, within: ids))
-            }
-        } catch is OutputTruncated where chunk.count > 1 {
-            let half = chunk.count / 2
-            return try await clean(Array(chunk[..<half])) + clean(Array(chunk[half...]))
-        } catch is OutputTruncated {
-            throw ProviderError(.gemini, .meetingTooLong)
-        }
-    }
-
-    public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] {
-        guard !transcript.utterances.isEmpty else { return [] }
-        try checkLength(transcript.utterances)
-        struct Output: Decodable {
-            struct Digest: Decodable { let speaker: String; let points: [Point] }
-            struct Point: Decodable { let text: String; let sources: [String] }
-            let digests: [Digest]
-        }
-        let speakers = Self.speakers(in: transcript.utterances)
-        let output = try await whole(
-            Output.self, task: GeminiPrompts.digestPerPerson,
-            input: "逐字稿：\n" + GeminiPrompts.render(transcript.utterances),
-            schema: GeminiPrompts.digestSchema(speakers))
-        let ids = Set(transcript.utterances.map(\.id))
-        let digests = try output.digests.map { digest in
-            PersonDigest(
-                speaker: try Self.known(digest.speaker, in: speakers),
-                points: digest.points.map { SourcedText(text: $0.text, sources: Self.sources($0.sources, within: ids)) })
-        }
-        return digests.sorted { speakers.firstIndex(of: $0.speaker)! < speakers.firstIndex(of: $1.speaker)! }
-    }
-
-    public func summarize(_ request: SummaryRequest) async throws -> Summary {
-        let utterances = request.transcript.utterances
-        guard !utterances.isEmpty else { return Summary(decisions: [], discussionPoints: [], actionItems: []) }
-        try checkLength(utterances + request.prioritized)
-        struct Output: Decodable {
-            struct Point: Decodable { let text: String; let sources: [String] }
-            struct Action: Decodable { let text: String; let owner: String?; let sources: [String] }
-            let headline: String?
-            let decisions: [Point]
-            let discussionPoints: [Point]
-            let actionItems: [Action]
-        }
-        let speakers = Self.speakers(in: utterances)
-        let output = try await whole(
-            Output.self, task: GeminiPrompts.summarize, input: GeminiPrompts.summaryRequest(request),
-            schema: GeminiPrompts.summarySchema(speakers))
-        let ids = Set(utterances.map(\.id))
-        let sourced = { (points: [Output.Point]) in
-            points.map { SourcedText(text: $0.text, sources: Self.sources($0.sources, within: ids)) }
-        }
-        let headline = output.headline?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Summary(
-            headline: headline?.isEmpty == false ? headline : nil,
-            decisions: sourced(output.decisions),
-            discussionPoints: sourced(output.discussionPoints),
-            actionItems: output.actionItems.map { item in
-                // An owner outside this meeting is dropped rather than failing the whole summary.
-                let owner = item.owner.map(SpeakerID.init).flatMap { speakers.contains($0) ? $0 : nil }
-                return .init(text: item.text, owner: owner, sources: Self.sources(item.sources, within: ids))
-            })
-    }
+    public func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess] { try await tasks.inferNames(request) }
+    public func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript { try await tasks.cleanTranscript(transcript) }
+    public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
+    public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
 
     /// `models.get` costs no tokens and fails the same way a real request would on a bad key.
     public func validateKey() async -> KeyCheck {
@@ -160,67 +62,13 @@ public struct GeminiLLM: LLMProvider {
         }
     }
 
-    // MARK: Long meetings
-
-    static func chunks(_ utterances: [LLMUtterance], maxCharacters: Int) -> [[LLMUtterance]] {
-        var chunks: [[LLMUtterance]] = []
-        var current: [LLMUtterance] = []
-        var size = 0
-        for utterance in utterances {
-            if !current.isEmpty && size + utterance.text.count > maxCharacters {
-                chunks.append(current)
-                current = []
-                size = 0
-            }
-            current.append(utterance)
-            size += utterance.text.count
-        }
-        if !current.isEmpty { chunks.append(current) }
-        return chunks
-    }
-
-    private func checkLength(_ utterances: [LLMUtterance]) throws {
-        if utterances.reduce(0, { $0 + $1.text.count }) > limits.maxInputCharacters {
-            throw ProviderError(.gemini, .meetingTooLong)
-        }
-    }
-
-    /// A whole-transcript task has nothing smaller to retry with when its output hits the cap.
-    private func whole<T: Decodable>(_ type: T.Type, task: String, input: String, schema: JSON) async throws -> T {
-        do {
-            return try await generate(type, task: task, input: input, schema: schema)
-        } catch is OutputTruncated {
-            throw ProviderError(.gemini, .meetingTooLong)
-        }
-    }
-
-    // MARK: Validation of model output
-
-    private static func speakers(in utterances: [LLMUtterance]) -> [SpeakerID] {
-        var order: [SpeakerID] = []
-        for u in utterances where !order.contains(u.speaker) { order.append(u.speaker) }
-        return order
-    }
-
-    private static func known(_ raw: String, in speakers: [SpeakerID]) throws -> SpeakerID {
-        let id = SpeakerID(raw.trimmingCharacters(in: CharacterSet(charactersIn: "{} ")).replacingOccurrences(of: "speaker:", with: ""))
-        guard speakers.contains(id) else { throw ProviderError(.gemini, .malformedResponse) }
-        return id
-    }
-
-    /// Ids the model invented are dropped; the rest keep transcript order without duplicates.
-    private static func sources(_ raw: [String], within ids: Set<UtteranceID>) -> [UtteranceID] {
-        var seen = Set<UtteranceID>()
-        return raw.map(UtteranceID.init).filter { ids.contains($0) && seen.insert($0).inserted }
-    }
-
     // MARK: Transport
 
-    struct OutputTruncated: Error {}
+    package var service: Service { .gemini }
 
-    private func generate<T: Decodable>(_ type: T.Type, task: String, input: String, schema: JSON) async throws -> T {
+    package func generate(system: String, input: String, schema: JSON) async throws -> String {
         let body = JSON.dict([
-            ("systemInstruction", .dict([("parts", .list([.dict([("text", .text(GeminiPrompts.common + "\n\n" + task))])]))])),
+            ("systemInstruction", .dict([("parts", .list([.dict([("text", .text(system))])]))])),
             ("contents", .list([.dict([
                 ("role", .text("user")),
                 ("parts", .list([.dict([("text", .text(input))])])),
@@ -238,11 +86,7 @@ public struct GeminiLLM: LLMProvider {
 
         let response = try await session.send(request, for: .gemini)
         guard response.status == 200 else { throw ProviderError(.gemini, Self.failure(response)) }
-        let text = try Self.candidateText(response.body)
-        guard let output = try? JSONDecoder().decode(T.self, from: Data(text.utf8)) else {
-            throw ProviderError(.gemini, .malformedResponse)
-        }
-        return output
+        return try Self.candidateText(response.body)
     }
 
     private struct Response: Decodable {
