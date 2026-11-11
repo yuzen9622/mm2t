@@ -120,6 +120,7 @@ public struct GeminiLLM: LLMProvider {
         struct Output: Decodable {
             struct Point: Decodable { let text: String; let sources: [String] }
             struct Action: Decodable { let text: String; let owner: String?; let sources: [String] }
+            let headline: String?
             let decisions: [Point]
             let discussionPoints: [Point]
             let actionItems: [Action]
@@ -132,7 +133,9 @@ public struct GeminiLLM: LLMProvider {
         let sourced = { (points: [Output.Point]) in
             points.map { SourcedText(text: $0.text, sources: Self.sources($0.sources, within: ids)) }
         }
+        let headline = output.headline?.trimmingCharacters(in: .whitespacesAndNewlines)
         return Summary(
+            headline: headline?.isEmpty == false ? headline : nil,
             decisions: sourced(output.decisions),
             discussionPoints: sourced(output.discussionPoints),
             actionItems: output.actionItems.map { item in

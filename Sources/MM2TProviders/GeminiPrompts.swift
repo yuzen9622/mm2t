@@ -37,6 +37,7 @@ enum GeminiPrompts {
 
     static let summarize = """
     任務：產生會議摘要。
+    - headline：用一到兩句話（不超過 60 個字）說明這場會議談了什麼、得到什麼結論，給會議清單當預覽。直接寫內容，不要以「本次會議」「這場會議」開頭。
     - decisions：會議中確定的決定。
     - discussionPoints：主要討論的議題，以及各方的意見與理由。
     - actionItems：待辦事項。owner 填負責人的說話者代號（例如 r2），沒有明確負責人時填 null。
@@ -106,6 +107,7 @@ enum GeminiPrompts {
 
     static func summarySchema(_ speakers: [SpeakerID]) -> JSON {
         .object([
+            ("headline", .string),
             ("decisions", .array(of: sourcedText)),
             ("discussionPoints", .array(of: sourcedText)),
             ("actionItems", .array(of: .object([

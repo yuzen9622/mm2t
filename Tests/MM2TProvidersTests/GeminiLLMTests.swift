@@ -168,7 +168,8 @@ extension StubServer.Request {
 
     @Test func summaryPutsHighlightsUpFrontAndDropsUnknownOwners() async throws {
         let output = #"""
-        {"decisions":[{"text":"禮拜四前升級 cluster","sources":["u2"]}],
+        {"headline":" 決定禮拜四前升級 cluster，{{speaker:r2}} 寫 migration plan。 ",
+         "decisions":[{"text":"禮拜四前升級 cluster","sources":["u2"]}],
          "discussionPoints":[{"text":"{{speaker:me}} 提出 migration","sources":["u1"]}],
          "actionItems":[
            {"text":"寫 migration plan","owner":"r2","sources":["u3"]},
@@ -179,6 +180,7 @@ extension StubServer.Request {
         let summary = try await gemini(server).summarize(SummaryRequest(
             transcript: transcript, prioritized: transcript.utterances.filter(\.isHighlighted)))
 
+        #expect(summary.headline == "決定禮拜四前升級 cluster，{{speaker:r2}} 寫 migration plan。")
         #expect(summary.decisions == [SourcedText(text: "禮拜四前升級 cluster", sources: [UtteranceID("u2")])])
         #expect(summary.actionItems.map(\.owner) == [SpeakerID("r2"), nil, nil])
         let request = try #require(server.requests.first)

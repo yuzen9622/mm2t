@@ -105,7 +105,8 @@ public struct RemoteSpeaker: Codable, Hashable, Sendable, Identifiable {
 
 /// How remote speech was split into speakers and what that split can tell the UI.
 public enum SpeakerAttribution: Codable, Hashable, Sendable {
-    /// The local diarizer split the speakers, detected overlaps and embedded every speaker.
+    /// The local diarizer split the speakers and detected overlaps. A speaker with too little clean
+    /// speech to embed gets no voiceprint, so it is neither matched nor written back on edits.
     case local(overlaps: [TimeRange])
     /// The STT's speaker labels split the speakers; nil `voiceprintsUnavailable` means the embedder ran.
     case transcription(voiceprintsUnavailable: Unavailable?)
@@ -245,10 +246,13 @@ public struct Summary: Codable, Hashable, Sendable {
         }
     }
 
+    /// One or two sentences for the meeting list; nil when the provider gave none.
+    public let headline: String?
     public let decisions: [SourcedText]
     public let discussionPoints: [SourcedText]
     public let actionItems: [ActionItem]
-    public init(decisions: [SourcedText], discussionPoints: [SourcedText], actionItems: [ActionItem]) {
+    public init(headline: String? = nil, decisions: [SourcedText], discussionPoints: [SourcedText], actionItems: [ActionItem]) {
+        self.headline = headline
         self.decisions = decisions
         self.discussionPoints = discussionPoints
         self.actionItems = actionItems
