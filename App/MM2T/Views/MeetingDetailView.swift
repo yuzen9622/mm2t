@@ -10,6 +10,9 @@ struct MeetingDetailView: View {
     @State private var model: MeetingDetailModel
     @State private var confirmReseparate = false
     @State private var showSpeakers = true
+    @State private var renaming = false
+    @State private var newTitle = ""
+    @State private var copied = false
 
     init(app: AppController, id: MeetingID, back: @escaping () -> Void) {
         self.app = app
@@ -27,6 +30,12 @@ struct MeetingDetailView: View {
                         playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
                     }
                 }
+                IconButton("Rename…", icon: "pencil") {
+                    newTitle = model.meeting?.metadata.title ?? ""
+                    renaming = true
+                }
+                .disabled(!model.canEditSpeakers)
+                IconButton(copied ? "Copied" : "Copy", icon: copied ? "check" : "copy", isOn: copied, action: copy)
                 ExportMenu(model: model)
                 IconButton("Speakers", icon: "users", isOn: showSpeakers) { showSpeakers.toggle() }
             }
@@ -57,6 +66,11 @@ struct MeetingDetailView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        .alert("Rename", isPresented: $renaming) {
+            TextField("Name", text: $newTitle)
+            Button("Save") { Task { await model.rename(to: newTitle) } }
+            Button("Cancel", role: .cancel) {}
+        }
         .confirmationDialog("Separate speakers again?", isPresented: $confirmReseparate) {
             Button("Separate Again", role: .destructive) { Task { await model.reseparate() } }
         } message: {
@@ -65,6 +79,18 @@ struct MeetingDetailView: View {
             } else {
                 Text("The generated views will need regenerating.")
             }
+        }
+    }
+
+    /// Puts the view on screen on the clipboard as plain text.
+    private func copy() {
+        guard let text = model.export(model.selectedView, as: .plainText) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            copied = false
         }
     }
 
@@ -142,6 +168,7 @@ struct ExportMenu: View {
                 Section(Copy.view(for: view)) {
                     Button("Markdown…") { save(view, .markdown) }
                     Button("Plain Text…") { save(view, .plainText) }
+                    if view == .raw || view == .cleaned { Button("Subtitles (.srt)…") { saveSubtitles(view) } }
                 }
             }
         } label: {
@@ -156,8 +183,16 @@ struct ExportMenu: View {
 
     private func save(_ view: TranscriptView, _ format: ExportFormat) {
         guard let text = model.export(view, as: format) else { return }
+        write(text, view, format == .markdown ? UTType(filenameExtension: "md") ?? .plainText : .plainText)
+    }
+
+    private func saveSubtitles(_ view: TranscriptView) {
+        guard let text = model.subtitles(view) else { return }
+        write(text, view, UTType(filenameExtension: "srt") ?? .plainText)
+    }
+
+    private func write(_ text: String, _ view: TranscriptView, _ type: UTType) {
         let panel = NSSavePanel()
-        let type: UTType = format == .markdown ? UTType(filenameExtension: "md") ?? .plainText : .plainText
         panel.allowedContentTypes = [type]
         panel.nameFieldStringValue = "\(model.meeting?.metadata.title ?? "mm2t") - \(Copy.view(for: view))"
         WindowSharing.exclude(panel)

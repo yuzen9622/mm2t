@@ -39,9 +39,13 @@ public final class MeetingDetailModel {
     @ObservationIgnored private let labels: PresentationLabels
     @ObservationIgnored public let playback: (any MeetingPlayback)?
     @ObservationIgnored private var loadedAudio = false
+    @ObservationIgnored private let learn: @MainActor (String) -> Void
 
+    /// `learn` receives each term a correction replaced what speech recognition heard with.
     public init(id: MeetingID, library: MeetingLibrary, voiceprints: VoiceprintStore, queue: ProcessingQueue,
-                labels: PresentationLabels, playback: (any MeetingPlayback)?) {
+                labels: PresentationLabels, playback: (any MeetingPlayback)?,
+                learn: @escaping @MainActor (String) -> Void = { _ in }) {
+        self.learn = learn
         self.id = id
         self.library = library
         self.voiceprints = voiceprints
@@ -164,6 +168,39 @@ public final class MeetingDetailModel {
 
     public func export(_ view: TranscriptView, as format: ExportFormat) -> String? {
         presentation?.export(view, as: format)
+    }
+
+    /// SubRip text; nil for the views that are not a timed transcript.
+    public func subtitles(_ view: TranscriptView) -> String? {
+        guard let meeting, let presentation else { return nil }
+        return Subtitles.srt(meeting, view: view, name: presentation.speakerName)
+    }
+
+    /// Corrects one line of the raw transcript and learns the term the correction introduced.
+    public func edit(_ utterance: UtteranceID, to text: String) async {
+        guard let old = meeting?.utterance(utterance)?.text else { return }
+        await editTranscript(from: old, to: text) { try await $0.edit(utterance, in: self.id, to: text) }
+    }
+
+    /// `row` is a row of `presentation.cleaned`.
+    public func editCleaned(_ row: SourcedRow, to text: String) async {
+        guard let index = presentation?.cleaned?.firstIndex(where: { $0.id == row.id }) else { return }
+        await editTranscript(from: row.text, to: text) { try await $0.editCleaned(paragraph: index, in: self.id, to: text) }
+    }
+
+    public func rename(to title: String) async {
+        await editTranscript(from: "", to: "") { try await $0.rename(self.id, to: title) }
+    }
+
+    private func editTranscript(from old: String, to new: String, _ change: (TranscriptEditing) async throws -> Meeting) async {
+        guard canEditSpeakers else { return }
+        do {
+            meeting = try await change(TranscriptEditing(library: library))
+            for term in VocabularyLearning.terms(correcting: old, to: new) { learn(term) }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     public func dismissError() { errorMessage = nil }

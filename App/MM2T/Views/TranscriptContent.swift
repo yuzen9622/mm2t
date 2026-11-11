@@ -30,14 +30,19 @@ struct TranscriptContent: View {
 
     @ViewBuilder private var raw: some View {
         ForEach(presentation.raw) { row in
-            UtteranceView(row: row, isFocused: row.id == model.focusedUtterance) { model.play(row) }
+            UtteranceView(row: row, isFocused: row.id == model.focusedUtterance, canEdit: model.canEditSpeakers,
+                          play: { model.play(row) }, save: { text in Task { await model.edit(row.id, to: text) } })
                 .id(row.id)
         }
     }
 
     @ViewBuilder private var cleaned: some View {
         if let rows = presentation.cleaned {
-            ForEach(rows) { SourcedRowView(row: $0, model: model, showsSpeaker: true).card() }
+            ForEach(rows) { row in
+                SourcedRowView(row: row, model: model, showsSpeaker: true,
+                               save: model.canEditSpeakers ? { text in Task { await model.editCleaned(row, to: text) } } : nil)
+                    .card()
+            }
         } else {
             NotGenerated()
         }
@@ -81,69 +86,115 @@ struct TranscriptContent: View {
     }
 }
 
+/// A line of text the user is correcting, with the two ways out of it.
+struct TextCorrection: View {
+    @State var text: String
+    let save: (String) -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            TextField("Correction", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(Typo.body)
+                .focused($focused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Palette.orange.opacity(0.6), lineWidth: 1.5))
+                .onExitCommand(perform: cancel)
+            HStack(spacing: 8) {
+                PillButton("Cancel", action: cancel)
+                PillButton("Save", kind: .primary) { save(text) }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .onAppear { focused = true }
+    }
+}
+
 struct UtteranceView: View {
     let row: UtteranceRow
     let isFocused: Bool
+    let canEdit: Bool
     let play: () -> Void
+    let save: (String) -> Void
     @State private var hovering = false
+    @State private var editing = false
 
     var body: some View {
-        Button(action: play) {
-            HStack(alignment: .top, spacing: 10) {
-                Avatar(name: row.speakerName, isNamed: true)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(row.speakerName).font(Typo.bodyStrong)
-                        Text(MeetingPresentation.timestamp(row.start)).font(Typo.caption).monospacedDigit().foregroundStyle(Palette.secondary)
-                        if row.isOverlapping {
-                            Text("Overlapping").font(Typo.caption).foregroundStyle(Palette.secondary)
-                                .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.field, in: Capsule())
-                        }
-                        if row.isHighlighted { Icon("star-filled", size: 13).foregroundStyle(Palette.orange) }
+        HStack(alignment: .top, spacing: 10) {
+            Avatar(name: row.speakerName, isNamed: true)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(row.speakerName).font(Typo.bodyStrong)
+                    Text(MeetingPresentation.timestamp(row.start)).font(Typo.caption).monospacedDigit().foregroundStyle(Palette.secondary)
+                    if row.isOverlapping {
+                        Text("Overlapping").font(Typo.caption).foregroundStyle(Palette.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.field, in: Capsule())
                     }
+                    if row.isHighlighted { Icon("star-filled", size: 13).foregroundStyle(Palette.orange) }
+                }
+                if editing {
+                    TextCorrection(text: row.text, save: { save($0); editing = false }, cancel: { editing = false })
+                } else {
                     Text(row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isFocused ? Palette.orangeSoft : hovering ? Palette.hover : .clear,
-                        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
+            if canEdit, !editing {
+                IconButton("Edit", icon: "pencil") { editing = true }
+                    .opacity(hovering ? 1 : 0)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isFocused ? Palette.orangeSoft : hovering ? Palette.hover : .clear,
+                    in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { if !editing { play() } }
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
         .motion(Motion.select, value: isFocused)
+        .motion(Motion.reveal, value: editing)
     }
 }
 
 /// A generated item; selecting it jumps to its source utterance and plays from there (story 51).
+/// `save` makes the text correctable, which only the cleaned transcript is.
 struct SourcedRowView: View {
     let row: SourcedRow
     let model: MeetingDetailModel
     let showsSpeaker: Bool
+    var save: ((String) -> Void)?
     @State private var hovering = false
+    @State private var editing = false
 
     var body: some View {
-        Button {
-            if let jump = row.jump { model.jump(to: jump) }
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                if showsSpeaker, let name = row.speakerName { Avatar(name: name, isNamed: true) }
+        HStack(alignment: .top, spacing: 10) {
+            if showsSpeaker, let name = row.speakerName { Avatar(name: name, isNamed: true) }
+            if editing, let save {
+                TextCorrection(text: row.text, save: { save($0); editing = false }, cancel: { editing = false })
+            } else {
                 Text(row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
+                if save != nil {
+                    IconButton("Edit", icon: "pencil") { editing = true }
+                        .opacity(hovering ? 1 : 0)
+                }
                 if let jump = row.jump {
                     Text(MeetingPresentation.timestamp(jump.time)).font(Typo.caption).monospacedDigit()
                         .foregroundStyle(hovering ? Palette.orange : Palette.secondary)
                 }
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(Pressable())
-        .disabled(row.jump == nil)
+        .contentShape(Rectangle())
+        .onTapGesture { if !editing, let jump = row.jump { model.jump(to: jump) } }
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
+        .motion(Motion.reveal, value: editing)
     }
 }
 
