@@ -1,5 +1,6 @@
 import MM2TApp
 import MM2TCore
+import MM2TLocal
 import MM2TProviders
 import SwiftUI
 
@@ -16,6 +17,9 @@ struct SettingsView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    Panel(title: "Permissions") {
+                        PermissionRows(setup: app.setup)
+                    }
                     Panel(title: "Transcription") {
                         SourceToggle(source: .selfHosted, store: store)
                         if store.settings.transcriptionOrder.contains(.selfHosted) {
@@ -26,15 +30,18 @@ struct SettingsView: View {
                             if !serverURL.isEmpty, AppSettings.selfHostedURL(from: serverURL) == nil {
                                 Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
                             }
-                            CredentialFieldView(field: app.setup.field(.selfHostedToken))
+                            CredentialFieldView(field: app.setup.field(.selfHostedToken), setup: app.setup)
                         }
                         Divider().overlay(Palette.border)
                         SourceToggle(source: .cloud, store: store)
                         if store.settings.transcriptionOrder.contains(.cloud) {
-                            CredentialFieldView(field: app.setup.field(.elevenLabsAPIKey))
+                            CredentialFieldView(field: app.setup.field(.elevenLabsAPIKey), setup: app.setup)
                         }
                         Divider().overlay(Palette.border)
-                        Toggle(Copy.source(.local), isOn: .constant(false)).disabled(true)
+                        SourceToggle(source: .local, store: store)
+                        if store.settings.transcriptionOrder.contains(.local) {
+                            OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
+                        }
                         Text("Sources are tried top to bottom. mm2t moves to the next one only when a source can't be reached.")
                             .font(Typo.caption).foregroundStyle(Palette.secondary)
                     }
@@ -51,11 +58,16 @@ struct SettingsView: View {
                         ModelDownloadView(setup: app.setup)
                     }
                     Panel(title: "Summaries") {
-                        CredentialFieldView(field: app.setup.field(.geminiAPIKey))
+                        CredentialFieldView(field: app.setup.field(.geminiAPIKey), setup: app.setup)
                         Text("Use a Gemini key from a paid plan. On the free tier, Google may use what you send to improve its products.")
                             .font(Typo.caption).foregroundStyle(Palette.secondary)
                         Divider().overlay(Palette.border)
-                        Toggle("Generate on this Mac", isOn: .constant(false)).disabled(true)
+                        Toggle("Generate on this Mac", isOn: Binding(
+                            get: { store.settings.llmLocation == .local },
+                            set: { store.settings.llmLocation = $0 ? .local : .cloud }))
+                        if store.settings.llmLocation == .local {
+                            OfflineModelView(model: .llm, fit: app.setup.suitability.llm, setup: app.setup)
+                        }
                     }
                     if !app.setup.issues.isEmpty {
                         Panel(title: "Still needed") {
@@ -68,6 +80,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
                 .motion(Motion.reveal, value: store.settings.transcriptionOrder)
+                .motion(Motion.reveal, value: store.settings.llmLocation)
                 .motion(Motion.reveal, value: app.setup.issues)
             }
         }
@@ -118,13 +131,22 @@ struct SourceToggle: View {
             get: { store.settings.transcriptionOrder.contains(source) },
             set: { on in
                 let enabled = Set(store.settings.transcriptionOrder).union(on ? [source] : []).subtracting(on ? [] : [source])
-                store.settings.transcriptionOrder = [TranscriptionSource.selfHosted, .cloud].filter(enabled.contains)
+                store.settings.transcriptionOrder = TranscriptionSource.allCases.filter(enabled.contains)
             }))
     }
 }
 
 struct CredentialFieldView: View {
     @Bindable var field: CredentialField
+    let setup: SetupModel
+
+    /// Saving and checking are one step: a key that was stored is a key that was tried.
+    private func save() {
+        Task {
+            await field.validate()
+            setup.recheck()
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -132,10 +154,10 @@ struct CredentialFieldView: View {
                 Icon("key", size: 15).foregroundStyle(Palette.muted)
                 FieldBox {
                     SecureField(Copy.credentialName(field.credential), text: $field.text)
-                        .onSubmit { field.save() }
+                        .onSubmit(save)
                 }
-                PillButton("Verify") { Task { await field.validate() } }
-                    .disabled(field.text.isEmpty || field.state == .validating)
+                PillButton("Save", action: save)
+                    .disabled(field.state == .validating)
             }
             if !Copy.keyState(field.state).isEmpty {
                 Text(Copy.keyState(field.state)).font(Typo.caption).foregroundStyle(Palette.secondary)
@@ -171,6 +193,57 @@ struct ModelDownloadView: View {
             if case .failed(let reason) = setup.models {
                 Text(reason).font(Typo.caption).foregroundStyle(Palette.danger)
             }
+        }
+    }
+}
+
+/// One on-device model: whether this Mac suits it, and its download.
+struct OfflineModelView: View {
+    let model: OfflineModel
+    let fit: OfflineFit
+    let setup: SetupModel
+
+    var body: some View {
+        if case .unsuited(let reason) = fit {
+            HStack(spacing: 8) {
+                Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
+                switch reason {
+                case .intelProcessor: Text("Not recommended on a Mac with an Intel processor.")
+                case .memory(let minimumGB): Text("Not recommended: needs at least \(minimumGB) GB of memory.")
+                }
+            }
+        }
+        switch setup.offlineModels[model] ?? .notDownloaded {
+        case .downloaded:
+            HStack(spacing: 8) {
+                Icon("circle-check", size: 16).foregroundStyle(Palette.success)
+                Text("Model installed")
+            }
+            if model == .transcription {
+                Text("The first transcription after opening mm2t takes a few minutes while macOS prepares the model.")
+                    .font(Typo.caption).foregroundStyle(Palette.secondary)
+            }
+        case .downloading(let fraction):
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Downloading \(size)")
+                ProgressLine(fraction: fraction)
+            }
+        case .notDownloaded, .failed:
+            HStack {
+                Text("Needs a model on this Mac (\(size)).")
+                Spacer()
+                PillButton("Download", icon: "download") { Task { await setup.downloadOfflineModel(model) } }
+            }
+            if case .failed(let reason) = setup.offlineModels[model] {
+                Text(reason).font(Typo.caption).foregroundStyle(Palette.danger)
+            }
+        }
+    }
+
+    private var size: String {
+        switch model {
+        case .transcription: "1.1 GB"
+        case .llm: "5.7 GB"
         }
     }
 }

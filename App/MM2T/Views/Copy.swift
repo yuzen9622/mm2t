@@ -67,8 +67,8 @@ enum Copy {
         case .missingSelfHostedURL: String(localized: "Enter the self-hosted server URL, or turn that source off.")
         case .noTranscriptionSource: String(localized: "Turn on at least one transcription source.")
         case .diarizationModelsMissing: String(localized: "Download the speaker separation model.")
-        case .notYetSupported(.localTranscription): String(localized: "On-device transcription is not available in this version yet.")
-        case .notYetSupported(.localLLM): String(localized: "On-device summaries are not available in this version yet.")
+        case .offlineModelMissing(.transcription): String(localized: "Download the on-device transcription model.")
+        case .offlineModelMissing(.llm): String(localized: "Download the on-device summary model.")
         }
     }
 

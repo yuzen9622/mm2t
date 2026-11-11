@@ -32,6 +32,11 @@ public struct RecordingRecoveryScanner: Sendable {
                 try? files.removeItem(at: directory)
                 continue
             }
+            guard !Self.isEmpty(directory) else {
+                // Nothing was captured (the app died as recording began); there is nothing to recover.
+                try? files.removeItem(at: directory)
+                continue
+            }
             do {
                 let recording = RecordingRecovery.isInterrupted(directory)
                     ? try RecordingRecovery.recover(directory)
@@ -44,6 +49,14 @@ public struct RecordingRecoveryScanner: Sendable {
             }
         }
         return outcome
+    }
+
+    /// Both tracks exist and are only their WAV header: recording began and captured nothing.
+    static func isEmpty(_ directory: URL) -> Bool {
+        [RecordingManifest.micFile, RecordingManifest.remoteFile].allSatisfy { file in
+            let size = (try? directory.appending(path: file).resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            return size.map { $0 <= 44 } ?? false
+        }
     }
 
     /// Meetings already in the library whose processing never finished or never started.

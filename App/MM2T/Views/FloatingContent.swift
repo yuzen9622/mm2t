@@ -306,7 +306,7 @@ struct CapsuleBar: View {
         HStack(spacing: 12) {
             CircleButton(isPaused ? "Resume" : "Pause", icon: isPaused ? "player-play-filled" : "player-pause-filled",
                          kind: isPaused ? .accent : .plain, action: toggle)
-            Waveform(level: isPaused || remoteSilent ? nil : level)
+            Waveform(level: isPaused ? nil : level)
             if remoteSilent, !isPaused {
                 Button {
                     SetupModel.openSettings(.systemAudio)

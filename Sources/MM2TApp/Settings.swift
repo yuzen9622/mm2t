@@ -2,8 +2,7 @@ import Foundation
 import MM2TCore
 import Observation
 
-/// Where the four LLM tasks run. `.local` is representable so a stored choice survives until the
-/// on-device model ships, but `PipelineSetup` reports it as not yet supported.
+/// Where the four LLM tasks run. `.local` needs the on-device model downloaded first.
 public enum LLMLocation: String, Codable, Sendable, CaseIterable {
     case cloud
     case local

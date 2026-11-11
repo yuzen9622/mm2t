@@ -27,7 +27,7 @@ import Testing
         #expect(Set(world.catalog.keysUsed.get) == ["stt:eleven", "llm:gemini"], "the saved keys reached the providers")
     }
 
-    @Test func eachEnabledSourceMustBeConfiguredAndOfflineOptionsAreNotPretended() throws {
+    @Test func eachEnabledSourceMustBeConfiguredIncludingTheOfflineModels() throws {
         let world = try World()
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
                                   credentials: world.credentials, catalog: world.catalog)
@@ -41,8 +41,11 @@ import Testing
         #expect(try issues { _ in }.isEmpty)
         #expect(try issues { $0.transcriptionOrder = [.selfHosted, .cloud] } == [.missingSelfHostedURL])
         #expect(try issues { $0.transcriptionOrder = [] } == [.noTranscriptionSource])
-        #expect(try issues { $0.transcriptionOrder = [.cloud, .local] } == [.notYetSupported(.localTranscription)])
-        #expect(try issues { $0.llmLocation = .local } == [.notYetSupported(.localLLM)])
+        #expect(try issues { $0.transcriptionOrder = [.cloud, .local] } == [.offlineModelMissing(.transcription)])
+        #expect(try issues { $0.llmLocation = .local } == [.offlineModelMissing(.llm)])
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        #expect(try issues { $0.transcriptionOrder = [.cloud, .local]; $0.llmLocation = .local }.isEmpty)
 
         world.catalog.modelsDownloaded.set(false)
         #expect(try issues { _ in } == [.diarizationModelsMissing])

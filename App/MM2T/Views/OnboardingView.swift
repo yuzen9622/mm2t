@@ -13,34 +13,14 @@ struct OnboardingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Panel(title: "Permissions") {
-                        PermissionRow(title: "Microphone", purpose: "Records your side of the meeting.",
-                                      state: setup.microphone, pane: .microphone) {
-                            Task { await setup.requestMicrophone() }
-                        }
-                        PermissionRow(title: "System audio recording",
-                                      purpose: "Records only the meeting app's sound. macOS asks the first time you record.",
-                                      state: .unknown, pane: .systemAudio, request: nil)
-                        PermissionRow(title: "Accessibility", purpose: "Reads the meeting window's title to detect browser meetings.",
-                                      state: setup.accessibility, pane: .accessibility) {
-                            setup.requestAccessibility()
-                        }
-                        ForEach(setup.automation.keys.sorted(), id: \.self) { browser in
-                            PermissionRow(title: "Automation: \(browser)", purpose: "Reads the open tab's address to tell which meeting it is.",
-                                          state: setup.automation[browser] ?? .unknown, pane: .automation) {
-                                Task { await setup.requestAutomation(of: browser) }
-                            }
-                        }
-                        if setup.automation.isEmpty {
-                            Text("Open your browser to grant it. It lets mm2t read the open tab's address.")
-                                .font(Typo.caption).foregroundStyle(Palette.secondary)
-                        }
+                        PermissionRows(setup: setup)
                     }
                     Panel(title: "Speaker separation") {
                         ModelDownloadView(setup: setup)
                     }
                     Panel(title: "API keys") {
-                        CredentialFieldView(field: setup.field(.elevenLabsAPIKey))
-                        CredentialFieldView(field: setup.field(.geminiAPIKey))
+                        CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
+                        CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
                         Text("Use a Gemini key from a paid plan. On the free tier, Google may use what you send to improve its products.")
                             .font(Typo.caption).foregroundStyle(Palette.secondary)
                     }
@@ -79,6 +59,44 @@ struct OnboardingView: View {
     }
 }
 
+/// The permission list, shared by first-run setup and the settings page. macOS sends no
+/// notification when a switch is flipped in System Settings, so it re-reads them while on screen.
+struct PermissionRows: View {
+    let setup: SetupModel
+
+    var body: some View {
+        Group {
+        PermissionRow(title: "Microphone", purpose: "Records your side of the meeting.",
+                      state: setup.microphone, pane: .microphone) {
+            Task { await setup.requestMicrophone() }
+        }
+        PermissionRow(title: "System audio recording",
+                      purpose: "Records only the meeting app's sound. macOS asks the first time you record.",
+                      state: setup.systemAudio, pane: .systemAudio, request: nil)
+        PermissionRow(title: "Accessibility", purpose: "Reads the meeting window's title to detect browser meetings.",
+                      state: setup.accessibility, pane: .accessibility) {
+            setup.requestAccessibility()
+        }
+        ForEach(setup.automation.keys.sorted(), id: \.self) { browser in
+            PermissionRow(title: "Automation: \(browser)", purpose: "Reads the open tab's address to tell which meeting it is.",
+                          state: setup.automation[browser] ?? .unknown, pane: .automation) {
+                Task { await setup.requestAutomation(of: browser) }
+            }
+        }
+        if setup.automation.isEmpty {
+            Text("Open your browser to grant it. It lets mm2t read the open tab's address.")
+                .font(Typo.caption).foregroundStyle(Palette.secondary)
+        }
+        }
+        .task {
+            while !Task.isCancelled {
+                setup.refreshPermissions()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
 struct PermissionRow: View {
     let title: LocalizedStringKey
     let purpose: LocalizedStringKey
@@ -98,6 +116,8 @@ struct PermissionRow: View {
                     .transition(.scale.combined(with: .opacity))
             } else if state == .notDetermined, let request {
                 PillButton("Allow…", kind: .primary, action: request)
+            } else if state == .notDetermined {
+                EmptyView()
             } else {
                 PillButton("Open System Settings") { SetupModel.openSettings(pane) }
             }

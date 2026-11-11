@@ -247,6 +247,7 @@ public final class CaptureController {
         case .levels(let levels):
             meters.me = levels.me
             meters.remote = levels.remote
+            if levels.remote.peak > 0 { meters.remoteSilentWhilePlaying = false }
             meters.elapsed = await session.elapsed
         case .remoteSilentWhileTargetPlaying:
             meters.remoteSilentWhilePlaying = true

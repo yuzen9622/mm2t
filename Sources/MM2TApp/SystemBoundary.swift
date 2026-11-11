@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import MM2TCore
 import MM2TDiarization
+import MM2TLocal
 import MM2TProviders
 import MM2TSystem
 
@@ -38,6 +39,7 @@ public struct LiveRecorder: Recorder {
 public protocol PermissionsProviding: Sendable {
     var microphone: PermissionState { get }
     func requestMicrophone() async -> Bool
+    var systemAudio: PermissionState { get }
     var accessibility: PermissionState { get }
     func requestAccessibility()
     func automation(of bundleID: String) -> PermissionState
@@ -48,6 +50,7 @@ public struct LivePermissions: PermissionsProviding {
     public init() {}
     public var microphone: PermissionState { Permissions.microphone }
     public func requestMicrophone() async -> Bool { await Permissions.requestMicrophone() }
+    public var systemAudio: PermissionState { Permissions.systemAudio }
     public var accessibility: PermissionState { Permissions.accessibility }
     public func requestAccessibility() { Permissions.requestAccessibility() }
     public func automation(of bundleID: String) -> PermissionState { Permissions.automation(of: bundleID) }
@@ -65,14 +68,28 @@ public protocol ModelInstalling: Sendable {
 
 extension DiarizationModels: ModelInstalling {}
 
+extension ModelSnapshot: ModelInstalling {
+    public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        try await download(configuration: .default, progress: progress)
+    }
+}
+
 // MARK: Providers
 
 public final class LiveProviderCatalog: ProviderCatalog {
     public let models: DiarizationModels
+    public let transcriptionModel: LocalTranscriptionModel
+    public let llmModel: LocalLLMModel
     private let speakerModels: LocalSpeakerModels
+    private let transcription: LocalTranscription
 
-    public init(models: DiarizationModels) {
+    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel) {
         self.models = models
+        self.transcriptionModel = transcriptionModel
+        self.llmModel = llmModel
+        // Kept for the app's lifetime like the diarizer: preparing the speech model for the Neural
+        // Engine takes minutes, so it happens once per launch, on the first offline transcription.
+        transcription = LocalTranscription(model: transcriptionModel)
         let embedder = WeSpeakerEmbedder(models: models)
         // One diarizer for the app's lifetime so the CoreML models load once, not per meeting.
         speakerModels = LocalSpeakerModels(diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder)
@@ -84,6 +101,12 @@ public final class LiveProviderCatalog: ProviderCatalog {
     }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
     public func localSpeakerModels() -> LocalSpeakerModels? { models.isDownloaded ? speakerModels : nil }
+    public func localTranscription() -> (any TranscriptionProvider)? {
+        transcriptionModel.snapshot.isDownloaded ? transcription : nil
+    }
+    /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
+    /// while a meeting is being processed rather than while the app idles in the menu bar.
+    public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
     public var thresholds: MatchThresholds { .weSpeaker }
 }
 

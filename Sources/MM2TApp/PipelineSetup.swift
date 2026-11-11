@@ -9,13 +9,13 @@ public enum SetupIssue: Hashable, Sendable {
     case missingSelfHostedURL
     case noTranscriptionSource
     case diarizationModelsMissing
-    case notYetSupported(UnsupportedOption)
+    case offlineModelMissing(OfflineModel)
 }
 
-/// Offline options from the spec that no implementation backs yet.
-public enum UnsupportedOption: Hashable, Sendable {
-    case localTranscription
-    case localLLM
+/// The on-device models behind the two offline switches, each downloaded separately.
+public enum OfflineModel: String, Hashable, Sendable, CaseIterable {
+    case transcription
+    case llm
 }
 
 public protocol CredentialStoring: Sendable {
@@ -43,6 +43,10 @@ public protocol ProviderCatalog: Sendable {
     func llm(apiKey: Secret) -> any LLMProvider
     /// nil until the models are on disk.
     func localSpeakerModels() -> LocalSpeakerModels?
+    /// nil until the model is on disk.
+    func localTranscription() -> (any TranscriptionProvider)?
+    /// nil until the model is on disk.
+    func localLLM() -> (any LLMProvider)?
     var thresholds: MatchThresholds { get }
 }
 
@@ -84,7 +88,11 @@ public struct PipelineSetup: Sendable {
                     issues.append(.missingSelfHostedURL)
                 }
             case .local:
-                issues.append(.notYetSupported(.localTranscription))
+                if let local = catalog.localTranscription() {
+                    routes.append(.init(.local, local))
+                } else {
+                    issues.append(.offlineModelMissing(.transcription))
+                }
             }
         }
         if settings.transcriptionOrder.isEmpty { issues.append(.noTranscriptionSource) }
@@ -94,7 +102,7 @@ public struct PipelineSetup: Sendable {
         case .cloud:
             if let key = try nonEmpty(.geminiAPIKey) { llm = catalog.llm(apiKey: key) } else { issues.append(.missingCredential(.geminiAPIKey)) }
         case .local:
-            issues.append(.notYetSupported(.localLLM))
+            if let local = catalog.localLLM() { llm = local } else { issues.append(.offlineModelMissing(.llm)) }
         }
 
         let models = catalog.localSpeakerModels()

@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TLocal
 import MM2TProviders
 import MM2TSystem
 import Testing
@@ -168,6 +169,9 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let llm = FakeLLM()
     let diarizer = ScriptedDiarizer()
     let modelsDownloaded = Box(true)
+    let onDeviceSTT = FakeSTT()
+    let onDeviceLLM = FakeLLM()
+    let offlineDownloaded: [OfflineModel: Box<Bool>] = [.transcription: Box(false), .llm: Box(false)]
     let keysUsed = Box<[String]>([])
     let selfHostedURLs = Box<[URL]>([])
 
@@ -190,9 +194,20 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         modelsDownloaded.get ? LocalSpeakerModels(diarizer: diarizer, embedder: ScriptedEmbedder()) : nil
     }
 
+    func localTranscription() -> (any TranscriptionProvider)? {
+        offlineDownloaded[.transcription]!.get ? onDeviceSTT : nil
+    }
+
+    func localLLM() -> (any LLMProvider)? {
+        offlineDownloaded[.llm]!.get ? onDeviceLLM : nil
+    }
+
     var thresholds: MatchThresholds { MatchThresholds(autoName: 0.9, suggest: 0.6) }
 
-    var providerCalls: Int { selfHosted.calls.get.count + cloud.calls.get.count + llm.calls.get.count }
+    var providerCalls: Int {
+        selfHosted.calls.get.count + cloud.calls.get.count + llm.calls.get.count
+            + onDeviceSTT.calls.get.count + onDeviceLLM.calls.get.count
+    }
 }
 
 final class MemoryCredentials: CredentialStoring, @unchecked Sendable {
@@ -214,6 +229,7 @@ final class FakePermissions: PermissionsProviding, @unchecked Sendable {
         mic.set(granted ? .granted : .denied)
         return granted
     }
+    var systemAudio: PermissionState { .unknown }
     var accessibility: PermissionState { .denied }
     func requestAccessibility() {}
     func automation(of bundleID: String) -> PermissionState { .notDetermined }
@@ -342,7 +358,7 @@ struct World {
     let now: Box<Date>
     let app: AppController
 
-    init(keys: Bool = true) throws {
+    init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30)) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
         if keys {
@@ -354,7 +370,8 @@ struct World {
         app = try AppController(
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: FakeInstaller(catalog.modelsDownloaded),
-            validator: validator, now: { now.get })
+            offlineInstallers: catalog.offlineDownloaded.mapValues(FakeInstaller.init),
+            machine: machine, validator: validator, now: { now.get })
     }
 
     var capture: CaptureController { app.capture }

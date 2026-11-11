@@ -1,6 +1,7 @@
 import Foundation
 import MM2TCore
 import MM2TDiarization
+import MM2TLocal
 import MM2TProviders
 import MM2TSystem
 import Observation
@@ -54,6 +55,8 @@ public final class AppController {
         recorder: any Recorder,
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
+        offlineInstallers: [OfflineModel: any ModelInstalling],
+        machine: MachineProfile = .current,
         validator: any KeyValidating,
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
         now: @escaping () -> Date = Date.init
@@ -73,7 +76,8 @@ public final class AppController {
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, onRecorded: { id in await queue.run(.process, on: id) })
         setup = SetupModel(
-            permissions: permissions, installer: installer, credentials: credentials, validator: validator,
+            permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
+            suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
             settings: settings, runningBrowsers: runningBrowsers,
             checkSetup: {
                 switch (try? pipelineSetup.build(settings.settings)) {
@@ -90,10 +94,14 @@ public final class AppController {
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let models = DiarizationModels(directory: paths.models)
+        let transcription = LocalTranscriptionModel.breeze(in: paths.models)
+        let llm = LocalLLMModel.qwen35(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
-            catalog: LiveProviderCatalog(models: models), recorder: LiveRecorder(), permissions: LivePermissions(),
-            installer: models, validator: LiveKeyValidator(),
+            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm),
+            recorder: LiveRecorder(), permissions: LivePermissions(),
+            installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
+            validator: LiveKeyValidator(),
             runningBrowsers: {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
