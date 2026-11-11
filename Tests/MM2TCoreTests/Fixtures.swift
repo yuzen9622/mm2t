@@ -94,6 +94,8 @@ struct FakeSTT: TranscriptionProvider {
     /// Set for a provider that diarizes: labels for `Script.remoteWords` when asked.
     let labels: [ClusterID]?
     let calls = Box<[(file: String, hints: [String], labelSpeakers: Bool)]>([])
+    /// An in-person meeting: nothing on the remote track, and the mic heard `Script.remoteWords`.
+    let roomOnly = Box(false)
 
     init(_ behavior: Behavior = .words, labels: [ClusterID]? = nil) {
         self.behavior = Box(behavior)
@@ -106,7 +108,9 @@ struct FakeSTT: TranscriptionProvider {
         case .unreachable: throw TranscriptionError.unreachable("connection refused")
         case .failed: throw TranscriptionError.failed("invalid API key")
         case .words:
-            let words = audio.lastPathComponent.hasPrefix("mic") ? Script.micWords : Script.remoteWords
+            let isMic = audio.lastPathComponent.hasPrefix("mic")
+            if roomOnly.get, !isMic { return .unlabeled([]) }
+            let words = isMic && !roomOnly.get ? Script.micWords : Script.remoteWords
             guard labelSpeakers, let labels else { return .unlabeled(words) }
             return .labeled(zip(words, labels).map { LabeledWord($0, speaker: $1) })
         }
@@ -122,6 +126,8 @@ struct FakeLLM: LLMProvider {
     let failNext = Box<Set<String>>([])
     /// Runs inside the named task, i.e. while the pipeline is mid-step.
     let during = Box<[String: @Sendable () async -> Void]>([:])
+    let glossaries = Box<[[String]]>([])
+    let title = Box<String?>(nil)
 
     private func record(_ task: String) async throws {
         calls.update { $0.append(task) }
@@ -142,6 +148,7 @@ struct FakeLLM: LLMProvider {
 
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript {
         try await record("cleanTranscript")
+        glossaries.update { $0.append(transcript.glossary) }
         return CleanedTranscript(paragraphs: transcript.utterances.map {
             .init(speaker: $0.speaker, text: "clean: \($0.text)", sources: [$0.id])
         })
@@ -164,6 +171,7 @@ struct FakeLLM: LLMProvider {
         summaryRequests.update { $0.append(request) }
         let key = request.prioritized.first ?? request.transcript.utterances[0]
         return Summary(
+            headline: "讨论软件", title: title.get, terms: ["mm2t", "软件"],
             decisions: [SourcedText(text: "Ship it, proposed by \(SpeakerMention.token(key.speaker))", sources: [key.id])],
             discussionPoints: [SourcedText(text: "Whether \(SpeakerMention.token(SpeakerID("r3"))) agrees", sources: [])],
             actionItems: [.init(text: "Follow up", owner: SpeakerID("r2"), sources: [key.id])])
