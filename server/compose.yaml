@@ -1,0 +1,29 @@
+services:
+  mm2t-server:
+    build: .
+    image: mm2t-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MM2T_DEVICE: cuda
+      MM2T_COMPUTE_TYPE: float16
+      MM2T_SERVER_TOKEN: ${MM2T_SERVER_TOKEN:-}
+      MM2T_MAX_UPLOAD_MB: ${MM2T_MAX_UPLOAD_MB:-500}
+    volumes:
+      - models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  models:
