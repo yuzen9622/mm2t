@@ -16,7 +16,9 @@ extension StubServer.Request {
     }
     /// Utterance ids in the transcript lines of the prompt, in order.
     var utteranceIDs: [String] {
-        geminiInput.split(separator: "\n").compactMap { line in
+        // Lines before "逐字稿：" are the glossary and the read-only context, not what the model must clean.
+        let transcript = geminiInput.range(of: "逐字稿：\n", options: .backwards).map { geminiInput[$0.upperBound...] } ?? Substring(geminiInput)
+        return transcript.split(separator: "\n").compactMap { line in
             guard let open = line.firstIndex(of: "["), let close = line.firstIndex(of: "]") else { return nil }
             return String(line[line.index(after: open)..<close])
         }
