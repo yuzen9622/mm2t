@@ -4,7 +4,9 @@ import MM2TCore
 
 public struct RecorderConfiguration: Sendable {
     /// The app whose audio becomes the remote track; for a browser, the browser's own bundle id.
-    public var targetBundleID: String
+    /// The app whose audio becomes the remote track; nil records everything the Mac plays except
+    /// this app, for when no meeting app is known.
+    public var targetBundleID: String?
     /// A fresh directory for this session; `mic.wav`, `remote.wav` and `session.json` go here.
     public var directory: URL
     public var title: String
@@ -15,7 +17,7 @@ public struct RecorderConfiguration: Sendable {
     /// remote-only recording and the probe's tap self-test.
     public var captureMicrophone: Bool
 
-    public init(targetBundleID: String, directory: URL, title: String,
+    public init(targetBundleID: String?, directory: URL, title: String,
                 platform: MeetingPlatform? = nil, sampleRate: Int = 16_000, captureMicrophone: Bool = true) {
         self.targetBundleID = targetBundleID
         self.directory = directory
@@ -32,7 +34,7 @@ public enum RecorderError: Error, Equatable, Sendable {
     /// Run onboarding (`Permissions.requestMicrophone()`) before recording.
     case microphoneAccessNotDetermined
     case noInputDevice
-    /// Creating the process tap failed; on macOS before 14.2 this is always the case.
+    /// Creating the process tap failed.
     case systemAudioCaptureUnavailable(CoreAudioError)
     case microphoneCaptureFailed(CoreAudioError)
     case directoryNotEmpty(URL)
@@ -68,7 +70,6 @@ public enum RecorderEvent: Sendable, Equatable {
 ///
 /// Audio flows IO thread -> `CaptureRing` -> this actor, which every 50 ms drains both rings
 /// through the shared `RecordingTimeline`, writes, and publishes levels.
-@available(macOS 14.2, *)
 public actor AudioRecorder {
     public nonisolated let events: AsyncStream<RecorderEvent>
     public nonisolated let configuration: RecorderConfiguration
@@ -286,7 +287,7 @@ public actor AudioRecorder {
         remoteSilentSince = since
         guard !reportedSilence, now - since > Self.silenceTimeout else { return }
         let playing = (try? AudioProcesses.list())?
-            .contains { $0.ownerBundleID == configuration.targetBundleID && $0.isRunningOutput } ?? false
+            .contains { $0.isRunningOutput && isTapped($0.ownerBundleID) } ?? false
         if playing {
             reportedSilence = true
             continuation.yield(.remoteSilentWhileTargetPlaying)
@@ -298,13 +299,26 @@ public actor AudioRecorder {
     // MARK: Captures
 
     private func startTap() throws {
-        let processes = try AudioProcesses.objects(ownedBy: configuration.targetBundleID)
-        let tap = try ProcessTap(processes: processes)
+        let tap = try ProcessTap(scope: tapScope())
         let io = try DeviceIO(device: tap.aggregateID, ring: remote.ring)
         try io.start()
         self.tap = tap
         tapIO = io
         tapStartedAt = HostTime.now
+    }
+
+    private func tapScope() throws -> TapScope {
+        if let target = configuration.targetBundleID {
+            return .only(try AudioProcesses.objects(ownedBy: target))
+        }
+        // Our own playback of a past meeting must not be recorded into the new one.
+        let own = Bundle.main.bundleIdentifier.flatMap { try? AudioProcesses.objects(ownedBy: $0) } ?? []
+        return .allExcept(own)
+    }
+
+    private func isTapped(_ owner: String?) -> Bool {
+        if let target = configuration.targetBundleID { return owner == target }
+        return owner != Bundle.main.bundleIdentifier
     }
 
     private func stopTap() {
@@ -316,11 +330,10 @@ public actor AudioRecorder {
 
     private func refreshTapProcesses() {
         guard let tap, timeline.state != .stopped,
-              let processes = try? AudioProcesses.objects(ownedBy: configuration.targetBundleID),
-              processes != tap.processes else { return }
+              let scope = try? tapScope(), scope != tap.scope else { return }
         do {
-            try tap.setProcesses(processes)
-            continuation.yield(.targetProcessesChanged(count: processes.count))
+            try tap.setScope(scope)
+            continuation.yield(.targetProcessesChanged(count: scope.processes.count))
         } catch {
             continuation.yield(.captureRestarted(.remote, reason: "tap update failed: \(error)"))
         }

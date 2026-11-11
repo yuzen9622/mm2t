@@ -47,22 +47,13 @@ public enum SystemSignalReader {
 }
 
 public enum BrowserScripting {
-    /// Browsers whose active tab URL is readable over Apple Events. Mirrors the browser list in
-    /// `MeetingDetector`, which is not public.
-    static let chromium: Set<String> = [
-        "com.google.Chrome", "com.microsoft.edgemac", "com.brave.Browser",
-        "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
-    ]
+    /// Firefox exposes no tab URL over Apple Events; detection falls back to the window title.
+    static let unscriptable: Set<String> = ["org.mozilla.firefox"]
 
+    /// Every browser `MeetingDetector` recognizes except Safari speaks the Chromium dictionary.
     public static func activeTabScript(_ bundleID: String) -> String? {
-        let body: String
-        if chromium.contains(bundleID) {
-            body = "get URL of active tab of front window"
-        } else if bundleID == "com.apple.Safari" {
-            body = "get URL of front document"
-        } else {
-            return nil
-        }
+        guard scriptableBrowsers.contains(bundleID) else { return nil }
+        let body = bundleID == "com.apple.Safari" ? "get URL of front document" : "get URL of active tab of front window"
         return """
         with timeout of 1 second
             tell application id "\(bundleID)" to \(body)
@@ -70,7 +61,7 @@ public enum BrowserScripting {
         """
     }
 
-    public static var scriptableBrowsers: Set<String> { chromium.union(["com.apple.Safari"]) }
+    public static var scriptableBrowsers: Set<String> { MeetingDetector.browsers.subtracting(unscriptable) }
 }
 
 /// Produces `SystemSignals` on a timer and immediately when any process starts or stops input,

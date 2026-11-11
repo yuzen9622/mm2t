@@ -11,12 +11,12 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
     public var title: String
     public var startedAt: Date
     public var platform: MeetingPlatform?
-    public var targetBundleID: String
+    public var targetBundleID: String?
     public var highlights: [TimeInterval] = []
     /// Set at a clean stop; nil means the session ended without one.
     public var duration: TimeInterval?
 
-    public init(title: String, startedAt: Date, platform: MeetingPlatform?, targetBundleID: String) {
+    public init(title: String, startedAt: Date, platform: MeetingPlatform?, targetBundleID: String?) {
         self.title = title
         self.startedAt = startedAt
         self.platform = platform

@@ -113,5 +113,7 @@ import Testing
         #expect(try #require(BrowserScripting.activeTabScript("com.apple.Safari")).contains("URL of front document"))
         #expect(BrowserScripting.activeTabScript("org.mozilla.firefox") == nil)
         #expect(BrowserScripting.activeTabScript("us.zoom.xos") == nil)
+        #expect(BrowserScripting.scriptableBrowsers == MeetingDetector.browsers.subtracting(["org.mozilla.firefox"]),
+                "the URL is read for exactly the browsers the detector recognizes")
     }
 }

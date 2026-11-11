@@ -83,7 +83,7 @@ public enum MeetingDetector {
     ]
 
     /// Chrome and Safari verified on a local install; the rest from memory.
-    static let browsers: Set<String> = [
+    public static let browsers: Set<String> = [
         "com.google.Chrome",
         "com.apple.Safari",
         "com.microsoft.edgemac",
