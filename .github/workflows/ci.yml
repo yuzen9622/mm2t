@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Swift package tests
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      # Tests that need the diarization models or Evaluation/ recordings skip themselves when those
+      # are absent, and the live provider smoke tests skip without MM2T_*_API_KEY, so CI needs neither.
+      - name: swift test
+        run: swift test --scratch-path .build/spm
+
+  app:
+    name: App build and translations
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Build the app (ad-hoc signed)
+        run: |
+          xcodebuild build \
+            -project App/MM2T.xcodeproj -scheme mm2t -configuration Debug \
+            -derivedDataPath .build/xcode-release \
+            CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+      - name: Every UI string has a zh-Hant translation
+        run: |
+          python3 App/Tools/strings.py .build/xcode-release
+          git diff --exit-code App/MM2T/Localizable.xcstrings
