@@ -51,6 +51,6 @@ import Testing
     }
 
     @Test func pipelineDefaultsAreTheEvaluationThresholds() {
-        #expect(MatchThresholds.weSpeaker == MatchThresholds(autoName: 0.70, suggest: 0.50))
+        #expect(MatchThresholds.weSpeaker == MatchThresholds(autoName: 0.70, suggest: 0.70))
     }
 }

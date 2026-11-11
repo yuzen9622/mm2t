@@ -3,8 +3,9 @@ import MM2TCore
 extension MatchThresholds {
     /// Defaults for voiceprints from `WeSpeakerEmbedder`. In Evaluation/diarization/RESULTS.md
     /// (門檻建議) no two different speakers scored above 0.611 and same-microphone voiceprints of one
-    /// person never below 0.828, so 0.70 auto-names; 0.50 sits above the 99th percentile of
-    /// different-speaker scores, so it only suggests. Caveat: 25 AliMeeting speakers, enrolled
+    /// person never below 0.828, so 0.70 auto-names. The evaluation proposed suggesting from 0.50, but different
+    /// people in one meeting scored up to 0.607 there, so the user chose 0.70 for both: a
+    /// voiceprint match is either confident enough to name or not shown at all. Caveat: 25 AliMeeting speakers, enrolled
     /// and matched within one session, not across real meetings; re-measure on the user's own.
-    public static let weSpeaker = MatchThresholds(autoName: 0.70, suggest: 0.50)
+    public static let weSpeaker = MatchThresholds(autoName: 0.70, suggest: 0.70)
 }
