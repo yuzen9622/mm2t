@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+.swiftpm/
+/Packages/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+Package.resolved.orig
+__pycache__/
+*.py[cod]
+*$py.class
+
