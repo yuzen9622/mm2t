@@ -9,11 +9,12 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
 
     public struct Limits: Sendable {
         /// Utterance text per cleaned-transcript request. The cleaned transcript is as long as its
-        /// input, so the 65,536-token output cap, not the 1M input window, is what forces chunking.
+        /// input and a request takes as long as its output, so small chunks sent together finish
+        /// sooner than a few large ones; the 65,536-token output cap is far above this.
         public var cleanChunkCharacters: Int
         /// Transcript text sent whole to the other three tasks; well inside the 1,048,576-token input window.
         public var maxInputCharacters: Int
-        public init(cleanChunkCharacters: Int = 6_000, maxInputCharacters: Int = 600_000) {
+        public init(cleanChunkCharacters: Int = 2_000, maxInputCharacters: Int = 600_000) {
             self.cleanChunkCharacters = cleanChunkCharacters
             self.maxInputCharacters = maxInputCharacters
         }
@@ -39,7 +40,7 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
     // MARK: Tasks
 
     private var tasks: LLMTasks {
-        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters, cleanConcurrency: 4)
+        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters, cleanConcurrency: 16)
     }
 
     public func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess] { try await tasks.inferNames(request) }
@@ -76,6 +77,9 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
             ("generationConfig", .dict([
                 ("responseMimeType", .text("application/json")),
                 ("responseJsonSchema", schema),
+                // These are rewriting and extraction tasks. At the default level a 2,000-character
+                // cleanup took 14 to 50 s; at "low" it takes about 15 s, with the same output.
+                ("thinkingConfig", .dict([("thinkingLevel", .text("low"))])),
             ])),
         ])
         var request = URLRequest(url: Self.base.appending(path: "\(model):generateContent"), timeoutInterval: timeout)

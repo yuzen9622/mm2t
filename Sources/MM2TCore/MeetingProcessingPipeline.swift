@@ -18,6 +18,9 @@ public struct MeetingProcessingPipeline: Sendable {
     public let llm: any LLMProvider
     public let thresholds: MatchThresholds
     public let vocabulary: [String]
+    /// Whether the two tracks are transcribed at once, and name inference and the three generated
+    /// views written at once. Right for hosted services; an on-device model has one set of weights.
+    public let runsConcurrently: Bool
 
     public init(
         library: MeetingLibrary,
@@ -28,8 +31,10 @@ public struct MeetingProcessingPipeline: Sendable {
         transcription: TranscriptionChain,
         llm: any LLMProvider,
         thresholds: MatchThresholds,
-        vocabulary: [String]
+        vocabulary: [String],
+        runsConcurrently: Bool = false
     ) {
+        self.runsConcurrently = runsConcurrently
         self.library = library
         self.voiceprints = voiceprints
         self.diarizer = diarizer
@@ -54,6 +59,12 @@ public struct MeetingProcessingPipeline: Sendable {
             try await library.save(meeting)
         }
         while let step = meeting.status.resumeStep {
+            if runsConcurrently, step >= .inferNames {
+                // One label for the group: the summary is the part the user is waiting for.
+                progress(.summarize)
+                try await generate(from: step, on: &meeting)
+                return meeting
+            }
             progress(step)
             do {
                 try await run(step, on: &meeting)
@@ -66,6 +77,56 @@ public struct MeetingProcessingPipeline: Sendable {
             try await library.save(meeting)
         }
         return meeting
+    }
+
+    /// Runs `first` and every step after it at once. None of them reads another's result, so the
+    /// wait is the slowest one rather than their sum. Each result is saved as it arrives; a failure
+    /// leaves the meeting failed at the earliest step that failed, and a retry runs from there.
+    private func generate(from first: ProcessingStep, on meeting: inout Meeting) async throws {
+        let steps = ProcessingStep.allCases.filter { $0 >= first }
+        let start = meeting
+        var failures: [ProcessingStep: String] = [:]
+        await withTaskGroup(of: (ProcessingStep, Result<Meeting, any Error>).self) { group in
+            for step in steps {
+                group.addTask {
+                    var copy = start
+                    do {
+                        try await run(step, on: &copy)
+                        return (step, .success(copy))
+                    } catch {
+                        return (step, .failure(error))
+                    }
+                }
+            }
+            for await (step, result) in group {
+                switch result {
+                case .success(let done): merge(step, from: done, into: &meeting)
+                case .failure(let error): failures[step] = String(describing: error)
+                }
+                try? await library.save(meeting)
+            }
+        }
+        if let failed = steps.first(where: { failures[$0] != nil }) {
+            meeting.status = .failed(step: failed, reason: failures[failed]!)
+        } else {
+            meeting.status = .completed
+        }
+        try await library.save(meeting)
+    }
+
+    /// Copies what `step` wrote, leaving what the other concurrent steps wrote in place.
+    private func merge(_ step: ProcessingStep, from done: Meeting, into meeting: inout Meeting) {
+        switch step {
+        case .inferNames: meeting.suggestions = done.suggestions
+        case .cleanTranscript: meeting.outputs.cleaned = done.outputs.cleaned
+        case .digestPerPerson: meeting.outputs.digests = done.outputs.digests
+        case .summarize:
+            meeting.outputs.summary = done.outputs.summary
+            meeting.outputs.isStale = done.outputs.isStale
+            meeting.metadata.title = done.metadata.title
+        case .transcribe, .diarize, .matchVoiceprints, .align:
+            preconditionFailure("\(step) feeds later steps and cannot run alongside them")
+        }
     }
 
     /// Re-runs name inference and the three generated views, e.g. after a merge made them stale.
@@ -85,14 +146,21 @@ public struct MeetingProcessingPipeline: Sendable {
     private func run(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
         switch step {
         case .transcribe:
-            let names = await voiceprints.allPersons().map(\.name)
+            let names = await voiceprints.spokenNames()
             let hints = names + vocabulary.filter { !names.contains($0) }
-            let remote = try await transcription.transcribe(
-                audio: library.audioURL(meeting, track: .remote), hints: hints, labelSpeakers: true)
-            // A silent remote track means the meeting happened in the room, so the mic holds every
-            // voice and is the track whose speakers need telling apart.
-            let me = try await transcription.transcribe(
-                audio: library.audioURL(meeting, track: .me), hints: hints, labelSpeakers: remote.words.isEmpty)
+            let micURL = await library.audioURL(meeting, track: .me), remoteURL = await library.audioURL(meeting, track: .remote)
+            let remote: TrackTranscript, me: TrackTranscript
+            if runsConcurrently {
+                // Both at once, so the mic is labeled before anyone knows whether it needs to be.
+                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
+                async let meTask = transcription.transcribe(audio: micURL, hints: hints, labelSpeakers: true)
+                (remote, me) = try await (remoteTask, meTask)
+            } else {
+                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
+                // A silent remote track means the meeting happened in the room, so the mic holds every
+                // voice and is the track whose speakers need telling apart.
+                me = try await transcription.transcribe(audio: micURL, hints: hints, labelSpeakers: remote.words.isEmpty)
+            }
             meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)
 
         case .diarize:
@@ -128,7 +196,7 @@ public struct MeetingProcessingPipeline: Sendable {
 
         case .cleanTranscript:
             var transcript = llmTranscript(meeting)
-            let names = await voiceprints.allPersons().map(\.name)
+            let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             meeting.outputs.cleaned = try await llm.cleanTranscript(transcript).inTraditionalChinese
 
@@ -225,7 +293,27 @@ public struct MeetingProcessingPipeline: Sendable {
         return ([], [:], .unseparated(localFailure.map { .failed(reason: $0) } ?? .noSource))
     }
 
+    /// In a meeting recorded in the room, the speaker who sounds most like the enrolled user becomes
+    /// `.me`, as the mic track is on a call. Below the suggestion threshold nobody is.
+    private func claimUser(in meeting: inout Meeting) async {
+        guard meeting.separatedTrack == .me else { return }
+        var best: (id: SpeakerID, similarity: Double)?
+        for speaker in meeting.speakers {
+            guard let similarity = await voiceprints.similarityToUser(speaker.embeddings),
+                  similarity >= thresholds.suggest, similarity > (best?.similarity ?? -.infinity) else { continue }
+            best = (speaker.id, similarity)
+        }
+        guard let mine = best?.id else { return }
+        meeting.remoteSegments = meeting.remoteSegments.map {
+            $0.speaker == mine ? SpeakerSegment(speaker: .me, range: $0.range) : $0
+        }
+        meeting.speakers = meeting.speakers.filter { $0.id != mine }.enumerated().map { index, speaker in
+            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+        }
+    }
+
     private func matchVoiceprints(_ meeting: inout Meeting) async {
+        await claimUser(in: &meeting)
         var suggestions: [NameSuggestion] = []
         for index in meeting.speakers.indices {
             let speaker = meeting.speakers[index]

@@ -157,12 +157,20 @@ public struct SpeakerSegment: Codable, Hashable, Sendable {
 public struct Transcription: Codable, Hashable, Sendable {
     public let me: TrackTranscript
     public let remote: TrackTranscript
+    public init(me: TrackTranscript, remote: TrackTranscript) {
+        self.me = me
+        self.remote = remote
+    }
 }
 
 public struct TrackTranscript: Codable, Hashable, Sendable {
     /// The provider that actually produced the words after fallback.
     public let source: TranscriptionSource
     public let content: TranscribedWords
+    public init(source: TranscriptionSource, content: TranscribedWords) {
+        self.source = source
+        self.content = content
+    }
 
     public var words: [TimedWord] { content.words }
 }

@@ -43,6 +43,18 @@ public actor MeetingLibrary {
         return meeting
     }
 
+    /// Gives a meeting that has not been transcribed the words heard while it was being recorded,
+    /// so processing starts at speaker separation. A meeting past that point is left alone.
+    @discardableResult
+    public func attach(_ transcription: Transcription, to id: MeetingID) throws -> Meeting {
+        var meeting = try meeting(id)
+        guard meeting.status == .pending(next: .transcribe) else { return meeting }
+        meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
+        meeting.status = .pending(next: .diarize)
+        try save(meeting)
+        return meeting
+    }
+
     public func meeting(_ id: MeetingID) throws -> Meeting {
         let url = documentURL(id)
         guard files.fileExists(atPath: url.path) else { throw LibraryError.unknownMeeting(id) }

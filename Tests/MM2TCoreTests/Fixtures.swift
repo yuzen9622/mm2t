@@ -191,6 +191,7 @@ struct World {
     let embedder = ScriptedEmbedder()
     let localModel: LocalSpeakerModel
     let diarizationOrder: [DiarizationSource]?
+    let runsConcurrently = Box(false)
     let selfHosted = FakeSTT(.unreachable)
     let cloud = FakeSTT(labels: Script.remoteLabels)
     let local = FakeSTT()
@@ -220,12 +221,14 @@ struct World {
         guard let diarizationOrder else {
             return MeetingProcessingPipeline(
                 library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
-                transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"])
+                transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"],
+                runsConcurrently: runsConcurrently.get)
         }
         return MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
             diarizationOrder: diarizationOrder,
-            transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"])
+            transcription: transcription, llm: llm, thresholds: thresholds, vocabulary: ["mm2t", "Alice"],
+                runsConcurrently: runsConcurrently.get)
     }
 
     var editing: SpeakerEditing { SpeakerEditing(library: library, voiceprints: voiceprints) }

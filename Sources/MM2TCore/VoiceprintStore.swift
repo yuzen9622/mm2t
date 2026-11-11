@@ -4,6 +4,8 @@ public struct Person: Codable, Hashable, Sendable, Identifiable {
     public let id: PersonID
     public internal(set) var name: String
     public internal(set) var embeddings: [Embedding]
+    /// The app's user, enrolled by reading a passage aloud. At most one person has this set.
+    public internal(set) var isUser: Bool?
 }
 
 public struct MatchThresholds: Hashable, Sendable {
@@ -52,10 +54,35 @@ public actor VoiceprintStore {
         persons.first { $0.name.compare(name, options: [.caseInsensitive]) == .orderedSame }
     }
 
-    /// Best similarity between any of the cluster's vectors and any vector of any person.
+    /// The user's own voiceprint, if they have enrolled.
+    public func user() -> Person? { persons.first { $0.isUser == true } }
+
+    /// Names worth telling speech recognition about; the user's entry is a label, not a name people say.
+    public func spokenNames() -> [String] { persons.filter { $0.isUser != true }.map(\.name) }
+
+    /// Replaces the user's voiceprint with a fresh enrollment, creating their entry the first time.
+    public func enrollUser(name: String, embeddings: [Embedding]) throws {
+        var next = persons
+        if let index = next.firstIndex(where: { $0.isUser == true }) {
+            next[index].embeddings = embeddings
+        } else {
+            next.append(Person(id: PersonID(), name: name, embeddings: embeddings, isUser: true))
+        }
+        try save(next)
+    }
+
+    /// How much a cluster sounds like the user: the best similarity between any of its vectors and
+    /// any of theirs. nil when the user has not enrolled or the cluster has no vector.
+    public func similarityToUser(_ embeddings: [Embedding]) -> Double? {
+        guard let user = user() else { return nil }
+        return user.embeddings.flatMap { stored in embeddings.map { $0.cosineSimilarity(to: stored) } }.max()
+    }
+
+    /// Best similarity between any of the cluster's vectors and any vector of any other person. The
+    /// user is left out: on a call they are the mic track, and in a room `similarityToUser` finds them.
     public func match(_ embeddings: [Embedding], thresholds: MatchThresholds) -> VoiceprintMatch {
         var best: (PersonID, Double)?
-        for person in persons {
+        for person in persons where person.isUser != true {
             for stored in person.embeddings {
                 for candidate in embeddings {
                     let similarity = candidate.cosineSimilarity(to: stored)
@@ -71,7 +98,7 @@ public actor VoiceprintStore {
 
     @discardableResult
     public func addPerson(name: String, embeddings: [Embedding] = []) throws -> PersonID {
-        let person = Person(id: PersonID(), name: name, embeddings: embeddings)
+        let person = Person(id: PersonID(), name: name, embeddings: embeddings, isUser: nil)
         try save(persons + [person])
         return person.id
     }
