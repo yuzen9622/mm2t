@@ -101,6 +101,8 @@ public final class CaptureController {
     /// A meeting the user dismissed stays dismissed until it has been over this long, so the
     /// detector ending and re-detecting one call (a rejoin, a device switch) does not prompt again.
     public static let dismissalCooldown: TimeInterval = 120
+    /// How often a recording in progress is checked for a new piece to transcribe.
+    static let liveInterval = Duration.seconds(15)
 
     public private(set) var state: CaptureState = .idle
     public let meters = RecordingMeters()
@@ -110,7 +112,10 @@ public final class CaptureController {
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let recordingsDirectory: URL
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let onRecorded: @MainActor (MeetingID) async -> Void
+    @ObservationIgnored private let onRecorded: @MainActor (MeetingID, LiveTranscriber?) async -> Void
+    @ObservationIgnored private let makeLive: @MainActor (URL) async -> LiveTranscriber?
+    @ObservationIgnored private var live: LiveTranscriber?
+    @ObservationIgnored private var liveTask: Task<Void, Never>?
     @ObservationIgnored private var detected: DetectedMeeting?
     @ObservationIgnored private var dismissed: (meeting: DetectedMeeting, endedAt: Date?)?
     @ObservationIgnored private var session: (any RecordingSession)?
@@ -122,8 +127,10 @@ public final class CaptureController {
         library: MeetingLibrary,
         recordingsDirectory: URL,
         now: @escaping () -> Date = Date.init,
-        onRecorded: @escaping @MainActor (MeetingID) async -> Void
+        makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
+        onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
     ) {
+        self.makeLive = makeLive
         self.recorder = recorder
         self.permissions = permissions
         self.library = library
@@ -230,6 +237,14 @@ public final class CaptureController {
             self.session = session
             meters.reset()
             state = .recording(target)
+            liveTask = Task { [weak self] in
+                guard let live = await self?.makeLive(configuration.directory) else { return }
+                self?.live = live
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.liveInterval)
+                    if !Task.isCancelled { await live.advance() }
+                }
+            }
             eventTask = Task { [weak self] in
                 for await event in session.events {
                     await self?.apply(event, from: session)
@@ -280,6 +295,10 @@ public final class CaptureController {
         state = .stopping(target)
         eventTask?.cancel()
         eventTask = nil
+        liveTask?.cancel()
+        liveTask = nil
+        let live = self.live
+        self.live = nil
         self.session = nil
         let id: MeetingID
         do {
@@ -291,7 +310,7 @@ public final class CaptureController {
             return
         }
         state = .idle
-        await onRecorded(id)
+        await onRecorded(id, live)
     }
 
     public func acknowledgeFailure() {

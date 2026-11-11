@@ -5,6 +5,9 @@ public enum Credential: String, Sendable, CaseIterable {
     case elevenLabsAPIKey = "elevenlabs-api-key"
     case geminiAPIKey = "gemini-api-key"
     case selfHostedToken = "self-hosted-token"
+    /// OAuth refresh tokens for the dashboard's calendar sources.
+    case googleCalendarRefreshToken = "google-calendar-refresh-token"
+    case microsoftCalendarRefreshToken = "microsoft-calendar-refresh-token"
 }
 
 public struct KeychainError: Error, Equatable, Sendable, CustomStringConvertible {

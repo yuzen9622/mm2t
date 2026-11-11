@@ -20,6 +20,10 @@ struct SettingsView: View {
                     Panel(title: "Permissions") {
                         PermissionRows(setup: app.setup)
                     }
+                    Panel(title: "Calendars") {
+                        CalendarSourceList(model: app.dashboard)
+                            .task { await app.dashboard.reloadCalendar() }
+                    }
                     Panel(title: "Transcription") {
                         SourceToggle(source: .selfHosted, store: store)
                         if store.settings.transcriptionOrder.contains(.selfHosted) {

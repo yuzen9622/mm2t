@@ -71,6 +71,8 @@ public final class CredentialField: Identifiable {
                 return
             }
             request = .selfHosted(url: url, token: secret)
+        case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken:
+            return  // Written by calendar sign-in, never typed into a key field.
         }
         state = .validating
         state = .checked(await validator.validate(request))

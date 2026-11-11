@@ -67,8 +67,12 @@ struct MenuBarContent: View {
                 Button("Not This Time") { app.capture.dismiss() }
             }
         default:
-            Button("Start Recording") {
-                Task { await app.capture.startNow(title: String(localized: "Recording")) }
+            if app.needsOnboarding {
+                Button("Continue Setup") { WindowOpener.open(WindowID.onboarding) }
+            } else {
+                Button("Start Recording") {
+                    Task { await app.capture.startNow(title: String(localized: "Recording")) }
+                }
             }
             if !app.capture.state.isCapturing, app.capture.state != .idle {
                 Text(Copy.capture(app.capture.state))

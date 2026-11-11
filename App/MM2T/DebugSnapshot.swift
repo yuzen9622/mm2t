@@ -44,6 +44,7 @@ enum DebugSnapshot {
             }
             try? await Task.sleep(for: .milliseconds(1800))
             save(window(titled: true), to: directory.appending(path: "main-home.png"))
+            await saveHomeVariants(app: app, to: directory)
             for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.settings, "settings"), (.meetings, "list")] {
                 showSection?(section)
                 try? await Task.sleep(for: .milliseconds(900))
@@ -84,6 +85,55 @@ enum DebugSnapshot {
             finish(report, in: directory)
         }
         #endif
+    }
+
+    /// Calendar sources with fixed events around today, so the dashboard's calendar can be judged
+    /// without signing in anywhere. Outlook stays unavailable, as in a build without its client ID.
+    static var sampleCalendars: [any CalendarSource]? {
+        #if DEBUG
+        guard isRequested else { return nil }
+        return [SampleCalendar(.apple, .connected), SampleCalendar(.google, .connected), SampleCalendar(.microsoft, .unavailable)]
+        #else
+        return nil
+        #endif
+    }
+
+    /// The dashboard at the window's minimum size and in dark mode, and the calendar card before any
+    /// source is connected.
+    private static func saveHomeVariants(app: AppController, to directory: URL) async {
+        #if DEBUG
+        guard let main = window(titled: true) else { return }
+        let size = main.frame.size
+        main.setContentSize(NSSize(width: 820, height: 540))
+        try? await Task.sleep(for: .milliseconds(900))
+        save(main, to: directory.appending(path: "main-home-min.png"))
+        main.setContentSize(NSSize(width: 980, height: 680))
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        try? await Task.sleep(for: .milliseconds(900))
+        save(main, to: directory.appending(path: "main-home-dark.png"))
+        NSApp.appearance = nil
+        main.setFrame(NSRect(origin: main.frame.origin, size: size), display: true)
+
+        let fresh = DashboardModel(
+            library: app.library, voiceprints: app.voiceprints, settings: app.settings,
+            calendars: [SampleCalendar(.apple, .disconnected), SampleCalendar(.google, .disconnected), SampleCalendar(.microsoft, .unavailable)],
+            todosFile: directory.appending(path: "todos.json"), now: Date.init)
+        await fresh.reloadCalendar()
+        render(CalendarCard(model: fresh).frame(width: 700).padding(24).background(Palette.window), to: directory.appending(path: "calendar-connect.png"))
+        render(CalendarSourceList(model: app.dashboard).frame(width: 308).padding(16).background(Palette.card),
+               to: directory.appending(path: "calendar-sources.png"))
+        #endif
+    }
+
+    private static func render(_ view: some View, to url: URL) {
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     /// Tooltips on controls in a window's corners and middle, to show each one stays inside it.
@@ -195,3 +245,57 @@ struct NoCredentials: CredentialStoring {
     func read(_ credential: Credential) throws -> Secret? { nil }
     func save(_ secret: Secret, for credential: Credential) throws {}
 }
+
+#if DEBUG
+/// A calendar source for snapshots: fixed meetings on the days around today.
+private struct SampleCalendar: CalendarSource {
+    let kind: CalendarSourceKind
+    let connection: CalendarConnection
+
+    init(_ kind: CalendarSourceKind, _ connection: CalendarConnection) {
+        self.kind = kind
+        self.connection = connection
+    }
+
+    func status() async -> CalendarConnection { connection }
+    func connect() async throws {}
+    func disconnect() async {}
+
+    func events(from start: Date, to end: Date) async throws -> [CalendarEvent] {
+        let today = Calendar.current.startOfDay(for: Date())
+        let live = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 / 1800).rounded(.down) * 1800 - 900)
+        func at(_ day: Int, _ hour: Double, _ minutes: Double, _ title: String, _ calendar: String = "", link: String? = nil,
+                allDay: Bool = false) -> CalendarEvent {
+            let begin = today.addingTimeInterval(Double(day) * 86_400 + (allDay ? 0 : hour * 3600))
+            return CalendarEvent(id: "\(kind)-\(day)-\(hour)-\(title)", title: title, start: begin,
+                                 end: begin.addingTimeInterval(allDay ? 86_400 : minutes * 60), isAllDay: allDay,
+                                 calendar: calendar, link: link.flatMap(URL.init(string:)), source: kind, uid: "\(day)-\(title)")
+        }
+        let events: [CalendarEvent] = switch kind {
+        case .google: [
+            at(0, 9.5, 30, "每日站會", link: "https://meet.google.com/abc-defg-hij"),
+            // Around the moment of the snapshot, so a live meeting and its Join button show.
+            CalendarEvent(id: "google-live", title: "新款手機行銷策略討論", start: live, end: live.addingTimeInterval(3600),
+                          isAllDay: false, calendar: "", link: URL(string: "https://meet.google.com/qrs-tuvw-xyz"), source: .google),
+            CalendarEvent(id: "google-next", title: "與 Mei 一對一", start: live.addingTimeInterval(5400), end: live.addingTimeInterval(7200),
+                          isAllDay: false, calendar: "", link: URL(string: "https://meet.google.com/jkl-mnop-qrs"), source: .google),
+            at(1, 10, 60, "供應商報價會議", link: "https://meet.google.com/xyz-abcd-efg"),
+            at(3, 14, 90, "通路合作提案", link: "https://meet.google.com/qrs-tuvw-xyz"),
+            at(-2, 11, 60, "直播腳本檢討"),
+            at(8, 15, 60, "通路促銷週會", link: "https://meet.google.com/lmn-opqr-stu"),
+        ]
+        case .apple: [
+            at(0, 9.5, 30, "每日站會", "工作"),
+            at(0, 11, 60, "Q4 預算審查", "工作", link: "https://teams.microsoft.com/l/meetup-join/sample"),
+            at(0, 14, 60, "設計評論", "工作", link: "https://zoom.us/j/5550100"),
+            at(1, 0, 0, "產品外訓", "家庭", allDay: true),
+            at(5, 13, 45, "牙醫", "家庭"),
+            at(-6, 10, 60, "季度規劃", "工作"),
+            at(12, 9, 60, "董事會簡報", "工作", link: "https://zoom.us/j/5550101"),
+        ]
+        case .microsoft: []
+        }
+        return events.filter { $0.end > start && $0.start < end }
+    }
+}
+#endif

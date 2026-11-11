@@ -152,7 +152,7 @@ import Testing
         let gate = Gate<Bool>()
         world.catalog.llm.holds.update { $0["cleanTranscript"] = gate }
         let regenerating = Task { await detail.regenerate() }
-        #expect(await eventually { world.queue.activeJob?.state == .running(.cleanTranscript) })
+        #expect(await eventually { world.queue.activeJob?.state == .running(.summarize) })
 
         #expect(!detail.canEditSpeakers)
         await detail.rename(SpeakerID("r1"), to: .newPerson(name: "不該寫入"))

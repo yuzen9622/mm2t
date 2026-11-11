@@ -39,6 +39,12 @@
 	<!-- PLACEHOLDER: replace with the public key printed by Sparkle's generate_keys (see docs/releasing.md). Builds keep updates off until it is a real key. -->
 	<key>SUPublicEDKey</key>
 	<string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
+	<!-- PLACEHOLDER: replace with the OAuth client ID of a "Desktop app" client from Google Cloud Console (Calendar API enabled, scope calendar.readonly). Until then Google Calendar shows as not available in this build. -->
+	<key>MM2TGoogleClientID</key>
+	<string>REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID</string>
+	<!-- PLACEHOLDER: replace with the Application (client) ID of a Microsoft Entra app registration (public client, redirect http://localhost under "Mobile and desktop applications", delegated Calendars.Read). Until then Outlook shows as not available in this build. -->
+	<key>MM2TMicrosoftClientID</key>
+	<string>REPLACE_WITH_MICROSOFT_OAUTH_CLIENT_ID</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>AGPL-3.0</string>
 </dict>

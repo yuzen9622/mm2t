@@ -10,7 +10,22 @@ import MM2TCore
 enum DebugBenchmark {
     #if DEBUG
     private static let env = ProcessInfo.processInfo.environment
-    static var isRequested: Bool { env["MM2T_BENCH_REMOTE"] != nil && env["MM2T_BENCH_MIC"] != nil && env["MM2T_BENCH_OUT"] != nil }
+    static var isRequested: Bool {
+        env["MM2T_BENCH_OUT"] != nil && (env["MM2T_BENCH_MEETING"] != nil || (env["MM2T_BENCH_REMOTE"] != nil && env["MM2T_BENCH_MIC"] != nil))
+    }
+
+    /// `MM2T_BENCH_MEETING` names a meeting already in the data root, to resume it from its pending step.
+    private static func recording(_ app: AppController) async throws -> Meeting {
+        if let id = env["MM2T_BENCH_MEETING"].flatMap(UUID.init(uuidString:)) { return try await app.library.meeting(MeetingID(id)) }
+        let staging = app.paths.root.appending(path: "staging-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let mic = staging.appending(path: "mic.wav"), remote = staging.appending(path: "remote.wav")
+        try FileManager.default.copyItem(at: URL(filePath: env["MM2T_BENCH_MIC"]!), to: mic)
+        try FileManager.default.copyItem(at: URL(filePath: env["MM2T_BENCH_REMOTE"]!), to: remote)
+        return try await app.library.create(Recording(
+            micTrack: mic, remoteTrack: remote, highlights: [],
+            metadata: MeetingMetadata(title: "Recording", startedAt: Date(), duration: 0)))
+    }
     #else
     static var isRequested: Bool { false }
     #endif
@@ -26,28 +41,19 @@ enum DebugBenchmark {
                 NSApp.terminate(nil)
             }
             do {
-                let staging = app.paths.root.appending(path: "staging-\(UUID().uuidString)")
-                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-                let mic = staging.appending(path: "mic.wav"), remote = staging.appending(path: "remote.wav")
-                try FileManager.default.copyItem(at: URL(filePath: env["MM2T_BENCH_MIC"]!), to: mic)
-                try FileManager.default.copyItem(at: URL(filePath: env["MM2T_BENCH_REMOTE"]!), to: remote)
-                let meeting = try await app.library.create(Recording(
-                    micTrack: mic, remoteTrack: remote, highlights: [],
-                    metadata: MeetingMetadata(title: "Recording", startedAt: Date(), duration: 0)))
+                let meeting = try await recording(app)
 
-                var marks: [(String, Date)] = []
-                func watch() {
-                    withObservationTracking {
-                        if case .running(let step?) = app.queue.jobs[meeting.id], marks.last?.0 != step.rawValue {
-                            marks.append((step.rawValue, Date()))
-                        }
-                    } onChange: { Task { @MainActor in watch() } }
+                let log = StepLog()
+                observeChanges {
+                    if case .running(let step?) = app.queue.jobs[meeting.id], log.marks.last?.0 != step.rawValue {
+                        log.marks.append((step.rawValue, Date()))
+                    }
                 }
-                watch()
                 let start = Date()
                 await app.queue.run(.process, on: meeting.id)
                 let end = Date()
 
+                let marks = log.marks
                 var steps: [String: Double] = [:]
                 for (index, mark) in marks.enumerated() {
                     steps[mark.0] = (index + 1 < marks.count ? marks[index + 1].1 : end).timeIntervalSince(mark.1)
@@ -74,4 +80,10 @@ enum DebugBenchmark {
         }
         #endif
     }
+}
+
+/// When each processing step was first seen running.
+@MainActor
+private final class StepLog {
+    var marks: [(String, Date)] = []
 }

@@ -18,6 +18,9 @@ struct OnboardingView: View {
                     Panel(title: "Speaker separation") {
                         ModelDownloadView(setup: setup)
                     }
+                    Panel(title: "Your voice") {
+                        VoiceEnrollmentView(model: app.enrollment, modelReady: setup.models == .downloaded)
+                    }
                     Panel(title: "API keys") {
                         CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
                         CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
@@ -36,14 +39,13 @@ struct OnboardingView: View {
             }
             HStack {
                 Spacer()
-                PillButton("Later") { dismiss() }
                 PillButton("Done", kind: .primary) {
-                    app.settings.settings.hasCompletedOnboarding = true
+                    app.completeOnboarding()
                     Task { await app.queue.retryAfterSetup() }
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!setup.issues.isEmpty)
+                .disabled(!setup.issues.isEmpty || !app.enrollment.hasVoice)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
@@ -56,6 +58,66 @@ struct OnboardingView: View {
         // without a fixed one the window resizes forever.
         .frame(width: 560, height: 640)
         .onAppear { setup.refresh() }
+        .task { await app.enrollment.refresh() }
+    }
+}
+
+/// The passage the user reads once so mm2t knows their voice, and how the reading went.
+struct VoiceEnrollmentView: View {
+    let model: VoiceEnrollmentModel
+    /// The speaker model turns the reading into a voiceprint, so it has to be on disk first.
+    let modelReady: Bool
+
+    static let passage = String(localized: "Today I am setting up my meeting notes. Whenever we meet in the same room, this is how the app will know which voice is mine.")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Read this aloud at your normal speaking voice. mm2t keeps a voiceprint of it on this Mac, so a meeting recorded in the room shows which speaker is you.")
+                .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: Self.passage)
+                .font(Typo.heading)
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+            HStack(spacing: 12) {
+                switch model.state {
+                case .recording:
+                    PillButton("Done Reading", icon: "player-stop", kind: .primary) {
+                        Task { await model.finish(passage: Self.passage, name: Copy.presentationLabels.me) }
+                    }
+                    ProgressLine(fraction: model.level).frame(maxWidth: 160)
+                case .checking:
+                    Text("Checking…").foregroundStyle(Palette.secondary)
+                case .enrolled:
+                    Icon("circle-check", size: 18).foregroundStyle(Palette.success)
+                    Text("mm2t knows your voice")
+                    Spacer()
+                    PillButton("Read Again", icon: "refresh") {
+                        model.retry()
+                        Task { await model.start() }
+                    }
+                case .idle, .rejected:
+                    PillButton("Start Reading", icon: "microphone", kind: .primary) {
+                        model.retry()
+                        Task { await model.start() }
+                    }
+                    .disabled(!modelReady)
+                    if !modelReady {
+                        Text("Download the speaker separation model first.").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    }
+                }
+            }
+            if case .rejected(let problem) = model.state {
+                HStack(spacing: 8) {
+                    Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
+                    Text(Copy.enrollment(problem)).fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity)
+            }
+        }
+        .motion(Motion.reveal, value: model.state)
     }
 }
 
@@ -76,6 +138,12 @@ struct PermissionRows: View {
         PermissionRow(title: "Accessibility", purpose: "Reads the meeting window's title to detect browser meetings.",
                       state: setup.accessibility, pane: .accessibility) {
             setup.requestAccessibility()
+        }
+        if setup.accessibility == .denied {
+            // macOS ties the switch to the build that was added. A build signed differently shows
+            // the old switch as on while the running app is still refused.
+            Text("Already switched on? The switch may belong to an older build of mm2t. Select mm2t in the list, remove it with the − button, then add it again.")
+                .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
         }
         ForEach(setup.automation.keys.sorted(), id: \.self) { browser in
             PermissionRow(title: "Automation: \(browser)", purpose: "Reads the open tab's address to tell which meeting it is.",

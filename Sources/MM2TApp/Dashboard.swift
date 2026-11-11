@@ -1,81 +1,6 @@
-import EventKit
 import Foundation
 import MM2TCore
 import Observation
-
-// MARK: Calendar
-
-public enum CalendarAccess: Sendable, Equatable {
-    case notDetermined
-    case granted
-    case denied
-}
-
-public struct CalendarEvent: Hashable, Sendable, Identifiable {
-    public let id: String
-    public let title: String
-    public let start: Date
-    public let end: Date
-    public let isAllDay: Bool
-    public let calendar: String
-    /// The video-call address found in the event, if any.
-    public let link: URL?
-
-    public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool, calendar: String, link: URL?) {
-        self.id = id
-        self.title = title
-        self.start = start
-        self.end = end
-        self.isAllDay = isAllDay
-        self.calendar = calendar
-        self.link = link
-    }
-}
-
-/// The calendars the Mac already syncs (iCloud, Google, Exchange accounts in System Settings).
-public protocol CalendarProviding: Sendable {
-    var access: CalendarAccess { get }
-    /// Shows the system prompt the first time.
-    func requestAccess() async -> Bool
-    func events(from start: Date, to end: Date) async -> [CalendarEvent]
-}
-
-public struct NoCalendar: CalendarProviding {
-    public init() {}
-    public var access: CalendarAccess { .denied }
-    public func requestAccess() async -> Bool { false }
-    public func events(from start: Date, to end: Date) async -> [CalendarEvent] { [] }
-}
-
-public final class SystemCalendar: CalendarProviding, @unchecked Sendable {
-    private let store = EKEventStore()
-
-    public init() {}
-
-    public var access: CalendarAccess {
-        switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess: .granted
-        case .notDetermined: .notDetermined
-        default: .denied
-        }
-    }
-
-    public func requestAccess() async -> Bool {
-        (try? await store.requestFullAccessToEvents()) ?? false
-    }
-
-    public func events(from start: Date, to end: Date) async -> [CalendarEvent] {
-        guard access == .granted else { return [] }
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }.map { event in
-            CalendarEvent(
-                id: "\(event.calendarItemIdentifier)-\(event.startDate.timeIntervalSince1970)",
-                title: event.title ?? "", start: event.startDate, end: event.endDate, isAllDay: event.isAllDay,
-                calendar: event.calendar?.title ?? "",
-                link: MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }))
-        }
-    }
-}
 
 // MARK: Rows
 
@@ -122,6 +47,13 @@ public struct TermRow: Hashable, Sendable, Identifiable {
     public var id: String { term }
 }
 
+public struct CalendarSourceState: Hashable, Sendable, Identifiable {
+    public let kind: CalendarSourceKind
+    public var connection: CalendarConnection
+    public var problem: CalendarProblem?
+    public var id: CalendarSourceKind { kind }
+}
+
 // MARK: Model
 
 /// The home screen: what the user owes, what is on their calendar, and what their meetings add up to.
@@ -133,8 +65,14 @@ public final class DashboardModel {
     public private(set) var activity: [ActivityDay] = []
     public private(set) var voices: [VoiceRow] = []
     public private(set) var terms: [TermRow] = []
-    public private(set) var events: [CalendarEvent] = []
-    public private(set) var calendarAccess: CalendarAccess
+    /// Every calendar source in display order, with its connection.
+    public private(set) var calendarSources: [CalendarSourceState]
+    /// The first day of the month on screen.
+    public private(set) var month: Date
+    public private(set) var selectedDay: Date
+    /// Events of every connected source across the six weeks the month grid shows.
+    public private(set) var monthEvents: [CalendarEvent] = []
+    public private(set) var isLoadingCalendar = false
     public var meLabel = "Me"
 
     public static let activityDays = 84
@@ -142,20 +80,24 @@ public final class DashboardModel {
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let voiceprints: VoiceprintStore
     @ObservationIgnored private let settings: SettingsStore
-    @ObservationIgnored private let calendar: any CalendarProviding
+    @ObservationIgnored private let calendars: [any CalendarSource]
+    @ObservationIgnored private var calendarLoad = 0
     @ObservationIgnored private let todosFile: URL
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var done: Set<String>
 
     public init(library: MeetingLibrary, voiceprints: VoiceprintStore, settings: SettingsStore,
-                calendar: any CalendarProviding, todosFile: URL, now: @escaping () -> Date) {
+                calendars: [any CalendarSource], todosFile: URL, now: @escaping () -> Date) {
         self.library = library
         self.voiceprints = voiceprints
         self.settings = settings
-        self.calendar = calendar
+        self.calendars = calendars
         self.todosFile = todosFile
         self.now = now
-        calendarAccess = calendar.access
+        calendarSources = calendars.map { CalendarSourceState(kind: $0.kind, connection: .disconnected) }
+        let today = Calendar.current.startOfDay(for: now())
+        month = Calendar.current.dateInterval(of: .month, for: today)?.start ?? today
+        selectedDay = today
         done = Set((try? JSONDecoder().decode([String].self, from: Data(contentsOf: todosFile))) ?? [])
     }
 
@@ -172,16 +114,119 @@ public final class DashboardModel {
         await reloadCalendar()
     }
 
+    /// Re-reads every source's connection, then the events of the month on screen.
     public func reloadCalendar() async {
-        calendarAccess = calendar.access
-        let start = now()
-        events = await calendar.events(from: start.addingTimeInterval(-3600), to: Calendar.current.startOfDay(for: start).addingTimeInterval(2 * 86_400))
-            .filter { $0.end > start }
+        for (index, source) in calendars.enumerated() where calendarSources[index].connection != .connecting {
+            calendarSources[index].connection = await source.status()
+        }
+        await loadEvents()
     }
 
-    public func connectCalendar() async {
-        _ = await calendar.requestAccess()
-        await reloadCalendar()
+    public var hasConnectedCalendar: Bool { calendarSources.contains { $0.connection == .connected } }
+
+    /// The six weeks of days the month grid shows.
+    public var gridDays: [Date] { MonthGrid.days(around: month, calendar: .current) }
+
+    /// Events that touch `day`, all-day ones first.
+    public func events(on day: Date) -> [CalendarEvent] {
+        let start = Calendar.current.startOfDay(for: day)
+        guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else { return [] }
+        return monthEvents.filter { $0.start < end && $0.end > start }
+            .sorted { ($0.isAllDay ? 0 : 1, $0.start) < ($1.isAllDay ? 0 : 1, $1.start) }
+    }
+
+    public func select(_ day: Date) {
+        selectedDay = Calendar.current.startOfDay(for: day)
+        if !Calendar.current.isDate(day, equalTo: month, toGranularity: .month) {
+            month = Calendar.current.dateInterval(of: .month, for: day)?.start ?? month
+            Task { await loadEvents() }
+        }
+    }
+
+    /// Moves the grid `offset` months and selects that month's first day (today, when it is this month).
+    public func showMonth(_ offset: Int) async {
+        guard let target = Calendar.current.date(byAdding: .month, value: offset, to: month) else { return }
+        month = target
+        let today = Calendar.current.startOfDay(for: now())
+        selectedDay = Calendar.current.isDate(today, equalTo: target, toGranularity: .month) ? today : target
+        await loadEvents()
+    }
+
+    public func showToday() async {
+        let today = Calendar.current.startOfDay(for: now())
+        let moved = !Calendar.current.isDate(today, equalTo: month, toGranularity: .month)
+        month = Calendar.current.dateInterval(of: .month, for: today)?.start ?? today
+        selectedDay = today
+        if moved { await loadEvents() }
+    }
+
+    public func connect(_ kind: CalendarSourceKind) async {
+        guard let index = calendars.firstIndex(where: { $0.kind == kind }),
+              calendarSources[index].connection != .connecting else { return }
+        calendarSources[index].connection = .connecting
+        calendarSources[index].problem = nil
+        do {
+            try await calendars[index].connect()
+        } catch CalendarError.cancelled {
+        } catch CalendarError.unreachable {
+            calendarSources[index].problem = .unreachable
+        } catch {
+            calendarSources[index].problem = .signInFailed
+        }
+        calendarSources[index].connection = await calendars[index].status()
+        await loadEvents()
+    }
+
+    public func disconnect(_ kind: CalendarSourceKind) async {
+        guard let index = calendars.firstIndex(where: { $0.kind == kind }) else { return }
+        await calendars[index].disconnect()
+        calendarSources[index].problem = nil
+        calendarSources[index].connection = await calendars[index].status()
+        // Reloaded rather than filtered: a merged-away copy from another source has to come back.
+        await loadEvents()
+    }
+
+    private func loadEvents() async {
+        calendarLoad += 1
+        let load = calendarLoad
+        let days = gridDays
+        guard let first = days.first, let last = days.last.flatMap({ Calendar.current.date(byAdding: .day, value: 1, to: $0) }) else { return }
+        let connected = calendars.enumerated().filter { calendarSources[$0.offset].connection == .connected }
+        guard !connected.isEmpty else {
+            monthEvents = []
+            isLoadingCalendar = false
+            return
+        }
+        isLoadingCalendar = true
+        var lists: [[CalendarEvent]] = []
+        var problems: [CalendarSourceKind: CalendarProblem?] = [:]
+        await withTaskGroup(of: (CalendarSourceKind, Result<[CalendarEvent], Error>).self) { group in
+            for (_, source) in connected {
+                group.addTask {
+                    do { return (source.kind, .success(try await source.events(from: first, to: last))) }
+                    catch { return (source.kind, .failure(error)) }
+                }
+            }
+            for await (kind, result) in group {
+                switch result {
+                case .success(let events):
+                    lists.append(events)
+                    problems[kind] = .some(nil)
+                case .failure(CalendarError.signedOut):
+                    problems[kind] = .signedOut
+                case .failure:
+                    problems[kind] = .unreachable
+                }
+            }
+        }
+        guard load == calendarLoad else { return }
+        monthEvents = CalendarMerge.merge(lists)
+        isLoadingCalendar = false
+        for (index, source) in calendars.enumerated() {
+            guard let problem = problems[source.kind] else { continue }
+            calendarSources[index].problem = problem
+            if problem == .signedOut { calendarSources[index].connection = await source.status() }
+        }
     }
 
     public func toggle(_ todo: TodoRow) {

@@ -40,6 +40,9 @@ struct MainWindow: View {
 
     var body: some View {
         GeometryReader { window in
+            if app.needsOnboarding, !DebugSnapshot.isRequested {
+                SetupGate()
+            } else {
             HStack(spacing: 0) {
                 sidebar
                 Divider().overlay(Palette.border)
@@ -50,6 +53,7 @@ struct MainWindow: View {
                     .clipped()
             }
             .environment(\.tipBounds, window.size)
+            }
         }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
@@ -135,6 +139,21 @@ struct MainWindow: View {
         }
         .motion(Motion.page, value: section)
         .motion(Motion.page, value: meeting)
+    }
+}
+
+/// What the main window shows until setup is finished: nothing of the app, and the way into setup.
+struct SetupGate: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            Icon("microphone", size: 34).foregroundStyle(Palette.orange)
+            Text("Finish setting up mm2t").font(Typo.title)
+            Text("mm2t needs your permissions, your keys and a short reading in your own voice before it can take notes.")
+                .foregroundStyle(Palette.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
+            PillButton("Continue Setup", kind: .primary) { WindowOpener.open(WindowID.onboarding) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.window)
     }
 }
 

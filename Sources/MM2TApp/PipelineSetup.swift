@@ -114,7 +114,8 @@ public struct PipelineSetup: Sendable {
             diarizer: models?.diarizer, embedder: models?.embedder,
             diarizationOrder: settings.diarizationOrder,
             transcription: TranscriptionChain(routes), llm: llm,
-            thresholds: catalog.thresholds, vocabulary: settings.vocabulary))
+            thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
+            runsConcurrently: settings.llmLocation == .cloud && !settings.transcriptionOrder.contains(.local)))
     }
 
     private func nonEmpty(_ credential: Credential) throws -> Secret? {

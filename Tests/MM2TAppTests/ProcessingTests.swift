@@ -62,7 +62,7 @@ import Testing
         let meeting = try await world.recordedMeeting()
         let processed = try await world.library.meeting(meeting.id)
 
-        #expect(world.catalog.selfHostedURLs.get == [server])
+        #expect(Set(world.catalog.selfHostedURLs.get) == [server])
         #expect(world.catalog.selfHosted.calls.get.count == 2, "tried first for both tracks")
         #expect(processed.transcription?.remote.source == .cloud, "story 64: the source actually used is recorded")
         #expect(world.catalog.cloud.calls.get.first?.hints == ["mm2t", "Typeless"])
@@ -96,7 +96,7 @@ import Testing
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         let stopping = Task { await world.capture.stop() }
 
-        #expect(await eventually { world.queue.activeJob?.state == .running(.cleanTranscript) })
+        #expect(await eventually { world.queue.activeJob?.state == .running(.summarize) })
         let id = try #require(world.queue.activeJob?.id)
         let detail = world.detail(id)
         await detail.load()

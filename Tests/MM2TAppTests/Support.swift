@@ -140,6 +140,7 @@ struct FakeLLM: LLMProvider {
         let last = request.transcript.utterances.last!
         return Summary(
             headline: "\(SpeakerMention.token(last.speaker)) 拍板預算，\(SpeakerMention.token(.me)) 整理報價。",
+            terms: ["Kubernetes", "報價單"],
             decisions: [SourcedText(text: "由 \(SpeakerMention.token(last.speaker)) 拍板", sources: [last.id])],
             discussionPoints: [SourcedText(text: "預算", sources: [request.transcript.utterances[0].id])],
             actionItems: [.init(text: "整理報價", owner: SpeakerID("r1"), sources: [last.id])])

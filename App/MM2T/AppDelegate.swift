@@ -10,7 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         do {
-            app = try DebugSnapshot.isRequested ? AppController.live(credentials: NoCredentials()) : AppController.live()
+            let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
+            app = try DebugSnapshot.isRequested
+                ? AppController.live(credentials: NoCredentials(), signedInPage: signedIn, calendars: DebugSnapshot.sampleCalendars)
+                : AppController.live(signedInPage: signedIn)
             startupError = nil
         } catch {
             app = nil
@@ -41,10 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await app.launch() }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
         WindowOpener.open(WindowID.main)
-        // The setup window introduces itself once. After that everything in it lives in Settings.
-        if !app.settings.settings.hasCompletedOnboarding {
-            app.settings.settings.hasCompletedOnboarding = true
-            WindowOpener.open(WindowID.onboarding)
+        // Setup comes first: the main window shows nothing else until it is finished.
+        Task {
+            await app.enrollment.refresh()
+            if app.needsOnboarding { WindowOpener.open(WindowID.onboarding) }
         }
     }
 

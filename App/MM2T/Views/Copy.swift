@@ -77,6 +77,41 @@ enum Copy {
         case .elevenLabsAPIKey: String(localized: "ElevenLabs API key")
         case .geminiAPIKey: String(localized: "Gemini API key")
         case .selfHostedToken: String(localized: "self-hosted server token")
+        case .googleCalendarRefreshToken: String(localized: "Google Calendar sign-in")
+        case .microsoftCalendarRefreshToken: String(localized: "Outlook sign-in")
+        }
+    }
+
+    static func calendarSource(_ kind: CalendarSourceKind) -> String {
+        switch kind {
+        case .apple: String(localized: "Apple Calendar")
+        case .google: String(localized: "Google Calendar")
+        case .microsoft: String(localized: "Outlook")
+        }
+    }
+
+    static func calendarSourceDetail(_ kind: CalendarSourceKind) -> String {
+        switch kind {
+        case .apple: String(localized: "iCloud and the accounts this Mac already syncs")
+        case .google: String(localized: "Your primary Google calendar, read-only")
+        case .microsoft: String(localized: "Microsoft 365 or Outlook.com, read-only")
+        }
+    }
+
+    /// The one line a source shows instead of its Connect button when this build cannot connect it.
+    static func calendarUnavailable(_ kind: CalendarSourceKind) -> String {
+        switch kind {
+        case .apple: String(localized: "macOS isn't letting mm2t read calendars.")
+        case .google: String(localized: "Not available in this build: it has no Google OAuth client ID.")
+        case .microsoft: String(localized: "Not available in this build: it has no Microsoft OAuth client ID.")
+        }
+    }
+
+    static func calendarProblem(_ problem: CalendarProblem, _ kind: CalendarSourceKind) -> String {
+        switch problem {
+        case .signInFailed: String(localized: "Sign-in didn't finish. Try again.")
+        case .unreachable: String(localized: "Couldn't reach \(calendarSource(kind)).")
+        case .signedOut: String(localized: "\(calendarSource(kind)) signed you out. Connect it again.")
         }
     }
 
@@ -116,6 +151,16 @@ enum Copy {
             String(localized: "Recording could not start: \(String(describing: error))")
         case .saveFailed(let reason):
             String(localized: "The recording is safe but could not be added to your meetings: \(reason). mm2t will try again at next launch.")
+        }
+    }
+
+    static func enrollment(_ problem: VoiceEnrollmentModel.Problem) -> String {
+        switch problem {
+        case .tooShort: String(localized: "That was too short to learn your voice. Read the whole passage, a little closer to the microphone.")
+        case .differentWords: String(localized: "That didn't sound like the passage. Read it once more; it doesn't have to be word for word.")
+        case .modelMissing: String(localized: "Download the speaker separation model first.")
+        case .microphoneDenied: String(localized: "mm2t can't use the microphone. Allow it in System Settings, then try again.")
+        case .failed(let reason): reason
         }
     }
 
