@@ -40,6 +40,7 @@ public final class AppController {
     public let setup: SetupModel
     public let meetings: MeetingListModel
     public let people: VoiceprintsModel
+    public let dashboard: DashboardModel
     /// Recordings repaired at launch (or left unprocessed by a quit), offered for processing.
     public private(set) var recovered: [MeetingID] = []
     public private(set) var recoveryFailures: [URL: String] = [:]
@@ -58,6 +59,7 @@ public final class AppController {
         offlineInstallers: [OfflineModel: any ModelInstalling],
         machine: MachineProfile = .current,
         validator: any KeyValidating,
+        calendar: any CalendarProviding = NoCalendar(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
         now: @escaping () -> Date = Date.init
     ) throws {
@@ -87,6 +89,12 @@ public final class AppController {
             })
         meetings = MeetingListModel(library: library, voiceprints: voiceprints, queue: queue)
         people = VoiceprintsModel(store: voiceprints)
+        dashboard = DashboardModel(
+            library: library, voiceprints: voiceprints, settings: settings, calendar: calendar,
+            todosFile: paths.root.appending(path: "todos.json"), now: now)
+        queue.onCompleted = { meeting in
+            for term in meeting.outputs.summary?.terms ?? [] { settings.settings.addVocabulary(term, source: .learned) }
+        }
     }
 
     public static func live(
@@ -101,7 +109,7 @@ public final class AppController {
             catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm),
             recorder: LiveRecorder(), permissions: LivePermissions(),
             installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
-            validator: LiveKeyValidator(),
+            validator: LiveKeyValidator(), calendar: SystemCalendar(),
             runningBrowsers: {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
@@ -130,7 +138,9 @@ public final class AppController {
     }
 
     public func detail(_ id: MeetingID, labels: PresentationLabels, playback: (any MeetingPlayback)?) -> MeetingDetailModel {
-        MeetingDetailModel(id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback)
+        MeetingDetailModel(
+            id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback,
+            learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 
     private func startMonitor() {

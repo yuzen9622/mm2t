@@ -12,7 +12,7 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var store = app.settings
         VStack(spacing: 0) {
-            ScreenHeader(title: Text("Settings")) {
+            ScreenHeader {
                 PillButton("Licenses") { showLicenses = true }
             }
             ScrollView {

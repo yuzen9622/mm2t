@@ -117,7 +117,8 @@ struct PermissionRow: View {
             } else if state == .notDetermined, let request {
                 PillButton("Allow…", kind: .primary, action: request)
             } else if state == .notDetermined {
-                EmptyView()
+                // macOS asks for this one itself, the first time it is used.
+                Text(Copy.permissionState(state)).font(Typo.caption).foregroundStyle(Palette.secondary)
             } else {
                 PillButton("Open System Settings") { SetupModel.openSettings(pane) }
             }

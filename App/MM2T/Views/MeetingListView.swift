@@ -13,7 +13,7 @@ struct MeetingListView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            ScreenHeader(title: Text("Meetings")) {
+            ScreenHeader {
                 SearchField(text: $model.query).frame(width: 220)
                 PillButton("Start Recording", icon: "microphone", kind: .primary) {
                     Task { await app.capture.startNow(title: String(localized: "Recording")) }

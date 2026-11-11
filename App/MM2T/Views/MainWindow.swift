@@ -3,6 +3,7 @@ import MM2TCore
 import SwiftUI
 
 enum SidebarItem: Hashable, CaseIterable {
+    case home
     case meetings
     case people
     case vocabulary
@@ -10,6 +11,7 @@ enum SidebarItem: Hashable, CaseIterable {
 
     var icon: String {
         switch self {
+        case .home: "home"
         case .meetings: "messages"
         case .people: "users"
         case .vocabulary: "book-2"
@@ -19,6 +21,7 @@ enum SidebarItem: Hashable, CaseIterable {
 
     var title: LocalizedStringKey {
         switch self {
+        case .home: "Home"
         case .meetings: "Meetings"
         case .people: "People"
         case .vocabulary: "Vocabulary"
@@ -29,18 +32,24 @@ enum SidebarItem: Hashable, CaseIterable {
 
 struct MainWindow: View {
     let app: AppController
-    @State private var section = SidebarItem.meetings
+    @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
+    /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
+    @State private var movedUp = false
     @Namespace private var sidebarSpace
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider().overlay(Palette.border)
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Palette.window)
-                .clipped()
+        GeometryReader { window in
+            HStack(spacing: 0) {
+                sidebar
+                Divider().overlay(Palette.border)
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topLeading) { title }
+                    .background(Palette.window)
+                    .clipped()
+            }
+            .environment(\.tipBounds, window.size)
         }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
@@ -49,13 +58,14 @@ struct MainWindow: View {
         .frame(minWidth: 820, minHeight: 540)
         .onAppear {
             app.meetings.meLabel = Copy.presentationLabels.me
-            DebugSnapshot.mainWindowAppeared(select: { section = .meetings; meeting = $0 })
+            app.dashboard.meLabel = Copy.presentationLabels.me
+            DebugSnapshot.mainWindowAppeared(select: { show(.meetings, meeting: $0) }, show: { show($0) })
         }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach([SidebarItem.meetings, .people, .vocabulary], id: \.self) { row($0) }
+            ForEach([SidebarItem.home, .meetings, .people, .vocabulary], id: \.self) { row($0) }
             Spacer()
             row(.settings)
         }
@@ -75,15 +85,37 @@ struct MainWindow: View {
     }
 
     private func row(_ item: SidebarItem) -> some View {
-        SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) {
-            section = item
-            if item != .meetings { meeting = nil }
-        }
+        SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
+    }
+
+    private func show(_ item: SidebarItem, meeting: MeetingID? = nil) {
+        let order = SidebarItem.allCases
+        movedUp = order.firstIndex(of: item)! < order.firstIndex(of: section)!
+        section = item
+        self.meeting = meeting
+    }
+
+    /// The section's name stays in place and its characters roll to the next name, the way a
+    /// changing number does; only the panel under it fades. A meeting's own header replaces it.
+    private var title: some View {
+        Text(section.title)
+            .font(Typo.title)
+            .lineLimit(1)
+            .contentTransition(.numericText(countsDown: movedUp))
+            .motion(Motion.page, value: section)
+            .opacity(meeting == nil ? 1 : 0)
+            .motion(Motion.page, value: meeting)
+            .padding(.horizontal, 24)
+            .frame(height: 60)
+            .allowsHitTesting(false)
+            .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder private var content: some View {
         ZStack {
             switch section {
+            case .home:
+                HomeView(app: app, open: { show(.meetings, meeting: $0) }).transition(.opacity)
             case .meetings:
                 if let meeting {
                     MeetingDetailView(app: app, id: meeting, back: { self.meeting = nil })
@@ -91,14 +123,14 @@ struct MainWindow: View {
                         .entrance(from: .trailing, distance: 28)
                 } else {
                     MeetingListView(app: app, open: { meeting = $0 })
-                        .entrance(from: .leading, distance: 28)
+                        .transition(.opacity)
                 }
             case .people:
-                VoiceprintsView(model: app.people).entrance()
+                VoiceprintsView(model: app.people).transition(.opacity)
             case .vocabulary:
-                VocabularyView(store: app.settings).entrance()
+                VocabularyView(store: app.settings).transition(.opacity)
             case .settings:
-                SettingsView(app: app).entrance()
+                SettingsView(app: app).transition(.opacity)
             }
         }
         .motion(Motion.page, value: section)
@@ -156,9 +188,10 @@ struct WindowChrome: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {}
 }
 
-/// The row at the top of every screen: its name on the left, its controls on the right.
+/// The row at the top of every screen: its name on the left, its controls on the right. A section's
+/// screen passes no title, because `MainWindow` draws the section's name in that spot.
 struct ScreenHeader<Trailing: View>: View {
-    let title: Text
+    var title: Text?
     var back: (() -> Void)?
     @ViewBuilder let trailing: Trailing
 
@@ -167,12 +200,14 @@ struct ScreenHeader<Trailing: View>: View {
             if let back {
                 IconButton("Back", icon: "chevron-left", action: back)
             }
-            title.font(Typo.title).lineLimit(1)
+            if let title { title.font(Typo.title).lineLimit(1) }
             Spacer(minLength: 12)
             trailing
         }
         .padding(.horizontal, 24)
         .frame(height: 60)
+        // Above the content that follows it, so a tooltip hanging below a header button is not covered.
+        .zIndex(1)
     }
 }
 

@@ -10,7 +10,7 @@ struct VoiceprintsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenHeader(title: Text("People")) {}
+            ScreenHeader {}
             if model.rows.isEmpty {
                 EmptyState(icon: "users", title: "Naming a speaker in a meeting saves their voiceprint on this Mac.")
             } else {

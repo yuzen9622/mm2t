@@ -30,6 +30,8 @@
 	<string>mm2t 會錄下你的麥克風，作為會議記錄中「我」的音軌。</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>mm2t 只錄下會議 App 播放的聲音，作為會議記錄中遠端與會者的音軌。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>mm2t 會在首頁顯示你今天與明天的行程，並讓你直接打開會議連結。行程不會離開這台 Mac。</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>mm2t 會讀取瀏覽器目前分頁的網址，判斷你是否正在開 Google Meet、Teams、Zoom 或 Webex 網頁版會議。</string>
 	<key>SUFeedURL</key>
