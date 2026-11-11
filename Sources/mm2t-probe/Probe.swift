@@ -4,7 +4,6 @@ import Foundation
 import MM2TCore
 import MM2TSystem
 
-@available(macOS 14.2, *)
 @MainActor
 enum Probe {
     static func permissions() {

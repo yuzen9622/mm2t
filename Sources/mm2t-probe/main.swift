@@ -63,7 +63,6 @@ func runMain(_ body: @escaping @MainActor () async throws -> Void) -> Never {
     exit(0)
 }
 
-@available(macOS 14.2, *)
 @MainActor func dispatch(_ command: String) throws {
     switch command {
     case "permissions":
@@ -116,9 +115,4 @@ func runMain(_ body: @escaping @MainActor () async throws -> Void) -> Never {
     }
 }
 
-if #available(macOS 14.2, *) {
-    try dispatch(command)
-} else {
-    print("mm2t-probe needs macOS 14.2 or newer (Core Audio process taps)")
-    exit(1)
-}
+try dispatch(command)
