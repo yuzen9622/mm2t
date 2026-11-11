@@ -87,11 +87,13 @@ public struct MeetingProcessingPipeline: Sendable {
         case .transcribe:
             let names = await voiceprints.allPersons().map(\.name)
             let hints = names + vocabulary.filter { !names.contains($0) }
-            let me = try await transcription.transcribe(
-                audio: library.audioURL(meeting, track: .me), hints: hints, labelSpeakers: false)
             let remote = try await transcription.transcribe(
                 audio: library.audioURL(meeting, track: .remote), hints: hints, labelSpeakers: true)
-            meeting.transcription = Transcription(me: me, remote: remote)
+            // A silent remote track means the meeting happened in the room, so the mic holds every
+            // voice and is the track whose speakers need telling apart.
+            let me = try await transcription.transcribe(
+                audio: library.audioURL(meeting, track: .me), hints: hints, labelSpeakers: remote.words.isEmpty)
+            meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)
 
         case .diarize:
             await diarize(&meeting)
@@ -119,22 +121,29 @@ public struct MeetingProcessingPipeline: Sendable {
                     transcript: llmTranscript(meeting), unnamedSpeakers: unnamed, knownNames: known))
                 inferred = guesses
                     .filter { unnamed.contains($0.speaker) && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
-                    .map { NameSuggestion(speaker: $0.speaker, source: .inferred(name: $0.name, reason: $0.reason)) }
+                    .map { NameSuggestion(speaker: $0.speaker, source: .inferred(
+                        name: TraditionalChinese.convert($0.name), reason: TraditionalChinese.convert($0.reason))) }
             }
             meeting.suggestions = NameSuggestions(items: voiceprintSuggestions + inferred)
 
         case .cleanTranscript:
-            meeting.outputs.cleaned = try await llm.cleanTranscript(llmTranscript(meeting))
+            var transcript = llmTranscript(meeting)
+            let names = await voiceprints.allPersons().map(\.name)
+            transcript.glossary = names + vocabulary.filter { !names.contains($0) }
+            meeting.outputs.cleaned = try await llm.cleanTranscript(transcript).inTraditionalChinese
 
         case .digestPerPerson:
-            meeting.outputs.digests = try await llm.digestPerPerson(llmTranscript(meeting))
+            meeting.outputs.digests = try await llm.digestPerPerson(llmTranscript(meeting)).map(\.inTraditionalChinese)
 
         case .summarize:
             let transcript = llmTranscript(meeting)
-            meeting.outputs.summary = try await llm.summarize(SummaryRequest(
+            let summary = try await llm.summarize(SummaryRequest(
                 transcript: transcript,
-                prioritized: transcript.utterances.filter(\.isHighlighted)))
+                prioritized: transcript.utterances.filter(\.isHighlighted))).inTraditionalChinese
+            meeting.outputs.summary = summary
             meeting.outputs.isStale = false
+            // The recorder can only name a meeting after its app ("Google Meet") or "Recording".
+            if let title = summary.title, !meeting.metadata.isTitleEdited { meeting.metadata.title = title }
         }
     }
 
@@ -172,9 +181,12 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Never fails: when every source is unavailable or throws, the meeting keeps its transcript
     /// under one unnamed speaker and records why, so the user can re-run separation later.
     private func diarize(_ meeting: inout Meeting) async {
-        guard let remote = meeting.transcription?.remote else { preconditionFailure("diarize before transcribe") }
-        let (segments, embeddings, attribution) = await separation(of: remote, track: library.audioURL(meeting, track: .remote))
+        guard let transcription = meeting.transcription else { preconditionFailure("diarize before transcribe") }
+        let track: Track = transcription.remote.words.isEmpty && !transcription.me.words.isEmpty ? .me : .remote
+        let remote = track == .me ? transcription.me : transcription.remote
+        let (segments, embeddings, attribution) = await separation(of: remote, track: library.audioURL(meeting, track: track))
         apply(segments, embeddings: embeddings, to: &meeting)
+        meeting.separatedTrack = track == .me ? .me : nil
         meeting.mergedSpeakers = [:]
         meeting.attribution = attribution
         if meeting.remoteSegments.isEmpty, let first = remote.words.first, let last = remote.words.last {
@@ -232,9 +244,10 @@ public struct MeetingProcessingPipeline: Sendable {
 
     private func align(_ meeting: inout Meeting) {
         guard let transcription = meeting.transcription else { preconditionFailure("align before transcribe") }
+        let separatesMic = meeting.separatedTrack == .me
         meeting.utterances = Alignment.utterances(
-            me: transcription.me.words,
-            remote: transcription.remote.words,
+            me: separatesMic ? [] : transcription.me.words,
+            remote: separatesMic ? transcription.me.words : transcription.remote.words,
             segments: meeting.remoteSegments,
             overlaps: meeting.attribution?.overlaps ?? [])
     }

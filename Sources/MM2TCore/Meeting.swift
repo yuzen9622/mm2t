@@ -24,6 +24,9 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     /// Speakers removed by a merge, mapped to the speaker they were merged into.
     public internal(set) var mergedSpeakers: [SpeakerID: SpeakerID] = [:]
     public internal(set) var remoteSegments: [SpeakerSegment] = []
+    /// The track `speakers` and `remoteSegments` describe. nil means the remote track; `.me` when
+    /// nothing was heard on the remote track, so the room's voices on the mic were separated instead.
+    public internal(set) var separatedTrack: Track?
     public internal(set) var attribution: SpeakerAttribution?
     public internal(set) var transcription: Transcription?
     public internal(set) var utterances: [Utterance] = []
@@ -70,6 +73,9 @@ public struct MeetingMetadata: Codable, Hashable, Sendable {
     public var startedAt: Date
     public var duration: TimeInterval
     public var platform: MeetingPlatform?
+    /// Set once the user names the meeting, so a regenerated summary does not rename it.
+    public var titleEdited: Bool?
+    public var isTitleEdited: Bool { titleEdited ?? false }
 
     public init(title: String, startedAt: Date, duration: TimeInterval, platform: MeetingPlatform? = nil) {
         self.title = title
@@ -168,7 +174,8 @@ public struct Utterance: Codable, Hashable, Sendable, Identifiable {
     /// Another remote speaker talked at the same time, so attribution may be wrong. Always false
     /// when `Meeting.attribution` has no overlaps.
     public let isOverlapping: Bool
-    public let text: String
+    /// The user may correct this; `words` keep what the speech service heard.
+    public internal(set) var text: String
     public let words: [TimedWord]
 
     public var track: Track { speaker == .me ? .me : .remote }
@@ -212,7 +219,7 @@ public struct SourcedText: Codable, Hashable, Sendable {
 public struct CleanedTranscript: Codable, Hashable, Sendable {
     public struct Paragraph: Codable, Hashable, Sendable {
         public let speaker: SpeakerID
-        public let text: String
+        public internal(set) var text: String
         public let sources: [UtteranceID]
         public init(speaker: SpeakerID, text: String, sources: [UtteranceID]) {
             self.speaker = speaker
@@ -221,7 +228,7 @@ public struct CleanedTranscript: Codable, Hashable, Sendable {
         }
     }
 
-    public let paragraphs: [Paragraph]
+    public internal(set) var paragraphs: [Paragraph]
     public init(paragraphs: [Paragraph]) { self.paragraphs = paragraphs }
 }
 
@@ -248,11 +255,18 @@ public struct Summary: Codable, Hashable, Sendable {
 
     /// One or two sentences for the meeting list; nil when the provider gave none.
     public let headline: String?
+    /// A short name for the meeting; nil when the provider gave none.
+    public let title: String?
+    /// Names, products and jargon heard in the meeting, offered to the vocabulary.
+    public let terms: [String]?
     public let decisions: [SourcedText]
     public let discussionPoints: [SourcedText]
     public let actionItems: [ActionItem]
-    public init(headline: String? = nil, decisions: [SourcedText], discussionPoints: [SourcedText], actionItems: [ActionItem]) {
+    public init(headline: String? = nil, title: String? = nil, terms: [String]? = nil,
+                decisions: [SourcedText], discussionPoints: [SourcedText], actionItems: [ActionItem]) {
         self.headline = headline
+        self.title = title
+        self.terms = terms
         self.decisions = decisions
         self.discussionPoints = discussionPoints
         self.actionItems = actionItems

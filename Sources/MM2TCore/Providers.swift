@@ -63,6 +63,15 @@ public enum TranscriptionError: Error, Equatable, Sendable {
     case failed(String)
 }
 
+extension TranscriptionError: CustomStringConvertible {
+    /// The provider's own words, which is what a failed meeting shows.
+    public var description: String {
+        switch self {
+        case .unreachable(let message), .failed(let message): message
+        }
+    }
+}
+
 /// A word with the provider's speaker label, e.g. Scribe's `speaker_0`. Labels are local to one file.
 public struct LabeledWord: Hashable, Codable, Sendable {
     public let word: TimedWord
@@ -110,6 +119,8 @@ public struct LLMUtterance: Hashable, Sendable {
 
 public struct LLMTranscript: Hashable, Sendable {
     public let utterances: [LLMUtterance]
+    /// The user's vocabulary and known names: the spelling to prefer when speech recognition wrote a sound-alike.
+    public var glossary: [String] = []
 }
 
 public struct NameInferenceRequest: Hashable, Sendable {
