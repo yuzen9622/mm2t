@@ -17,11 +17,13 @@ enum DebugSnapshot {
     static var isRequested: Bool { directory != nil }
 
     private static var selectMeeting: ((MeetingID) -> Void)?
+    private static var showSection: ((SidebarItem) -> Void)?
     private static weak var detail: MeetingDetailModel?
 
-    static func mainWindowAppeared(select: @escaping (MeetingID) -> Void) {
+    static func mainWindowAppeared(select: @escaping (MeetingID) -> Void, show: @escaping (SidebarItem) -> Void) {
         guard isRequested else { return }
         selectMeeting = select
+        showSection = show
     }
 
     static func detailAppeared(_ model: MeetingDetailModel) {
@@ -40,9 +42,15 @@ enum DebugSnapshot {
                 report["error"] = "no completed meeting in \(app.paths.meetings.path)"
                 return finish(report, in: directory)
             }
-            try? await Task.sleep(for: .milliseconds(800))
-            save(window(titled: true), to: directory.appending(path: "main-list.png"))
+            try? await Task.sleep(for: .milliseconds(1800))
+            save(window(titled: true), to: directory.appending(path: "main-home.png"))
+            for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.settings, "settings"), (.meetings, "list")] {
+                showSection?(section)
+                try? await Task.sleep(for: .milliseconds(900))
+                save(window(titled: true), to: directory.appending(path: "main-\(name).png"))
+            }
             saveCapsules(to: directory)
+            saveTips(to: directory)
             selectMeeting?(meeting.id)
             await waitFor { detail?.presentation != nil }
             for view in TranscriptView.allCases {
@@ -75,6 +83,33 @@ enum DebugSnapshot {
             app.capture.dismiss()
             finish(report, in: directory)
         }
+        #endif
+    }
+
+    /// Tooltips on controls in a window's corners and middle, to show each one stays inside it.
+    private static func saveTips(to directory: URL) {
+        #if DEBUG
+        let size = CGSize(width: 360, height: 150)
+        func control(_ title: LocalizedStringKey) -> some View {
+            Circle().fill(Palette.hover).frame(width: 32, height: 32).tip(title, show: true)
+        }
+        let view = VStack {
+            HStack { control("Back"); Spacer(); control("Play"); Spacer(); control("Speakers") }
+            Spacer()
+            HStack { control("Rename…"); Spacer(); control("Copy"); Spacer(); control("Delete…") }
+        }
+        .padding(8)
+        .frame(width: size.width, height: size.height)
+        .background(Palette.window)
+        .environment(\.tipBounds, size)
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: directory.appending(path: "tips.png"))
         #endif
     }
 

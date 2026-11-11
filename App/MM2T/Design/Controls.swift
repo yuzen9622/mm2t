@@ -229,29 +229,60 @@ struct ProgressLine: View {
     }
 }
 
-/// A small label naming what the pointer is over.
+/// The size of the window's content, so a tooltip can tell which sides of its control have room.
+/// Zero where no window set it; the tooltip then only avoids the top and left edges.
+private struct TipBoundsKey: EnvironmentKey {
+    static let defaultValue = CGSize.zero
+}
+
+extension EnvironmentValues {
+    var tipBounds: CGSize {
+        get { self[TipBoundsKey.self] }
+        set { self[TipBoundsKey.self] = newValue }
+    }
+}
+
+/// A small label naming what the pointer is over. It sits above its control, centered, and moves
+/// below or lines up with an edge when the window has no room there.
 struct TipModifier: ViewModifier {
     let text: Text
     let show: Bool
+    @Environment(\.tipBounds) private var bounds
+
+    /// The label's height plus the gap to the control, and the widest half-label the app shows.
+    private static let clearance: CGFloat = 36
+    private static let reach: CGFloat = 64
 
     func body(content: Content) -> some View {
-        content.overlay(alignment: .top) {
-            if show {
-                text
-                    .font(Typo.captionStrong)
-                    .foregroundStyle(.white)
-                    .fixedSize()
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(hex: 0x1B1B1D), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
-                    .offset(y: -30)
-                    .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
-                    .allowsHitTesting(false)
-                    .zIndex(10)
+        content.overlay {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .global)
+                let below = frame.minY < Self.clearance
+                let horizontal: HorizontalAlignment = frame.midX < Self.reach ? .leading
+                    : bounds.width > 0 && frame.midX > bounds.width - Self.reach ? .trailing : .center
+                ZStack {
+                    if show {
+                        text
+                            .font(Typo.captionStrong)
+                            .foregroundStyle(.white)
+                            .fixedSize()
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(hex: 0x1B1B1D), in: Capsule())
+                            .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
+                            .offset(y: below ? 30 : -30)
+                            .transition(.scale(scale: 0.85, anchor: below ? .top : .bottom).combined(with: .opacity))
+                    }
+                }
+                // A frame the control's size with the label hanging out of it: the label keeps its own
+                // width, so aligning to an edge makes it grow away from the window's border.
+                .frame(width: proxy.size.width, height: proxy.size.height,
+                       alignment: Alignment(horizontal: horizontal, vertical: below ? .bottom : .top))
+                .motion(Motion.reveal, value: show)
             }
+            .allowsHitTesting(false)
         }
-        .motion(Motion.reveal, value: show)
+        .zIndex(show ? 10 : 0)
     }
 }
 
