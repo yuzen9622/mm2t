@@ -30,6 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         #endif
+        #if DEBUG
+        if DebugBenchmark.isRequested {
+            Task { await app.launch(watchMeetings: false) }
+            DebugBenchmark.run(app: app)
+            return
+        }
+        #endif
         Updates.start()
         Task { await app.launch() }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
