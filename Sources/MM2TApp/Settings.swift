@@ -14,7 +14,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// source is unreachable, as `TranscriptionChain` defines.
     public var transcriptionOrder: [TranscriptionSource] = [.cloud]
     public var selfHostedURL: URL?
-    public var vocabulary: [String] = []
+    /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
+    public private(set) var vocabulary: [String] = []
+    /// The subset of `vocabulary` that mm2t added itself, from a meeting or from a correction.
+    public private(set) var learnedVocabulary: [String] = []
+    /// Learned terms the user deleted, so they are not learned again.
+    public private(set) var dismissedVocabulary: [String] = []
     public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
     public var hasCompletedOnboarding = false
@@ -28,13 +33,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         transcriptionOrder = try c.decodeIfPresent([TranscriptionSource].self, forKey: .transcriptionOrder) ?? defaults.transcriptionOrder
         selfHostedURL = try c.decodeIfPresent(URL.self, forKey: .selfHostedURL)
         vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? defaults.vocabulary
+        learnedVocabulary = try c.decodeIfPresent([String].self, forKey: .learnedVocabulary) ?? []
+        dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
         diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case transcriptionOrder, selfHostedURL, vocabulary, diarizationOrder, llmLocation, hasCompletedOnboarding
+        case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
+        case diarizationOrder, llmLocation, hasCompletedOnboarding
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
@@ -45,12 +53,41 @@ public struct AppSettings: Codable, Equatable, Sendable {
         return url
     }
 
-    /// One term per line or comma, blanks and duplicates dropped.
-    public static func vocabulary(from text: String) -> [String] {
-        var seen: Set<String> = []
-        return text.split(whereSeparator: { $0.isNewline || $0 == "," || $0 == "，" })
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    public enum TermSource: Sendable { case manual, learned }
+
+    public func source(of term: String) -> TermSource {
+        learnedVocabulary.contains(term) ? .learned : .manual
+    }
+
+    /// Adds one term per line or comma. A term the user types is theirs from then on, even if it
+    /// was learned or dismissed before; a learned term is skipped when known or dismissed.
+    public mutating func addVocabulary(_ text: String, source: TermSource) {
+        for term in text.split(whereSeparator: { $0.isNewline || $0 == "," || $0 == "，" }).map({ $0.trimmingCharacters(in: .whitespaces) })
+        where !term.isEmpty {
+            let existing = vocabulary.first { Self.same($0, term) }
+            switch source {
+            case .manual:
+                dismissedVocabulary.removeAll { Self.same($0, term) }
+                if let existing { learnedVocabulary.removeAll { $0 == existing } } else { vocabulary.append(term) }
+            case .learned:
+                guard existing == nil, !dismissedVocabulary.contains(where: { Self.same($0, term) }) else { continue }
+                vocabulary.append(term)
+                learnedVocabulary.append(term)
+            }
+        }
+    }
+
+    public mutating func removeVocabulary(_ term: String) {
+        guard vocabulary.contains(term) else { return }
+        vocabulary.removeAll { $0 == term }
+        if learnedVocabulary.contains(term) {
+            learnedVocabulary.removeAll { $0 == term }
+            dismissedVocabulary.append(term)
+        }
+    }
+
+    private static func same(_ a: String, _ b: String) -> Bool {
+        a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
     }
 }
 

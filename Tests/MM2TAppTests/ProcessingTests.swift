@@ -57,7 +57,7 @@ import Testing
         let server = try #require(AppSettings.selfHostedURL(from: " http://gpu.tailnet:8000 "))
         world.app.settings.settings.selfHostedURL = server
         world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud]
-        world.app.settings.settings.vocabulary = AppSettings.vocabulary(from: "mm2t, Typeless\nmm2t\n")
+        world.app.settings.settings.addVocabulary("mm2t, Typeless\nmm2t\n", source: .manual)
 
         let meeting = try await world.recordedMeeting()
         let processed = try await world.library.meeting(meeting.id)

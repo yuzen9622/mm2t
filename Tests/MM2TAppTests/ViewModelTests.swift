@@ -310,7 +310,7 @@ import Testing
         let defaults = UserDefaults(suiteName: "mm2t-settings-\(UUID().uuidString)")!
         let first = SettingsStore(defaults: defaults)
         first.settings.transcriptionOrder = [.selfHosted, .cloud]
-        first.settings.vocabulary = ["mm2t"]
+        first.settings.addVocabulary("mm2t", source: .manual)
         first.settings.hasCompletedOnboarding = true
         #expect(SettingsStore(defaults: defaults).settings == first.settings)
 

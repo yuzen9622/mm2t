@@ -12,7 +12,7 @@ import Testing
         world.catalog.offlineDownloaded[.llm]!.set(true)
         world.app.settings.settings.transcriptionOrder = [.local]
         world.app.settings.settings.llmLocation = .local
-        world.app.settings.settings.vocabulary = ["mm2t"]
+        world.app.settings.settings.addVocabulary("mm2t", source: .manual)
 
         let meeting = try await world.recordedMeeting()
         let processed = try await world.library.meeting(meeting.id)

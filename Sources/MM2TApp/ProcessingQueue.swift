@@ -39,6 +39,8 @@ public final class ProcessingQueue {
     /// Bumped whenever a meeting document may have changed, so open views reload.
     public private(set) var revision = 0
 
+    /// Called with each meeting a job finished processing, e.g. to learn its vocabulary.
+    @ObservationIgnored public var onCompleted: (@MainActor (Meeting) -> Void)?
     @ObservationIgnored private let makePipeline: @MainActor () throws -> PipelineBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
@@ -117,7 +119,9 @@ public final class ProcessingQueue {
                 meeting = try await pipeline.reseparateSpeakers(id)
             }
             switch meeting.status {
-            case .completed: jobs[id] = .completed
+            case .completed:
+                jobs[id] = .completed
+                onCompleted?(meeting)
             case .failed(let step, let reason): jobs[id] = .failed(step: step, reason: reason)
             case .pending(let step): jobs[id] = .failed(step: step, reason: "processing stopped before \(step.rawValue)")
             }
