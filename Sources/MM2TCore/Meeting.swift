@@ -277,7 +277,7 @@ public struct Summary: Codable, Hashable, Sendable {
 public enum SpeakerMention {
     public static func token(_ id: SpeakerID) -> String { "{{speaker:\(id.rawValue)}}" }
 
-    static func substitute(in text: String, name: (SpeakerID) -> String) -> String {
+    public static func substitute(in text: String, name: (SpeakerID) -> String) -> String {
         var result = ""
         var rest = Substring(text)
         while let open = rest.range(of: "{{speaker:"), let close = rest[open.upperBound...].range(of: "}}") {
