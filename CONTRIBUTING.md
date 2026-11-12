@@ -23,10 +23,24 @@
 
 CI（`.github/workflows/ci.yml`）會在每個 pull request 上執行第 1 到 3 項。
 
+## 分支
+
+- `development`：日常整合分支。從它開分支，pull request 也以它為目標。
+- `release`：只用來發布，由維護者從 `development` 合併，tag 只打在這個分支上。
+- `main`：預設分支，內容等於最新一次發布。請不要直接對它開 pull request。
+
+發布流程見 [docs/releasing.md](docs/releasing.md)。
+
+## 更新 CHANGELOG
+
+使用者看得到的變更（新功能、行為改變、修正、移除、安全性問題）都要在 [CHANGELOG.md](CHANGELOG.md) 的 `## [Unreleased]` 底下加一行，歸入 `Added`、`Changed`、`Deprecated`、`Removed`、`Fixed` 或 `Security`，用繁體中文（臺灣用語）寫，描述使用者感受到的改變而不是程式細節。純內部重構、測試與 CI 調整不需要寫。
+
+維護者發布時，會把 `[Unreleased]` 的內容移到新的版本標題底下。Release workflow 把該版本的區段當作 GitHub Release 與自動更新的版本說明，區段不存在時發布會失敗。
+
 ## Commit 與 pull request
 
 - Commit 訊息採 [Conventional Commits](https://www.conventionalcommits.org/)，例如 `feat(app): ...`、`fix(diarization): ...`、`build: ...`。
-- 一個 pull request 只做一件事。說明為什麼要改，以及你怎麼驗證。
+- Pull request 以 `development` 為目標。一個 pull request 只做一件事，說明為什麼要改，以及你怎麼驗證，並更新 CHANGELOG（見下方）。
 - 新加入的相依套件或模型，授權必須與 AGPL-3.0 相容，並加進 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 貢獻者授權協議（CLA）
@@ -41,7 +55,7 @@ CI（`.github/workflows/ci.yml`）會在每個 pull request 上執行第 1 到 3
 
 ### 怎麼強制執行
 
-CLA Assistant 會在每個 pull request 上回報 `license/cla` 狀態檢查。`main` 分支的保護規則要求這項檢查通過，所以沒有簽 CLA 的 pull request 無法合併。
+CLA Assistant 會在每個 pull request 上回報 `license/cla` 狀態檢查。`development` 與 `release` 分支的保護規則要求這項檢查通過，所以沒有簽 CLA 的 pull request 無法合併。
 
 簽署紀錄（GitHub 帳號、簽署時間、CLA 版本）由 CLA Assistant 保存。
 
@@ -51,7 +65,7 @@ CLA Assistant 會在每個 pull request 上回報 `license/cla` 狀態檢查。`
 
 1. 建立一個公開的 GitHub Gist，內容是 `CLA.md` 的全文。CLA Assistant 從 Gist 讀取協議內容。
 2. 用 GitHub 帳號登入 [cla-assistant.io](https://cla-assistant.io)，選擇 `yuzen9622/mm2t` 儲存庫與上一步的 Gist，按 **Link**。
-3. 在 GitHub 儲存庫的 **Settings > Branches**（或 **Rules > Rulesets**）為 `main` 加上規則：合併前必須通過 `license/cla` 狀態檢查。同一條規則也可以要求 CI 的 `Swift package tests` 與 `App build and translations` 通過。
+3. 在 GitHub 儲存庫的 **Settings > Branches**（或 **Rules > Rulesets**）為 `development` 與 `release` 加上規則：合併前必須通過 `license/cla` 狀態檢查。同一條規則也可以要求 CI 的 `Swift package tests` 與 `App build and translations` 通過。
 4. 開一個測試用的 pull request，確認 CLA Assistant 有留言，且 `license/cla` 出現在檢查清單中。
 
 修改 `CLA.md` 時，同步更新 Gist。CLA Assistant 會要求所有人重新簽署新版本。
