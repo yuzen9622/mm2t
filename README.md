@@ -80,6 +80,26 @@ macOS 依程式碼簽章記住權限。用 ad-hoc 簽章時，每次重新建置
 
 說話者分群模型（約 210 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
 
+### Google Calendar 的 Desktop OAuth 本機設定
+
+Google OAuth Client 必須是「電腦版應用程式」，且 `App/Config/Info.plist` 的 `MM2TGoogleClientID` 必須對應同一個 Client。若 Google 回報 `client_secret_required`，可由你在自己的 Terminal 輸入該 Client 既有的 secret，不要貼進聊天、Issue、命令列參數或 Git。
+
+```bash
+# 只在自己的互動式 Terminal 執行；輸入不回顯，也不進 shell history
+python3 App/Tools/google_oauth.py configure
+
+# 使用既有 Apple Development 憑證建置；不會開啟或重啟 App
+python3 App/Tools/google_oauth.py build --team <你的 Team ID>
+```
+
+設定存放在 Git 忽略的 `App/Config/GoogleOAuth.local.plist`，權限為 `0600`。工具每次讀取當下的原始 Info.plist，保留 icon 等設定，僅在私有暫存副本加入 `MM2TGoogleClientSecret`，再交給 Xcode；不修改原始 Info.plist 或 Xcode 專案，也不把 secret 值放在建置參數中。一般 `xcodebuild`／Xcode 的 Build 不會自動載入此本機設定；需要 Google secret 的版本請用上述工具建置。
+
+**Desktop client_secret 會包含在產出的 App bundle，能被取出，不是 App 身分或機密性的證明。** 它僅供 Google token 端點的協定相容；登入仍使用系統瀏覽器、每次獨立的 PKCE S256，以及成功、取消和錯誤回呼都必須通過的 state 驗證。secret 只送到 Google 的 HTTPS token/refresh POST，不放在授權網址、回呼頁、Microsoft 請求或診斷中。不要提交本機設定、分享含憑證的建置紀錄，或在未確認分發需求前上傳該產物。
+
+建置完成後，等目前錄音／轉錄處理結束，再自行結束舊 App 並開啟 `.build/xcode/Build/Products/Debug/mm2t.app`。首次真實登入仍需你在 Google 的系統瀏覽器畫面完成授權。
+
+本機設定工具的測試只使用合成資料：`python3 -m unittest discover -s App/Tools -p 'test_google_oauth.py'`。
+
 ### UI 字串翻譯
 
 UI 字串以英文寫在程式碼裡，繁體中文翻譯放在 `App/Tools/zh-Hant.json`。建置之後執行下面的指令，它會重新產生 `App/MM2T/Localizable.xcstrings`，並在有字串缺翻譯或有翻譯沒用到時回傳非零：
