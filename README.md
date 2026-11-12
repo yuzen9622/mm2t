@@ -69,7 +69,7 @@ mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不
 </p>
 
 <p align="center">
-  <video width="880">
+  <video width="880" controls>
   <source src="./docs/assets/video/mm2t-zh.mp4" type="video/mp4" >
   </video>
 </p>
