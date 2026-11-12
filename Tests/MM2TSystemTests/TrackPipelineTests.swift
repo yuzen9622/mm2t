@@ -91,8 +91,21 @@ func write(_ samples: [Float], to ring: CaptureRing, hostSeconds: Double, rate: 
     }
 }
 
+/// One folder per test process, removed when it exits; one a crashed run left behind is swept an hour later.
+let testScratch: URL = {
+    let files = FileManager.default
+    let parent = files.temporaryDirectory.appending(path: "mm2t-test-runs")
+    for old in (try? files.contentsOfDirectory(at: parent, includingPropertiesForKeys: [.creationDateKey])) ?? []
+    where (try? old.resourceValues(forKeys: [.creationDateKey]).creationDate).flatMap { $0 } ?? .distantFuture
+        < Date(timeIntervalSinceNow: -3600) {
+        try? files.removeItem(at: old)
+    }
+    atexit { try? FileManager.default.removeItem(at: testScratch) }
+    return parent.appending(path: UUID().uuidString)
+}()
+
 func temporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appending(path: "mm2t-system-tests-\(UUID().uuidString)")
+    let url = testScratch.appending(path: "mm2t-system-tests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }

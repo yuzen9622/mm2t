@@ -118,8 +118,21 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// One folder per test process, removed when it exits; one a crashed run left behind is swept an hour later.
+let testScratch: URL = {
+    let files = FileManager.default
+    let parent = files.temporaryDirectory.appending(path: "mm2t-test-runs")
+    for old in (try? files.contentsOfDirectory(at: parent, includingPropertiesForKeys: [.creationDateKey])) ?? []
+    where (try? old.resourceValues(forKeys: [.creationDateKey]).creationDate).flatMap { $0 } ?? .distantFuture
+        < Date(timeIntervalSinceNow: -3600) {
+        try? files.removeItem(at: old)
+    }
+    atexit { try? FileManager.default.removeItem(at: testScratch) }
+    return parent.appending(path: UUID().uuidString)
+}()
+
 func audioFile(_ name: String = "remote.wav") throws -> URL {
-    let dir = FileManager.default.temporaryDirectory.appending(path: "mm2t-provider-tests-\(UUID().uuidString)")
+    let dir = testScratch.appending(path: "mm2t-provider-tests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let url = dir.appending(path: name)
     try silentWAV(seconds: 0.2).write(to: url)
