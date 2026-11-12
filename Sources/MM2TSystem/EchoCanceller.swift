@@ -185,12 +185,15 @@ public struct EchoRemover: MicCleaner {
 
     public func clean(mic: URL, remote: URL) throws -> CleanedMic? {
         let total = try WAVFormat.frameCount(mic), shared = min(total, try WAVFormat.frameCount(remote))
-        guard total > 0 else { return nil }
+        guard total > 0, shared > 0 else { return nil }
         let rate = try WAVFormat.read(mic, frames: 0..<1).sampleRate
+        // Tracks at different rates do not line up sample for sample; the recorder never writes them so.
+        guard rate > 0, try WAVFormat.read(remote, frames: 0..<1).sampleRate == rate else { return nil }
         let chunk = Self.chunkSeconds * rate
         var samples: [Int16] = []
         samples.reserveCapacity(total)
-        var profile = EchoProfile(frameDuration: EchoCanceller.profileFrame, before: [], after: [])
+        var profile = EchoProfile(
+            frameDuration: Double(max(1, Int(EchoCanceller.profileFrame * Double(rate)))) / Double(rate), before: [], after: [])
         var removedAny = false
         for start in stride(from: 0, to: total, by: chunk) {
             let range = start..<min(start + chunk, total)
