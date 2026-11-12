@@ -1,12 +1,19 @@
 import AppKit
+import MM2TApp
 import SwiftUI
 
-/// Story 21: no mm2t window may appear in a screen share or screenshot. Each SwiftUI root sets it
-/// as soon as its view joins a window, and these observers catch any window AppKit creates on its
-/// own (menu bar panel, sheets, alerts) when it first shows.
+/// Story 21: no mm2t window may appear in a screen share or screenshot, unless the user turns off
+/// "Hide mm2t from screen sharing and screenshots". Each SwiftUI root applies it as soon as its view
+/// joins a window, and these observers catch any window AppKit creates on its own (menu bar panel,
+/// sheets, alerts) when it first shows. Changing the setting re-applies it to every open window.
 @MainActor
 enum WindowSharing {
-    static func install() {
+    /// Follows `AppSettings.hidesFromScreenCapture`; on until the settings are read.
+    private(set) static var hides = true {
+        didSet { if hides != oldValue { NSApp.windows.forEach(exclude) } }
+    }
+
+    static func install(settings: SettingsStore?) {
         let center = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification,
                      NSWindow.didChangeOcclusionStateNotification, NSWindow.didUpdateNotification] {
@@ -14,20 +21,24 @@ enum WindowSharing {
                 MainActor.assumeIsolated { NSApp.windows.forEach(exclude) }
             }
         }
+        if let settings {
+            observeChanges { hides = settings.settings.hidesFromScreenCapture }
+        }
         NSApp.windows.forEach(exclude)
     }
 
     /// Debug-only escape hatch for recording promo footage (`MM2T_ALLOW_CAPTURE=1`): windows stay
-    /// capturable and the app uses sample calendars and no stored keys. Release builds always exclude.
+    /// capturable and the app uses sample calendars and no stored keys. Release builds always follow the setting.
     #if DEBUG
     static let allowsCapture = ProcessInfo.processInfo.environment["MM2T_ALLOW_CAPTURE"] == "1"
     #else
     static let allowsCapture = false
     #endif
 
+    /// Hides `window` from capture, or makes it capturable again, as the setting says.
     static func exclude(_ window: NSWindow) {
-        if allowsCapture { return }
-        if window.sharingType != .none { window.sharingType = .none }
+        let type: NSWindow.SharingType = hides && !allowsCapture ? .none : .readOnly
+        if window.sharingType != type { window.sharingType = type }
     }
 }
 

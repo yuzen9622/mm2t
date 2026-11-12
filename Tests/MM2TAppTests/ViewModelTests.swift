@@ -318,8 +318,23 @@ import Testing
         let migrated = SettingsStore(defaults: defaults).settings
         #expect(migrated.vocabulary == ["舊"])
         #expect(migrated.transcriptionOrder == [.cloud] && migrated.diarizationOrder == [.local, .transcription])
+        #expect(migrated.hidesFromScreenCapture)
 
         #expect(AppSettings.selfHostedURL(from: "gpu:8000") == nil)
         #expect(AppSettings.selfHostedURL(from: "ftp://gpu") == nil)
+    }
+
+    @Test func appLanguageIsReadFromTheAppsOwnDomainOnly() throws {
+        let suite = "mm2t-language-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(AppLanguage.current(in: defaults, domain: suite) == .system)
+        AppLanguage.traditionalChinese.save(in: defaults)
+        #expect(defaults.stringArray(forKey: AppLanguage.key) == ["zh-Hant"])
+        #expect(AppLanguage.current(in: defaults, domain: suite) == .traditionalChinese)
+        AppLanguage.english.save(in: defaults)
+        #expect(AppLanguage.current(in: defaults, domain: suite) == .english)
+        AppLanguage.system.save(in: defaults)
+        #expect(AppLanguage.current(in: defaults, domain: suite) == .system)
     }
 }

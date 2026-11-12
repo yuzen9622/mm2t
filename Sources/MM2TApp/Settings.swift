@@ -23,6 +23,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
     public var hasCompletedOnboarding = false
+    /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
+    /// user turns this off.
+    public var hidesFromScreenCapture = true
 
     public init() {}
 
@@ -38,11 +41,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
     }
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
-        case diarizationOrder, llmLocation, hasCompletedOnboarding
+        case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
@@ -105,6 +109,27 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private static func same(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
+    }
+}
+
+/// The language of the app's own UI. Stored the standard way, as `AppleLanguages` in the app's
+/// own defaults domain, which macOS reads at launch; a change applies after a restart.
+public enum AppLanguage: String, CaseIterable, Sendable {
+    case system
+    case english = "en"
+    case traditionalChinese = "zh-Hant"
+
+    public static let key = "AppleLanguages"
+
+    /// What the app's own domain says; `.system` when it sets nothing and the Mac's order applies.
+    /// `domain` is the defaults' persistent domain name: the bundle identifier for `.standard`.
+    public static func current(in defaults: UserDefaults, domain: String) -> AppLanguage {
+        guard let first = (defaults.persistentDomain(forName: domain)?[key] as? [String])?.first else { return .system }
+        return allCases.first { $0 != .system && first.hasPrefix($0.rawValue) } ?? .system
+    }
+
+    public func save(in defaults: UserDefaults) {
+        if self == .system { defaults.removeObject(forKey: Self.key) } else { defaults.set([rawValue], forKey: Self.key) }
     }
 }
 

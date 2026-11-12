@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        WindowSharing.install()
+        WindowSharing.install(settings: app?.settings)
         guard let app else { return }
         floating = FloatingPanelController(app: app)
         DebugRecorder.start(app: app)
