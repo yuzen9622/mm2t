@@ -1,5 +1,6 @@
 import AppKit
 import MM2TApp
+import MM2TProviders
 import Observation
 
 @MainActor
@@ -14,13 +15,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
                 ? AppController.live(defaults: DebugRecorder.defaults, credentials: NoCredentials(), signedInPage: signedIn,
                                      calendars: DebugSnapshot.sampleCalendars)
-                : AppController.live(defaults: DebugRecorder.defaults, signedInPage: signedIn)
+                : AppController.live(defaults: DebugRecorder.defaults, credentials: Self.credentials, signedInPage: signedIn)
             startupError = nil
         } catch {
             app = nil
             startupError = String(describing: error)
         }
         super.init()
+    }
+
+    /// Debug builds can point at a throwaway keychain service (MM2T_KEYCHAIN_SERVICE) so keychain
+    /// experiments never touch the real stored keys.
+    private static var credentials: KeychainCredentialStore {
+        #if DEBUG
+        if let service = ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_SERVICE"] {
+            return KeychainCredentialStore(service: service)
+        }
+        #endif
+        return KeychainCredentialStore()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
