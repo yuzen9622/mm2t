@@ -9,6 +9,23 @@
 5. 下載上一個 Release 的 `appcast.xml`，加入新版本的項目與 EdDSA 簽章，並把 GitHub 自動產生的版本說明嵌入項目中。
 6. 建立 GitHub Release，上傳 DMG 與 `appcast.xml`。
 
+## 未簽章模式（暫時）
+
+還沒設定 `MACOS_CERTIFICATE_P12_BASE64` secret 時，workflow 的「Choose signed or unsigned mode」步驟會切到未簽章模式，改做：
+
+1. 用 Release 組態封存 App，以 ad-hoc 簽章（`CODE_SIGN_IDENTITY=-`）。因為 ad-hoc 簽章沒有 Team ID，hardened runtime 的 library validation 會拒絕載入 Sparkle 與 llama 等 framework，所以 workflow 會加上 `com.apple.security.cs.disable-library-validation` entitlement，再用 `codesign --force --sign -` 重新簽 App 本身（framework 保留 Xcode 給的 ad-hoc 簽章）。
+2. 建立同樣格式的 `mm2t-X.Y.Z.dmg`，不簽章、不公證。
+3. 跳過 Sparkle 公鑰檢查與 appcast，Release 只上傳 DMG。
+4. 在 GitHub 自動產生的版本說明前面，加上未簽章 App 的安裝說明（按右鍵 **打開**、**系統設定 > 隱私權與安全性 > 仍要打開**，或 `xattr -dr com.apple.quarantine /Applications/mm2t.app`）。
+
+未簽章版本的限制：
+
+- 使用者第一次打開時會看到 Gatekeeper 警告，必須依版本說明手動允許。
+- 沒有 appcast，`SUPublicEDKey` 也還是佔位字串，App 內不會出現 **檢查更新⋯**，使用者要自己回 Releases 下載新版。
+- ad-hoc 簽章的身分每個版本都不同，更新後 macOS 可能重新詢問麥克風、系統音訊錄製等權限，鑰匙圈中的 API 金鑰也可能要求重新允許存取。
+
+完成下面「一次性設定」的第 2 到第 4 步後，下一個 tag 就會自動走簽章、公證與 appcast 的流程，不需要修改 workflow。注意第一次切到簽章版時，舊的未簽章版本沒有 appcast 可以檢查，使用者仍要手動下載一次。
+
 App 的 `SUFeedURL` 是 `https://github.com/yuzen9622/mm2t/releases/latest/download/appcast.xml`，永遠指向最新一個正式 Release 的 appcast。每個 Release 的 appcast 都包含最近 3 個版本。
 
 ## 一次性設定
@@ -73,7 +90,7 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
    rm sparkle_private_key.txt
    ```
 
-`SUPublicEDKey` 還是佔位字串時，release workflow 會在第一步失敗，App 也不會啟動 Sparkle。
+`SUPublicEDKey` 還是佔位字串時，簽章模式的 release workflow 會在檢查公鑰的步驟失敗，App 也不會啟動 Sparkle。
 
 ### Secret 一覽
 

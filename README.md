@@ -19,9 +19,9 @@ mm2t 是原生 macOS 會議記錄 App。它常駐選單列，在 Google Meet、M
 2. 打開 DMG，把 `mm2t.app` 拖到「應用程式」資料夾。
 3. 從「應用程式」打開 mm2t。
 
-DMG 和 App 都用 Developer ID 簽章並經過 Apple 公證，打開時不會出現「無法驗證開發者」的警告。
+目前的版本還沒有 Developer ID 簽章與 Apple 公證，第一次打開時 macOS 會擋下來：在「應用程式」中按住 Control 點一下 `mm2t.app` 選 **打開**；若沒有「打開」選項，到 **系統設定 > 隱私權與安全性** 按 **仍要打開**。每個 Release 頁面都有完整步驟。
 
-mm2t 用 [Sparkle](https://sparkle-project.org) 檢查更新。第二次啟動時它會詢問你要不要自動檢查；之後也可以從選單列選單的 **檢查更新⋯** 手動檢查。
+正式簽章的版本會用 Sparkle 檢查更新（未簽章版本不會自動更新，請回 GitHub Releases 下載新版）。mm2t 用 [Sparkle](https://sparkle-project.org) 檢查更新。第二次啟動時它會詢問你要不要自動檢查；之後也可以從選單列選單的 **檢查更新⋯** 手動檢查。
 
 ## 第一次使用：授予權限
 
