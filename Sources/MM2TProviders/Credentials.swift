@@ -14,7 +14,7 @@ public struct KeychainError: Error, Equatable, Sendable, CustomStringConvertible
     public let status: OSStatus
     public var description: String {
         let reason = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
-        return "無法存取鑰匙圈：\(reason)"
+        return String(localized: "Couldn't access the keychain: \(reason)", bundle: .main)
     }
 }
 

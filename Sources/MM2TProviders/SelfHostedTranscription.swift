@@ -61,7 +61,7 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             let response = try await session.send(request, for: .selfHosted)
             if response.status == 401 {
                 return .rejected(token == nil
-                    ? "伺服器要求 Token。請在設定填入伺服器的 MM2T_SERVER_TOKEN。"
+                    ? String(localized: "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.", bundle: .main)
                     : ProviderError(.selfHosted, .invalidCredential).description)
             }
             return .valid

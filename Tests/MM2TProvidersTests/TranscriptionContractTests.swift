@@ -102,7 +102,7 @@ struct ContractCase: CustomTestStringConvertible, Sendable {
             try await chain.transcribe(audio: try audioFile(), hints: [], labelSpeakers: false)
         }
         guard case .failed(let message) = error else { Issue.record("expected .failed, got \(String(describing: error))"); return }
-        #expect(message.contains("無效"))
+        #expect(message.contains("invalid"))
         #expect(fallback.requests.isEmpty)
     }
 

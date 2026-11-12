@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ couldn't read this recording. The file may be damaged or silent.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 無法讀取這段錄音。錄音檔可能已損毀或沒有聲音。"
+          }
+        }
+      }
+    },
+    "%@ declined to process this meeting under its content safety policy.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 因內容安全政策拒絕處理這場會議。"
+          }
+        }
+      }
+    },
     "%@ detected": {
       "localizations": {
         "zh-Hant": {
@@ -21,12 +41,92 @@
         }
       }
     },
+    "%@ had an internal error. Try again later.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 處理時發生內部錯誤。請稍後重試。"
+          }
+        }
+      }
+    },
+    "%@ is invalid or has expired. Enter it again in Settings and save.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 無效或已過期。請到設定重新填入後儲存。"
+          }
+        }
+      }
+    },
+    "%@ is temporarily unavailable (busy or under maintenance). Try again later.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 暫時無法服務（忙碌或維護中），請稍後重試。"
+          }
+        }
+      }
+    },
+    "%@ isn't allowed to use this feature, or the account or project is restricted. Check the key's permissions and the account status in the %@ console.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 沒有這項功能的權限，或帳號／專案受到限制。請到 %2$@ 後台檢查 Key 的權限與帳號狀態。"
+          }
+        }
+      }
+    },
+    "%@ isn't fully downloaded or couldn't load. Download the model again in Settings.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 的模型尚未下載完整或無法載入。請到設定重新下載模型。"
+          }
+        }
+      }
+    },
     "%@ meeting": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "%@ 會議"
+          }
+        }
+      }
+    },
+    "%@ rejected this request. Try again; if it keeps failing, please report it.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 拒絕了這次請求的內容。請重試；若一直失敗，請回報這個問題。"
+          }
+        }
+      }
+    },
+    "%@ reports that a usage or rate limit was reached. Try again later, or check your plan's quota in the %@ console.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 回報已達用量或速率上限。請稍後重試，或到 %2$@ 後台檢查方案額度。"
+          }
+        }
+      }
+    },
+    "%@ returned a result in an unexpected format. Try again; if it keeps failing, please report it.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 回傳的結果格式不正確。請重試；若一直失敗，請回報這個問題。"
           }
         }
       }
@@ -461,6 +561,16 @@
         }
       }
     },
+    "Couldn't access the keychain: %@": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法存取鑰匙圈：%@"
+          }
+        }
+      }
+    },
     "Couldn't change speakers": {
       "localizations": {
         "zh-Hant": {
@@ -477,6 +587,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連上 %@。"
+          }
+        }
+      }
+    },
+    "Couldn't reach %@. Check that the host is on, on the same local network or Tailscale as this Mac, and that the URL in Settings is correct.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線到%@。請確認主機已開機、與這台 Mac 在同一個區網或 Tailscale，以及設定中的網址正確。"
+          }
+        }
+      }
+    },
+    "Couldn't reach %@. Check your internet connection and try again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線到 %@。請確認網路連線後重試。"
           }
         }
       }
@@ -2221,12 +2351,32 @@
         }
       }
     },
+    "The recording is larger than %@ accepts. Use another transcription source.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音檔超過 %@ 允許的大小上限。請改用其他轉錄來源。"
+          }
+        }
+      }
+    },
     "The recording is safe but could not be added to your meetings: %@. mm2t will try again at next launch.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "錄音已保存，但無法加入會議清單：%@。mm2t 下次啟動時會再試一次。"
+          }
+        }
+      }
+    },
+    "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器要求 Token。請在設定填入伺服器的 MM2T_SERVER_TOKEN。"
           }
         }
       }
@@ -2277,6 +2427,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "這場會議還沒處理。"
+          }
+        }
+      }
+    },
+    "This meeting is longer than %@ can process at once.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這場會議太長，超過 %@ 單次能處理的上限。"
           }
         }
       }
@@ -2451,6 +2611,16 @@
         }
       }
     },
+    "Your %@ account is out of credit. Top up or upgrade your plan in the %@ console, then try again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ 帳號額度不足。請到 %2$@ 後台儲值或升級方案後重試。"
+          }
+        }
+      }
+    },
     "Your meetings": {
       "localizations": {
         "zh-Hant": {
@@ -2497,16 +2667,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "你的常用詞"
-          }
-        }
-      }
-    },
-    "Zoom 會議": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zoom 會議"
           }
         }
       }
@@ -2657,6 +2817,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "自架伺服器 Token"
+          }
+        }
+      }
+    },
+    "the on-device summary model": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機語言模型"
+          }
+        }
+      }
+    },
+    "the on-device transcription model": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機轉錄"
+          }
+        }
+      }
+    },
+    "the self-hosted server token": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自架伺服器 Token"
+          }
+        }
+      }
+    },
+    "the self-hosted transcription server": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自架轉錄伺服器"
           }
         }
       }

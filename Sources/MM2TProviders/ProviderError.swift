@@ -8,20 +8,21 @@ public enum Service: String, Sendable, CaseIterable {
     case localTranscription
     case localLLM
 
+    /// User-facing text here is looked up in the app's String Catalog (`Bundle.main`), so it shows in the UI language.
     var displayName: String {
         switch self {
         case .elevenLabs: "ElevenLabs"
-        case .selfHosted: "自架轉錄伺服器"
+        case .selfHosted: String(localized: "the self-hosted transcription server", bundle: .main)
         case .gemini: "Gemini"
-        case .localTranscription: "本機轉錄"
-        case .localLLM: "本機語言模型"
+        case .localTranscription: String(localized: "the on-device transcription model", bundle: .main)
+        case .localLLM: String(localized: "the on-device summary model", bundle: .main)
         }
     }
 
     var keyName: String {
         switch self {
         case .elevenLabs: "ElevenLabs API Key"
-        case .selfHosted: "自架伺服器 Token"
+        case .selfHosted: String(localized: "the self-hosted server token", bundle: .main)
         case .gemini: "Gemini API Key"
         case .localTranscription, .localLLM: displayName
         }
@@ -66,38 +67,41 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
 
     public var description: String {
         let name = service.displayName
-        switch kind {
+        let key = service.keyName
+        let text = switch kind {
+        case .unreachable where service == .selfHosted:
+            String(localized: "Couldn't reach \(name). Check that the host is on, on the same local network or Tailscale as this Mac, and that the URL in Settings is correct.", bundle: .main)
         case .unreachable:
-            return service == .selfHosted
-                ? "無法連線到\(name)。請確認主機已開機、與這台 Mac 在同一個區網或 Tailscale，以及設定中的網址正確。"
-                : "無法連線到 \(name)。請確認網路連線後重試。"
+            String(localized: "Couldn't reach \(name). Check your internet connection and try again.", bundle: .main)
         case .unavailable:
-            return "\(name) 暫時無法服務（忙碌或維護中），請稍後重試。"
+            String(localized: "\(name) is temporarily unavailable (busy or under maintenance). Try again later.", bundle: .main)
         case .invalidCredential:
-            return "\(service.keyName) 無效或已過期。請到設定重新填入後儲存。"
+            String(localized: "\(key) is invalid or has expired. Enter it again in Settings and save.", bundle: .main)
         case .permissionDenied:
-            return "\(service.keyName) 沒有這項功能的權限，或帳號／專案受到限制。請到 \(name) 後台檢查 Key 的權限與帳號狀態。"
+            String(localized: "\(key) isn't allowed to use this feature, or the account or project is restricted. Check the key's permissions and the account status in the \(name) console.", bundle: .main)
         case .outOfCredit:
-            return "\(name) 帳號額度不足。請到 \(name) 後台儲值或升級方案後重試。"
+            String(localized: "Your \(name) account is out of credit. Top up or upgrade your plan in the \(name) console, then try again.", bundle: .main)
         case .rateLimited:
-            return "\(name) 回報已達用量或速率上限。請稍後重試，或到 \(name) 後台檢查方案額度。"
+            String(localized: "\(name) reports that a usage or rate limit was reached. Try again later, or check your plan's quota in the \(name) console.", bundle: .main)
         case .rejectedInput:
-            return "\(name) 拒絕了這次請求的內容。請重試；若一直失敗，請回報這個問題。"
+            String(localized: "\(name) rejected this request. Try again; if it keeps failing, please report it.", bundle: .main)
         case .audioTooLarge:
-            return "錄音檔超過 \(name) 允許的大小上限。請改用其他轉錄來源。"
+            String(localized: "The recording is larger than \(name) accepts. Use another transcription source.", bundle: .main)
         case .audioUnreadable:
-            return "\(name) 無法讀取這段錄音。錄音檔可能已損毀或沒有聲音。"
+            String(localized: "\(name) couldn't read this recording. The file may be damaged or silent.", bundle: .main)
         case .serviceError:
-            return "\(name) 處理時發生內部錯誤。請稍後重試。"
+            String(localized: "\(name) had an internal error. Try again later.", bundle: .main)
         case .malformedResponse:
-            return "\(name) 回傳的結果格式不正確。請重試；若一直失敗，請回報這個問題。"
+            String(localized: "\(name) returned a result in an unexpected format. Try again; if it keeps failing, please report it.", bundle: .main)
         case .blocked:
-            return "\(name) 因內容安全政策拒絕處理這場會議。"
+            String(localized: "\(name) declined to process this meeting under its content safety policy.", bundle: .main)
         case .meetingTooLong:
-            return "這場會議太長，超過 \(name) 單次能處理的上限。"
+            String(localized: "This meeting is longer than \(name) can process at once.", bundle: .main)
         case .modelUnavailable:
-            return "\(name) 的模型尚未下載完整或無法載入。請到設定重新下載模型。"
+            String(localized: "\(name) isn't fully downloaded or couldn't load. Download the model again in Settings.", bundle: .main)
         }
+        // Service names are lowercase so they read well mid-sentence; a sentence still starts with a capital.
+        return text.prefix(1).uppercased() + text.dropFirst()
     }
 
     package var asTranscriptionError: TranscriptionError {

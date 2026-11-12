@@ -1,0 +1,70 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSAppleEventsUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t reads the address of your browser’s current tab to tell whether you’re in a Google Meet, Teams, Zoom, or Webex meeting on the web."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 會讀取瀏覽器目前分頁的網址，判斷你是否正在開 Google Meet、Teams、Zoom 或 Webex 網頁版會議。"
+          }
+        }
+      }
+    },
+    "NSAudioCaptureUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t records only the audio your meeting app plays, as the track for remote participants in your meeting notes."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 只錄下會議 App 播放的聲音，作為會議記錄中遠端與會者的音軌。"
+          }
+        }
+      }
+    },
+    "NSCalendarsFullAccessUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t shows today’s and tomorrow’s events on its home screen so you can open meeting links directly. Your events never leave this Mac."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 會在首頁顯示你今天與明天的行程，並讓你直接打開會議連結。行程不會離開這台 Mac。"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t records your microphone as the “Me” track of your meeting notes."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 會錄下你的麥克風，作為會議記錄中「我」的音軌。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

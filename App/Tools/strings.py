@@ -11,8 +11,11 @@ import sys
 
 here = pathlib.Path(__file__).resolve().parent
 derived = pathlib.Path(sys.argv[1])
+intermediates = derived / "Build/Intermediates.noindex"
+# The app target, plus this repo's Swift package targets (their error text is looked up in the app's catalog).
+patterns = ["MM2T.build/*/mm2t.build/Objects-normal/*/*.stringsdata", "MM2TCore.build/*/*-t.build/Objects-normal/*/*.stringsdata"]
 keys = set()
-for path in glob.glob(str(derived / "Build/Intermediates.noindex/MM2T.build/*/mm2t.build/Objects-normal/*/*.stringsdata")):
+for path in (path for pattern in patterns for path in glob.glob(str(intermediates / pattern))):
     for entries in json.load(open(path)).get("tables", {}).values():
         keys.update(entry["key"] for entry in entries)
 if not keys:

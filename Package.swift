@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "MM2TCore",
+    defaultLocalization: "en",
     platforms: [.macOS("14.2")],
     products: [
         .library(name: "MM2TCore", targets: ["MM2TCore"]),

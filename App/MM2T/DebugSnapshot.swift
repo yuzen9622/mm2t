@@ -172,7 +172,7 @@ enum DebugSnapshot {
             }
             island(notch, open: true) {
                 HStack(spacing: 10) {
-                    Status(icon: "video", text: LocalizedStringKey(stringLiteral: "Zoom 會議"))
+                    Status(icon: "video", text: "\("Zoom") meeting")
                     CapsulePill("Record", filled: true) {}
                     CircleButton("Not This Time", icon: "x") {}
                 }
@@ -340,7 +340,7 @@ enum DebugSnapshot {
             bar(silent: true)
             Working(text: "Transcribing").capsuleChrome()
             HStack(spacing: 10) {
-                Status(icon: "video", text: LocalizedStringKey(stringLiteral: "Zoom 會議"))
+                Status(icon: "video", text: "\("Zoom") meeting")
                 CapsulePill("Record", filled: true) {}
                 CircleButton("Not This Time", icon: "x") {}
             }

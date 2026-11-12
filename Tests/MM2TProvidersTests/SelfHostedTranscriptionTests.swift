@@ -55,11 +55,11 @@ import Testing
     }
 
     static let failures: [(status: Int, code: String, says: String)] = [
-        (400, "invalid_audio", "無法讀取"),
-        (413, "payload_too_large", "大小上限"),
-        (401, "unauthorized", "Token 無效"),
-        (400, "invalid_vocabulary", "拒絕"),
-        (500, "engine_error", "內部錯誤"),
+        (400, "invalid_audio", "couldn't read"),
+        (413, "payload_too_large", "larger than"),
+        (401, "unauthorized", "token is invalid"),
+        (400, "invalid_vocabulary", "rejected"),
+        (500, "engine_error", "internal error"),
     ]
 
     @Test(arguments: failures)
@@ -91,7 +91,7 @@ import Testing
         guard case .rejected(let wrong) = await SelfHostedTranscription(baseURL: base, token: "tok", session: bad.session).validateKey() else {
             Issue.record("401 should reject"); return
         }
-        #expect(wrong.contains("Token 無效"))
+        #expect(wrong.contains("token is invalid"))
         guard case .rejected(let missing) = await SelfHostedTranscription(baseURL: base, token: nil, session: bad.session).validateKey() else {
             Issue.record("401 without a token should reject"); return
         }

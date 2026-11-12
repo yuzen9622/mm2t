@@ -95,15 +95,15 @@ import Testing
     }
 
     static let failures: [(status: Int, body: String, unreachable: Bool, says: String)] = [
-        (401, #"{"detail":{"type":"authentication_error","code":"invalid_api_key","message":"Invalid API key","request_id":"r1"}}"#, false, "無效"),
-        (401, #"{"detail":{"status":"quota_exceeded","message":"This request exceeds your quota."}}"#, false, "額度不足"),
-        (402, #"{"detail":{"type":"payment_required","code":"insufficient_credits","message":"x"}}"#, false, "額度不足"),
-        (403, #"{"detail":{"type":"authorization_error","code":"insufficient_permissions","message":"x"}}"#, false, "權限"),
-        (422, #"{"detail":[{"loc":["body","file"],"msg":"field required","type":"value_error.missing"}]}"#, false, "拒絕"),
-        (429, #"{"detail":{"type":"rate_limit_error","code":"concurrent_limit_exceeded","message":"x"}}"#, false, "上限"),
-        (500, #"{"detail":{"type":"internal_error","code":"internal_error","message":"x"}}"#, false, "內部錯誤"),
-        (503, #"{"detail":{"type":"service_unavailable","code":"maintenance","message":"x"}}"#, true, "暫時無法服務"),
-        (200, #"{"unexpected":true}"#, false, "格式不正確"),
+        (401, #"{"detail":{"type":"authentication_error","code":"invalid_api_key","message":"Invalid API key","request_id":"r1"}}"#, false, "invalid"),
+        (401, #"{"detail":{"status":"quota_exceeded","message":"This request exceeds your quota."}}"#, false, "out of credit"),
+        (402, #"{"detail":{"type":"payment_required","code":"insufficient_credits","message":"x"}}"#, false, "out of credit"),
+        (403, #"{"detail":{"type":"authorization_error","code":"insufficient_permissions","message":"x"}}"#, false, "isn't allowed"),
+        (422, #"{"detail":[{"loc":["body","file"],"msg":"field required","type":"value_error.missing"}]}"#, false, "rejected"),
+        (429, #"{"detail":{"type":"rate_limit_error","code":"concurrent_limit_exceeded","message":"x"}}"#, false, "limit"),
+        (500, #"{"detail":{"type":"internal_error","code":"internal_error","message":"x"}}"#, false, "internal error"),
+        (503, #"{"detail":{"type":"service_unavailable","code":"maintenance","message":"x"}}"#, true, "temporarily unavailable"),
+        (200, #"{"unexpected":true}"#, false, "unexpected format"),
     ]
 
     @Test(arguments: failures)

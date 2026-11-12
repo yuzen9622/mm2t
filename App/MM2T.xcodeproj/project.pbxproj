@@ -103,7 +103,7 @@
 				LastUpgradeCheck = 2700;
 			};
 			buildConfigurationList = A10000000000000000000901 /* Build configuration list for PBXProject "MM2T" */;
-			developmentRegion = "zh-Hant";
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
