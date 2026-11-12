@@ -204,9 +204,11 @@ struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
                 .scaleEffect(isOpen ? 1 : 0.9, anchor: .top)
                 .allowsHitTesting(isOpen)
             HStack(spacing: 0) {
-                leading.frame(width: Self.wing)
+                // EmptyView takes no space, even with a frame. Keep both wings present so
+                // a lone spinner stays beside the physical notch instead of shifting under it.
+                Color.clear.frame(width: Self.wing).overlay { leading }
                 Color.clear.frame(width: metrics.width)
-                trailing.frame(width: Self.wing)
+                Color.clear.frame(width: Self.wing).overlay { trailing }
             }
             .frame(height: metrics.height)
             .opacity(isOpen ? 0 : 1)

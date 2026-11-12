@@ -161,6 +161,9 @@ enum DebugSnapshot {
         }
         let view = VStack(spacing: 10) {
             island(notch, open: false) { bar() }
+            // Starting, saving, and processing have only a leading spinner. An empty trailing
+            // wing must still reserve its width or the spinner drifts under the physical notch.
+            island(notch, open: false, { Working(text: "Transcribing") }, leading: Spinner(), trailing: EmptyView())
             island(notch, open: false, { bar(paused: true) }, leading: Icon("player-pause-filled", size: 13).foregroundStyle(Palette.orange),
                    trailing: MiniMeter(level: nil))
             island(notch, open: true) { bar() }
@@ -176,6 +179,7 @@ enum DebugSnapshot {
             }
             island(notch, open: true) { Working(text: "Transcribing") }
             island(.none, open: false) { bar() }
+            island(.none, open: false, { Working(text: "Transcribing") }, leading: Spinner(), trailing: EmptyView())
             island(.none, open: true) { bar() }
         }
         .padding(16)
