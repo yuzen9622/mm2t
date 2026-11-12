@@ -8,6 +8,8 @@ import MM2TSystem
 public enum SetupIssue: Hashable, Sendable {
     case missingCredential(Credential)
     case missingSelfHostedURL
+    /// The OpenAI-compatible summary server needs a base URL and a model name.
+    case missingLLMEndpoint
     case noTranscriptionSource
     case diarizationModelsMissing
     case offlineModelMissing(OfflineModel)
@@ -39,13 +41,14 @@ public struct LocalSpeakerModels: Sendable {
 /// Makes the providers behind the pipeline's interfaces. The live catalog builds the network
 /// clients and the on-device models; tests substitute scripted ones.
 public protocol ProviderCatalog: Sendable {
-    func cloudTranscription(apiKey: Secret) -> any TranscriptionProvider
-    func selfHostedTranscription(url: URL, token: Secret?) -> any TranscriptionProvider
+    func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider
+    func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider
     func llm(apiKey: Secret) -> any LLMProvider
+    func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
     func localSpeakerModels() -> LocalSpeakerModels?
     /// nil until the model is on disk.
-    func localTranscription() -> (any TranscriptionProvider)?
+    func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)?
     /// nil until the model is on disk.
     func localLLM() -> (any LLMProvider)?
     var thresholds: MatchThresholds { get }
@@ -78,18 +81,18 @@ public struct PipelineSetup: Sendable {
             switch source {
             case .cloud:
                 if let key = try nonEmpty(.elevenLabsAPIKey) {
-                    routes.append(.init(.cloud, catalog.cloudTranscription(apiKey: key)))
+                    routes.append(.init(.cloud, catalog.cloudTranscription(apiKey: key, language: settings.transcriptionLanguage)))
                 } else {
                     issues.append(.missingCredential(.elevenLabsAPIKey))
                 }
             case .selfHosted:
                 if let url = settings.selfHostedURL {
-                    routes.append(.init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken))))
+                    routes.append(.init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken), language: settings.transcriptionLanguage)))
                 } else {
                     issues.append(.missingSelfHostedURL)
                 }
             case .local:
-                if let local = catalog.localTranscription() {
+                if let local = catalog.localTranscription(language: settings.transcriptionLanguage) {
                     routes.append(.init(.local, local))
                 } else {
                     issues.append(.offlineModelMissing(.transcription))
@@ -101,7 +104,17 @@ public struct PipelineSetup: Sendable {
         var llm: (any LLMProvider)?
         switch settings.llmLocation {
         case .cloud:
-            if let key = try nonEmpty(.geminiAPIKey) { llm = catalog.llm(apiKey: key) } else { issues.append(.missingCredential(.geminiAPIKey)) }
+            switch settings.cloudLLM {
+            case .gemini:
+                if let key = try nonEmpty(.geminiAPIKey) { llm = catalog.llm(apiKey: key) } else { issues.append(.missingCredential(.geminiAPIKey)) }
+            case .openAICompatible:
+                let model = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let url = settings.openAIBaseURL, !model.isEmpty {
+                    llm = catalog.openAICompatibleLLM(baseURL: url, apiKey: try nonEmpty(.openAICompatibleAPIKey), model: model)
+                } else {
+                    issues.append(.missingLLMEndpoint)
+                }
+            }
         case .local:
             if let local = catalog.localLLM() { llm = local } else { issues.append(.offlineModelMissing(.llm)) }
         }

@@ -188,15 +188,24 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let offlineDownloaded: [OfflineModel: Box<Bool>] = [.transcription: Box(false), .llm: Box(false)]
     let keysUsed = Box<[String]>([])
     let selfHostedURLs = Box<[URL]>([])
+    let languagesUsed = Box<[TranscriptionLanguage]>([])
+    let openAIEndpoints = Box<[String]>([])
 
-    func cloudTranscription(apiKey: Secret) -> any TranscriptionProvider {
+    func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
         keysUsed.update { $0.append("stt:" + apiKey.revealed) }
+        languagesUsed.update { $0.append(language) }
         return cloud
     }
 
-    func selfHostedTranscription(url: URL, token: Secret?) -> any TranscriptionProvider {
+    func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         selfHostedURLs.update { $0.append(url) }
+        languagesUsed.update { $0.append(language) }
         return selfHosted
+    }
+
+    func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
+        openAIEndpoints.update { $0.append("\(baseURL.absoluteString)|\(apiKey?.revealed ?? "-")|\(model)") }
+        return llm
     }
 
     func llm(apiKey: Secret) -> any LLMProvider {
@@ -208,8 +217,9 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         modelsDownloaded.get ? LocalSpeakerModels(diarizer: diarizer, embedder: ScriptedEmbedder()) : nil
     }
 
-    func localTranscription() -> (any TranscriptionProvider)? {
-        offlineDownloaded[.transcription]!.get ? onDeviceSTT : nil
+    func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
+        languagesUsed.update { $0.append(language) }
+        return offlineDownloaded[.transcription]!.get ? onDeviceSTT : nil
     }
 
     func localLLM() -> (any LLMProvider)? {

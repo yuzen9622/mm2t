@@ -5,6 +5,7 @@ public enum Service: String, Sendable, CaseIterable {
     case elevenLabs
     case selfHosted
     case gemini
+    case openAICompatible
     case localTranscription
     case localLLM
 
@@ -14,6 +15,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .elevenLabs: "ElevenLabs"
         case .selfHosted: String(localized: "the self-hosted transcription server", bundle: .main)
         case .gemini: "Gemini"
+        case .openAICompatible: String(localized: "the self-hosted summary model", bundle: .main)
         case .localTranscription: String(localized: "the on-device transcription model", bundle: .main)
         case .localLLM: String(localized: "the on-device summary model", bundle: .main)
         }
@@ -24,6 +26,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .elevenLabs: "ElevenLabs API Key"
         case .selfHosted: String(localized: "the self-hosted server token", bundle: .main)
         case .gemini: "Gemini API Key"
+        case .openAICompatible: String(localized: "the summary server API key", bundle: .main)
         case .localTranscription, .localLLM: displayName
         }
     }
@@ -69,7 +72,7 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
         let name = service.displayName
         let key = service.keyName
         let text = switch kind {
-        case .unreachable where service == .selfHosted:
+        case .unreachable where service == .selfHosted || service == .openAICompatible:
             String(localized: "Couldn't reach \(name). Check that the host is on, on the same local network or Tailscale as this Mac, and that the URL in Settings is correct.", bundle: .main)
         case .unreachable:
             String(localized: "Couldn't reach \(name). Check your internet connection and try again.", bundle: .main)

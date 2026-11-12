@@ -284,7 +284,9 @@
   "the on-device summary model": "本機語言模型",
   "the on-device transcription model": "本機轉錄",
   "the self-hosted server token": "自架伺服器 Token",
+  "the self-hosted summary model": "自架摘要模型",
   "the self-hosted transcription server": "自架轉錄伺服器",
+  "the summary server API key": "摘要伺服器 API 金鑰",
   "· Now": "· 進行中",
   "產品週會": "產品週會"
 }

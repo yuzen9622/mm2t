@@ -11,7 +11,7 @@ public enum KeyState: Equatable, Sendable {
     case saved
     case validating
     case checked(KeyCheck)
-    /// The self-hosted token is checked against the server, so the URL must be set first.
+    /// The self-hosted token and the OpenAI-compatible key are checked against their server, so its URL must be set first.
     case needsServerURL
     case storageFailed(String)
 }
@@ -27,13 +27,16 @@ public final class CredentialField: Identifiable {
     @ObservationIgnored private let store: any CredentialStoring
     @ObservationIgnored private let validator: any KeyValidating
     @ObservationIgnored private let selfHostedURL: @MainActor () -> URL?
+    @ObservationIgnored private let openAIEndpoint: @MainActor () -> (baseURL: URL, model: String)?
 
     public init(credential: Credential, store: any CredentialStoring, validator: any KeyValidating,
-                selfHostedURL: @escaping @MainActor () -> URL?) {
+                selfHostedURL: @escaping @MainActor () -> URL?,
+                openAIEndpoint: @escaping @MainActor () -> (baseURL: URL, model: String)? = { nil }) {
         self.credential = credential
         self.store = store
         self.validator = validator
         self.selfHostedURL = selfHostedURL
+        self.openAIEndpoint = openAIEndpoint
         load()
     }
 
@@ -71,6 +74,12 @@ public final class CredentialField: Identifiable {
                 return
             }
             request = .selfHosted(url: url, token: secret)
+        case .openAICompatibleAPIKey:
+            guard let endpoint = openAIEndpoint() else {
+                state = .needsServerURL
+                return
+            }
+            request = .openAICompatible(baseURL: endpoint.baseURL, apiKey: secret, model: endpoint.model)
         case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken:
             return  // Written by calendar sign-in, never typed into a key field.
         }
@@ -142,9 +151,12 @@ public final class SetupModel {
         self.suitability = suitability
         self.runningBrowsers = runningBrowsers
         self.checkSetup = checkSetup
-        fields = [Credential.elevenLabsAPIKey, .geminiAPIKey, .selfHostedToken].map {
+        fields = [Credential.elevenLabsAPIKey, .geminiAPIKey, .selfHostedToken, .openAICompatibleAPIKey].map {
             CredentialField(credential: $0, store: credentials, validator: validator,
-                            selfHostedURL: { settings.settings.selfHostedURL })
+                            selfHostedURL: { settings.settings.selfHostedURL },
+                            openAIEndpoint: {
+                                settings.settings.openAIBaseURL.map { ($0, settings.settings.openAIModel) }
+                            })
         }
         refresh()
     }

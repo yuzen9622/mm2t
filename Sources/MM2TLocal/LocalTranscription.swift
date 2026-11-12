@@ -34,14 +34,26 @@ public struct LocalTranscriptionModel: Sendable {
 /// unreachable, so every failure stops the chain with a message. Loads the model on first use.
 public struct LocalTranscription: TranscriptionProvider {
     let engine: WhisperEngine
+    let language: TranscriptionLanguage
 
-    public init(model: LocalTranscriptionModel) {
+    public init(model: LocalTranscriptionModel, language: TranscriptionLanguage = .auto) {
         engine = WhisperEngine(folder: model.snapshot.directory)
+        self.language = language
+    }
+
+    private init(engine: WhisperEngine, language: TranscriptionLanguage) {
+        self.engine = engine
+        self.language = language
+    }
+
+    /// The same loaded model told to expect another language; loading it takes minutes, so it is shared.
+    public func speaking(_ language: TranscriptionLanguage) -> LocalTranscription {
+        LocalTranscription(engine: engine, language: language)
     }
 
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         do {
-            return .unlabeled(try await engine.transcribe(audio: audio, hints: hints))
+            return .unlabeled(try await engine.transcribe(audio: audio, hints: hints, language: language))
         } catch let error as ProviderError {
             throw error.asTranscriptionError
         } catch is CancellationError {
@@ -60,11 +72,12 @@ actor WhisperEngine {
         self.folder = folder
     }
 
-    func transcribe(audio: URL, hints: [String]) async throws -> [TimedWord] {
+    /// With no language code Whisper detects the language itself from the first window.
+    func transcribe(audio: URL, hints: [String], language: TranscriptionLanguage) async throws -> [TimedWord] {
         let whisper = try await load()
         var options = DecodingOptions(
-            task: .transcribe, language: "zh", temperatureFallbackCount: 3, usePrefillPrompt: true,
-            detectLanguage: false, skipSpecialTokens: true, wordTimestamps: true, chunkingStrategy: .vad)
+            task: .transcribe, language: language.code, temperatureFallbackCount: 3, usePrefillPrompt: true,
+            detectLanguage: language.code == nil, skipSpecialTokens: true, wordTimestamps: true, chunkingStrategy: .vad)
         options.promptTokens = Self.promptTokens(hints, tokenizer: whisper.tokenizer)
         let results = try await whisper.transcribe(audioPath: audio.path, decodeOptions: options)
         return Self.words(results.flatMap(\.segments))
