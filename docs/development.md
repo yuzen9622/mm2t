@@ -25,7 +25,7 @@ open .build/xcode/Build/Products/Debug/mm2t.app
 
 macOS 依程式碼簽章記住權限。用 ad-hoc 簽章時，每次重新建置都可能需要重新授權。如果你有 Apple Development 憑證，改傳 `CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=<你的 Team ID>`，權限就能保留。
 
-自己建置的 App 也會用 Sparkle 檢查更新，但 Sparkle 只會安裝與目前 App 簽章相符的更新，所以 ad-hoc 簽章的建置會拒絕安裝正式版。要停用更新，把 `App/Config/Info.plist` 的 `SUPublicEDKey` 清空即可。
+自己建置的 App 也會用 Sparkle 檢查正式版的更新。開發時不想讓它檢查，把 `App/Config/Info.plist` 的 `SUPublicEDKey` 清空即可（不要 commit 這個改動）。
 
 說話者分群模型（約 210 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
 

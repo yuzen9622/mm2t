@@ -35,6 +35,12 @@ mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不
   <img src="docs/assets/feature-speakers.png" alt="標好說話者名字的逐字稿" width="880"/>
 </p>
 
+每個人的聲紋都存在「人物」頁，會分別記住他在會議室現場和線上通話時的聲音。
+
+<p align="center">
+  <img src="docs/assets/feature-voiceprints.png" alt="人物頁：每個人的聲紋與錄音情境" width="880"/>
+</p>
+
 ## 會議結束，紀錄就整理好了
 
 每場會議會產出四種內容：
@@ -56,7 +62,7 @@ mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不
 
 錄音、聲紋與會議紀錄都只存在本機，mm2t 沒有自己的伺服器。語音轉文字與摘要使用你自己的 API 金鑰（ElevenLabs、Google Gemini），費用直接由你的帳號支付；也可以改用自架的轉錄伺服器，讓音訊完全不離開你的設備。詳見 [隱私權政策](PRIVACY.md)。
 
-## 30 秒看懂 mm2t
+## 一分鐘看懂 mm2t
 
 <p align="center">
   <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4"><img src="docs/assets/poster.png" alt="播放 mm2t 介紹影片" width="880"/></a>
