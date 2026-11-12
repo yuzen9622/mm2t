@@ -19,3 +19,4 @@ generated_images/
 # Local Google Desktop OAuth build configuration. Never commit credentials.
 /App/Config/GoogleOAuth.local.plist
 /App/Config/.google-oauth-*
+promo/
