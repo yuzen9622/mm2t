@@ -237,7 +237,7 @@ private func date(_ text: String) -> Date {
 
     @Test func aSourceWithoutClientIDIsUnavailableAndDisconnectRemovesTheToken() async throws {
         let credentials = MemoryCredentials()
-        let none = OnlineCalendar.google(clientID: nil, credentials: credentials, signedInPage: "", openBrowser: { _ in })
+        let none = OnlineCalendar.google(clientID: nil, credentials: credentials)
         #expect(await none.status() == .unavailable)
         await #expect(throws: CalendarError.unavailable) { try await none.connect() }
 

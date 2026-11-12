@@ -112,7 +112,7 @@ enum Copy {
         case .signInFailed: String(localized: "Sign-in didn't finish. Try again.")
         case .googleOAuth(let failure):
             if failure.reason == .clientSecretRequired {
-                String(localized: "Google sign-in needs an app configuration fix (client_secret_required).")
+                String(localized: "Google sign-in needs an iOS-type OAuth client ID in this build (client_secret_required).")
             } else {
                 String(localized: "Google sign-in failed (\(failure.diagnostic)).")
             }

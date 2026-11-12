@@ -4,7 +4,7 @@ import MM2TProviders
 import Testing
 @testable import MM2TApp
 
-// Token-endpoint replies are synthetic; the browser callback uses a real local listener.
+// Token-endpoint replies are synthetic; Microsoft's callback goes through a real loopback listener.
 private final class OAuthReplyProtocol: URLProtocol, @unchecked Sendable {
     static let header = "X-MM2T-OAuth-Test"
     override class func canInit(with request: URLRequest) -> Bool {
@@ -16,7 +16,7 @@ private final class OAuthReplyProtocol: URLProtocol, @unchecked Sendable {
         let status: Int
         let body: String
         switch testCase {
-        case "configured-code", "configured-refresh", "microsoft-no-secret":
+        case "google-code", "google-refresh", "microsoft-no-secret":
             let data: Data
             if let body = request.httpBody {
                 data = body
@@ -41,9 +41,13 @@ private final class OAuthReplyProtocol: URLProtocol, @unchecked Sendable {
                 #expect(request.url?.query == nil)
                 #expect(request.url?.absoluteString == "https://oauth2.googleapis.com/token")
                 #expect(request.httpMethod == "POST")
-                #expect(value("client_secret") == "synthetic-only+&=%/value")
-                #expect(value("grant_type") == (testCase == "configured-code" ? "authorization_code" : "refresh_token"))
-                if testCase == "configured-code" { #expect(value("code_verifier")?.isEmpty == false) }
+                #expect(value("client_secret") == nil)
+                #expect(value("client_id") == syntheticClientID)
+                #expect(value("grant_type") == (testCase == "google-code" ? "authorization_code" : "refresh_token"))
+                if testCase == "google-code" {
+                    #expect(value("code_verifier")?.isEmpty == false)
+                    #expect(value("redirect_uri") == "com.googleusercontent.apps.1234-synthetic:/oauth2redirect")
+                }
                 status = 200
                 body = #"{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","expires_in":3600}"#
             } else if testCase == "microsoft-no-secret" {
@@ -87,6 +91,8 @@ private final class OAuthReplyProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private let syntheticClientID = "1234-synthetic.apps.googleusercontent.com"
+
 private struct UnwritableOAuthCredentials: CredentialStoring {
     func read(_ credential: Credential) throws -> Secret? { nil }
     func save(_ secret: Secret, for credential: Credential) throws { throw CocoaError(.fileWriteNoPermission) }
@@ -97,74 +103,76 @@ private struct UnwritableOAuthCredentials: CredentialStoring {
                         credentials: any CredentialStoring = MemoryCredentials(),
                         page: Box<String> = Box(""), wrongState: Bool = false,
                         missingState: Bool = false, callbackError: String? = nil,
-                        callbackCode: String = "synthetic-code", clientSecret: Secret? = nil) -> OnlineCalendar {
+                        callbackCode: String = "synthetic-code", callbackScheme: String? = nil) -> OnlineCalendar {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OAuthReplyProtocol.self]
         configuration.httpAdditionalHeaders = [OAuthReplyProtocol.header: testCase]
-        return OnlineCalendar(service: service, clientID: "synthetic-client", clientSecret: clientSecret, credentials: credentials,
-                              signedInPage: service.kind == .google ? "Authorization returned. Check the app." : "Microsoft connected.",
-                              openBrowser: { authorization in
+        // The browser's answer to an authorization URL: its redirect, carrying code or error and state.
+        let callback: @Sendable (URL) -> URL? = { authorization in
             let fields = URLComponents(url: authorization, resolvingAgainstBaseURL: false)?.queryItems ?? []
             guard let redirect = fields.first(where: { $0.name == "redirect_uri" })?.value,
                   let state = fields.first(where: { $0.name == "state" })?.value,
                   var callback = URLComponents(string: redirect) else {
                 Issue.record("Missing synthetic authorization fields")
-                return
+                return nil
             }
+            #expect(!fields.contains(where: { $0.name == "client_secret" }))
             callback.queryItems = [callbackError.map { URLQueryItem(name: "error", value: $0) }
                                    ?? URLQueryItem(name: "code", value: callbackCode)]
             if !missingState {
                 callback.queryItems?.append(URLQueryItem(name: "state", value: wrongState ? "wrong" : state))
             }
-            guard let url = callback.url else { return }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                page.set(String(decoding: data, as: UTF8.self))
-            } catch { Issue.record("Synthetic local callback failed") }
-        }, session: URLSession(configuration: configuration))
+            if let callbackScheme { callback.scheme = callbackScheme }
+            return callback.url
+        }
+        let signIn: BrowserSignIn = service.kind == .google
+            ? .webAuthentication { authorization, scheme in
+                #expect(scheme == "com.googleusercontent.apps.1234-synthetic")
+                guard let url = callback(authorization) else { throw CalendarError.signInFailed }
+                return url
+            }
+            : .loopback(page: "Microsoft connected.", openBrowser: { authorization in
+                guard let url = callback(authorization) else { return }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    page.set(String(decoding: data, as: UTF8.self))
+                } catch { Issue.record("Synthetic local callback failed") }
+            })
+        return OnlineCalendar(service: service, clientID: syntheticClientID, credentials: credentials, signIn: signIn,
+                              session: URLSession(configuration: configuration))
     }
 
-    @Test func configuredGoogleCodeAndRefreshIncludeOnlyTheSyntheticSecret() async throws {
-        let secret = Secret("synthetic-only+&=%/value")
+    @Test func googleCodeAndRefreshCarryNoSecret() async throws {
         let credentials = MemoryCredentials()
-        let page = Box("")
-        let code = source(testCase: "configured-code", credentials: credentials, page: page, clientSecret: secret)
+        let code = source(testCase: "google-code", credentials: credentials)
         try await code.connect()
         #expect(await code.status() == .connected)
-        #expect(!page.get.contains(secret.revealed))
-        let refresh = source(testCase: "configured-refresh", credentials: credentials, clientSecret: secret)
+        let refresh = source(testCase: "google-refresh", credentials: credentials)
         #expect(try await refresh.events(from: .distantPast, to: .distantFuture).isEmpty)
         #expect(await refresh.status() == .connected)
     }
 
-    @Test func microsoftNeverReceivesTheGoogleSecret() async throws {
-        let calendar = source(.microsoft, testCase: "microsoft-no-secret", clientSecret: Secret("synthetic-only+&=%/value"))
+    @Test func microsoftTokenRequestCarriesNoSecret() async throws {
+        let calendar = source(.microsoft, testCase: "microsoft-no-secret")
         try await calendar.connect()
         #expect(await calendar.status() == .connected)
     }
 
-    @Test func googleAuthorizationKeepsPKCEAndStateWithoutASecret() {
-        let url = OAuthService.google.authorizationURL(clientID: "synthetic-client", redirect: "http://127.0.0.1:5555", state: "synthetic-state", challenge: "synthetic-challenge")
+    @Test func googleRedirectIsTheReversedClientIDScheme() {
+        #expect(OAuthService.googleCallbackScheme(clientID: syntheticClientID) == "com.googleusercontent.apps.1234-synthetic")
+        let url = OAuthService.google.authorizationURL(clientID: syntheticClientID, redirect: "com.googleusercontent.apps.1234-synthetic:/oauth2redirect",
+                                                       state: "synthetic-state", challenge: "synthetic-challenge")
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         #expect(items.contains(URLQueryItem(name: "code_challenge_method", value: "S256")))
         #expect(items.contains(URLQueryItem(name: "code_challenge", value: "synthetic-challenge")))
         #expect(items.contains(URLQueryItem(name: "state", value: "synthetic-state")))
+        #expect(items.contains(URLQueryItem(name: "redirect_uri", value: "com.googleusercontent.apps.1234-synthetic:/oauth2redirect")))
         #expect(!items.contains { $0.name == "client_secret" })
     }
 
-    @Test func localGoogleConfigurationIsOptionalAndRedacted() {
-        for value: Any? in [nil, "", " ", "REPLACE_SECRET", "$(GOOGLE_SECRET)", 42] {
-            #expect(GoogleOAuthClientSecret.resolve(value) == nil)
-        }
-        let secret = GoogleOAuthClientSecret.resolve(" synthetic-only+&=%/value ")
-        #expect(secret?.revealed == "synthetic-only+&=%/value")
-        #expect(String(describing: secret) == "Optional(Secret(redacted))")
-        for empty: Secret? in [nil, Secret("")] {
-            let request = OAuthService.google.tokenRequest(clientID: "cid", clientSecret: empty, [("grant_type", "refresh_token")])
-            #expect(String(decoding: request.httpBody ?? Data(), as: UTF8.self) == "client_id=cid&grant_type=refresh_token")
-        }
-        let microsoft = OAuthService.microsoft.tokenRequest(clientID: "cid", clientSecret: secret, [("grant_type", "refresh_token")])
-        #expect(!String(decoding: microsoft.httpBody ?? Data(), as: UTF8.self).contains("client_secret"))
+    @Test func aCallbackOnAnotherSchemeIsNotExchanged() async throws {
+        let calendar = source(testCase: "must-not-exchange", callbackScheme: "evil")
+        await #expect(throws: GoogleOAuthFailure(.invalidCallback)) { try await calendar.connect() }
     }
 
     @Test func diagnosticNeverIncludesServerSuppliedValues() {
@@ -177,16 +185,12 @@ private struct UnwritableOAuthCredentials: CredentialStoring {
         #expect(GoogleOAuthFailure.response(status: 502, data: Data("not json".utf8)).diagnostic == "HTTP 502 / oauth_error")
     }
 
-    @Test func googleFailureIsSpecificAndBrowserDoesNotPromiseSuccess() async throws {
-        let page = Box("")
-        let calendar = source(testCase: "missing-secret", page: page)
+    @Test func aDesktopClientIsReportedAsTheWrongClientType() async throws {
+        let calendar = source(testCase: "missing-secret")
         await #expect(throws: GoogleOAuthFailure(.clientSecretRequired, httpStatus: 400)) {
             try await calendar.connect()
         }
         #expect(await calendar.status() == .disconnected)
-        #expect(page.get.contains("Authorization returned. Check the app."))
-        #expect(!page.get.contains("connected"))
-        #expect(!page.get.contains("synthetic-code"))
     }
 
     @Test func microsoftSuccessfulSignInAndPageAreUnchanged() async throws {

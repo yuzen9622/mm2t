@@ -1,3 +1,5 @@
+import AppKit
+import AuthenticationServices
 import CryptoKit
 import Foundation
 import MM2TCore
@@ -5,10 +7,10 @@ import MM2TProviders
 import Network
 
 // Google Calendar and Outlook (Microsoft 365) as calendar sources: OAuth 2.0 for installed apps
-// (authorization code with PKCE and a loopback redirect), then each service's own events API.
-// Google Desktop clients may require a bundled client secret for protocol compatibility;
-// it is not proof of app identity and never replaces PKCE or state validation.
-// User refresh tokens are kept in the Keychain; access tokens live in memory.
+// (authorization code with PKCE, no client secret), then each service's own events API.
+// Google uses an iOS-type client, whose redirect is the client ID's reversed custom scheme caught
+// by ASWebAuthenticationSession; Microsoft uses a loopback redirect. Only the refresh token is
+// kept, in the Keychain; access tokens live in memory.
 
 // MARK: OAuth
 
@@ -16,6 +18,7 @@ import Network
 // error descriptions, authorization codes, callback URLs, or credentials in diagnostics.
 public struct GoogleOAuthFailure: Error, Hashable, Sendable {
     public enum Reason: String, Sendable {
+        /// The token endpoint wants a client secret: the client ID is not an iOS-type client.
         case clientSecretRequired = "client_secret_required"
         case invalidClient = "invalid_client"
         case invalidRequest = "invalid_request"
@@ -78,21 +81,14 @@ public enum OAuthClientID {
     }
 }
 
-/// A Desktop client compatibility value, not a confidential app identity credential.
-/// Loaded from the locally prepared build plist; never included in diagnostics.
-public enum GoogleOAuthClientSecret {
-    public static func resolve(_ value: Any?) -> Secret? {
-        OAuthClientID.resolve(value).map { Secret($0) }
-    }
-}
-
 /// What differs between the two services' sign-in.
 struct OAuthService: Sendable {
     let kind: CalendarSourceKind
     let authorizeURL: URL
     let tokenURL: URL
     let scope: String
-    /// Google wants the loopback IP; Microsoft's portal only takes `http://localhost` (any port matches).
+    /// The loopback host, for a service signed in through `BrowserSignIn.loopback`.
+    /// Microsoft's portal only takes `http://localhost` (any port matches).
     let redirectHost: String
     let extraAuthorizeItems: [URLQueryItem]
     /// Microsoft accepts the scope on token requests and uses it to pick the resource.
@@ -129,14 +125,17 @@ struct OAuthService: Sendable {
         return components.url!
     }
 
-    func tokenRequest(clientID: String, clientSecret: Secret? = nil, _ fields: [(String, String)]) -> URLRequest {
+    /// An iOS-type Google client's redirect scheme: its client ID reversed,
+    /// `1234-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.1234-abc`.
+    static func googleCallbackScheme(clientID: String) -> String {
+        clientID.split(separator: ".").reversed().joined(separator: ".")
+    }
+
+    func tokenRequest(clientID: String, _ fields: [(String, String)]) -> URLRequest {
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var all = [("client_id", clientID)] + fields
-        if kind == .google, let clientSecret, !clientSecret.isEmpty {
-            all.append(("client_secret", clientSecret.revealed))
-        }
         if scopeOnTokenRequests { all.append(("scope", scope)) }
         request.httpBody = Data(all.map { "\($0)=\(Self.formEncode($1))" }.joined(separator: "&").utf8)
         return request
@@ -381,34 +380,32 @@ public actor OnlineCalendar: CalendarSource {
     public nonisolated let kind: CalendarSourceKind
     private let service: OAuthService
     private let clientID: String?
-    private let clientSecret: Secret?
     private let credentials: any CredentialStoring
-    private let signedInPage: String
-    private let openBrowser: @Sendable (URL) async -> Void
+    private let signIn: BrowserSignIn
     private let session: URLSession
     private var access: AccessToken?
 
     /// `clientID` nil (the Info.plist placeholder) makes the source unavailable in this build.
-    /// `signedInPage` is the text the browser shows once sign-in hands back to the app.
-    public static func google(clientID: String?, clientSecret: Secret? = nil, credentials: any CredentialStoring, signedInPage: String,
-                              openBrowser: @escaping @Sendable (URL) async -> Void) -> OnlineCalendar {
-        OnlineCalendar(service: .google, clientID: clientID, clientSecret: clientSecret, credentials: credentials, signedInPage: signedInPage, openBrowser: openBrowser)
+    /// It must be an iOS-type client: those take no client secret and redirect to the reversed client ID.
+    public static func google(clientID: String?, credentials: any CredentialStoring) -> OnlineCalendar {
+        OnlineCalendar(service: .google, clientID: clientID, credentials: credentials,
+                       signIn: .webAuthentication { url, scheme in try await WebAuthentication.authorize(url, callbackScheme: scheme) })
     }
 
+    /// `signedInPage` is the text the browser shows once sign-in hands back to the app.
     public static func microsoft(clientID: String?, credentials: any CredentialStoring, signedInPage: String,
                                  openBrowser: @escaping @Sendable (URL) async -> Void) -> OnlineCalendar {
-        OnlineCalendar(service: .microsoft, clientID: clientID, credentials: credentials, signedInPage: signedInPage, openBrowser: openBrowser)
+        OnlineCalendar(service: .microsoft, clientID: clientID, credentials: credentials,
+                       signIn: .loopback(page: signedInPage, openBrowser: openBrowser))
     }
 
-    init(service: OAuthService, clientID: String?, clientSecret: Secret? = nil, credentials: any CredentialStoring, signedInPage: String,
-         openBrowser: @escaping @Sendable (URL) async -> Void, session: URLSession = .shared) {
+    init(service: OAuthService, clientID: String?, credentials: any CredentialStoring, signIn: BrowserSignIn,
+         session: URLSession = .shared) {
         kind = service.kind
         self.service = service
         self.clientID = clientID
-        self.clientSecret = service.kind == .google ? clientSecret : nil
         self.credentials = credentials
-        self.signedInPage = signedInPage
-        self.openBrowser = openBrowser
+        self.signIn = signIn
         self.session = session
     }
 
@@ -419,22 +416,36 @@ public actor OnlineCalendar: CalendarSource {
 
     public func connect() async throws {
         guard let clientID else { throw CalendarError.unavailable }
-        let redirect = try LoopbackRedirect(page: signedInPage)
-        defer { redirect.cancel() }
-        let port = try await redirect.start()
-        let redirectURI = "http://\(service.redirectHost):\(port)"
         let verifier = PKCE.verifier()
         let state = PKCE.verifier()
-        await openBrowser(service.authorizationURL(clientID: clientID, redirect: redirectURI, state: state,
-                                                   challenge: PKCE.challenge(for: verifier)))
-        let items = try await withThrowingTaskGroup(of: [URLQueryItem].self) { group in
-            group.addTask { try await redirect.callback() }
-            group.addTask {
-                try await Task.sleep(for: .seconds(300))
-                throw CalendarError.cancelled
+        let service = service
+        let authorization = { (redirect: String) in
+            service.authorizationURL(clientID: clientID, redirect: redirect, state: state, challenge: PKCE.challenge(for: verifier))
+        }
+        let redirectURI: String
+        let items: [URLQueryItem]
+        switch signIn {
+        case .loopback(let page, let openBrowser):
+            let redirect = try LoopbackRedirect(page: page)
+            defer { redirect.cancel() }
+            let port = try await redirect.start()
+            redirectURI = "http://\(service.redirectHost):\(port)"
+            await openBrowser(authorization(redirectURI))
+            items = try await withThrowingTaskGroup(of: [URLQueryItem].self) { group in
+                group.addTask { try await redirect.callback() }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(300))
+                    throw CalendarError.cancelled
+                }
+                defer { group.cancelAll() }
+                return try await group.next()!
             }
-            defer { group.cancelAll() }
-            return try await group.next()!
+        case .webAuthentication(let authorize):
+            let scheme = OAuthService.googleCallbackScheme(clientID: clientID)
+            redirectURI = "\(scheme):/oauth2redirect"
+            let callback = try await authorize(authorization(redirectURI), scheme)
+            guard callback.scheme?.lowercased() == scheme.lowercased() else { throw GoogleOAuthFailure(.invalidCallback) }
+            items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
         }
         let value = { (name: String) in items.first { $0.name == name }?.value }
         if kind == .google {
@@ -451,7 +462,7 @@ public actor OnlineCalendar: CalendarSource {
             if kind == .google { throw GoogleOAuthFailure(.invalidCallback) }
             throw CalendarError.signInFailed
         }
-        let response = try await token(service.tokenRequest(clientID: clientID, clientSecret: clientSecret, [
+        let response = try await token(service.tokenRequest(clientID: clientID, [
             ("grant_type", "authorization_code"), ("code", code), ("code_verifier", verifier), ("redirect_uri", redirectURI),
         ]))
         guard let refresh = response.refreshToken else {
@@ -520,7 +531,7 @@ public actor OnlineCalendar: CalendarSource {
         guard let clientID, let refresh = refreshToken else { throw CalendarError.signedOut }
         let response: TokenResponse
         do {
-            response = try await token(service.tokenRequest(clientID: clientID, clientSecret: clientSecret, [
+            response = try await token(service.tokenRequest(clientID: clientID, [
                 ("grant_type", "refresh_token"), ("refresh_token", refresh.revealed),
             ]))
         } catch let failure as GoogleOAuthFailure where failure.reason == .invalidGrant {
@@ -577,7 +588,61 @@ public actor OnlineCalendar: CalendarSource {
     }
 }
 
-// MARK: Loopback redirect
+// MARK: Redirects
+
+/// How the browser hands the authorization response back to the app.
+enum BrowserSignIn: Sendable {
+    /// Opens the browser and listens on a loopback port; `page` is what the browser shows afterwards.
+    case loopback(page: String, openBrowser: @Sendable (URL) async -> Void)
+    /// Runs the sign-in and returns the URL it was redirected to on the given custom scheme.
+    case webAuthentication(@Sendable (_ url: URL, _ callbackScheme: String) async throws -> URL)
+}
+
+/// Sign-in in the system browser through ASWebAuthenticationSession, which hands the custom-scheme
+/// redirect straight back to this app: no URL type in Info.plist, no listener, no secret.
+@MainActor
+enum WebAuthentication {
+    static func authorize(_ url: URL, callbackScheme: String) async throws -> URL {
+        let anchor = PresentationAnchor()
+        defer { withExtendedLifetime(anchor) {} }
+        let running = RunningSession()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                let once = Once()
+                // The session calls back on a queue of its own: a main-actor closure here traps
+                // ("Block was expected to execute on queue com.apple.main-thread") once sign-in returns.
+                let completion: @Sendable (URL?, (any Error)?) -> Void = { callback, error in
+                    once.run {
+                        if let callback {
+                            continuation.resume(returning: callback)
+                        } else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin {
+                            continuation.resume(throwing: CalendarError.cancelled)
+                        } else {
+                            continuation.resume(throwing: CalendarError.signInFailed)
+                        }
+                    }
+                }
+                let started = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme, completionHandler: completion)
+                started.presentationContextProvider = anchor
+                running.session = started
+                if !started.start() { once.run { continuation.resume(throwing: CalendarError.signInFailed) } }
+            }
+        } onCancel: {
+            Task { @MainActor in running.session?.cancel() }
+        }
+    }
+
+    @MainActor private final class RunningSession: Sendable {
+        var session: ASWebAuthenticationSession?
+    }
+
+    private final class PresentationAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
+        func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+            let pick = { @MainActor in NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible } ?? ASPresentationAnchor() }
+            return Thread.isMainThread ? MainActor.assumeIsolated(pick) : DispatchQueue.main.sync { MainActor.assumeIsolated(pick) }
+        }
+    }
+}
 
 /// A one-shot HTTP listener on the loopback interface that catches the browser coming back from
 /// sign-in with `?code=…&state=…`, answers with a short page, and hands over the query.

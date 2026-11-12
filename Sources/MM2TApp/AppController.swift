@@ -145,9 +145,7 @@ public final class AppController {
     /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones).
     public static func live(
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
-        signedInPage: String = "mm2t",
-        googleSignInPage: String = "Google authorization returned to mm2t. Return to the app to check the connection result.",
-        calendars: [any CalendarSource]? = nil
+        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
@@ -163,10 +161,7 @@ public final class AppController {
             validator: LiveKeyValidator(),
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
-                OnlineCalendar.google(clientID: info("MM2TGoogleClientID"),
-                                      clientSecret: GoogleOAuthClientSecret.resolve(Bundle.main.object(forInfoDictionaryKey: "MM2TGoogleClientSecret")),
-                                      credentials: credentials,
-                                      signedInPage: googleSignInPage, openBrowser: openBrowser),
+                OnlineCalendar.google(clientID: info("MM2TGoogleClientID"), credentials: credentials),
                 OnlineCalendar.microsoft(clientID: info("MM2TMicrosoftClientID"), credentials: credentials,
                                          signedInPage: signedInPage, openBrowser: openBrowser),
             ],

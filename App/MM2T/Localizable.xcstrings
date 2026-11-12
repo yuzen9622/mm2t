@@ -821,16 +821,6 @@
         }
       }
     },
-    "Google authorization returned to mm2t. Return to the app to check the connection result.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Google 授權回應已傳回 mm2t。請回到 App 確認連線結果。"
-          }
-        }
-      }
-    },
     "Google sign-in failed (%@).": {
       "localizations": {
         "zh-Hant": {
@@ -841,12 +831,12 @@
         }
       }
     },
-    "Google sign-in needs an app configuration fix (client_secret_required).": {
+    "Google sign-in needs an iOS-type OAuth client ID in this build (client_secret_required).": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Google 登入需要修正 App 的 OAuth 設定（client_secret_required）。"
+            "value": "這個版本的 Google OAuth 用戶端 ID 必須是 iOS 類型（client_secret_required）。"
           }
         }
       }
