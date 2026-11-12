@@ -1,11 +1,13 @@
 import Foundation
 import MM2TApp
+import MM2TCore
 import ObjectiveC
 import SwiftUI
 
 /// Switches the UI language while the app runs. macOS picks a bundle's language once at launch, so
-/// `Bundle.main` is pointed at the chosen `.lproj` (which `String(localized:)` and SwiftUI's `Text`
-/// both read through) and every root view is rebuilt. The choice is also saved as `AppleLanguages`,
+/// SwiftUI's `Text` gets the language through the environment's locale, `String(localized:)` through
+/// `InterfaceLanguage` (shadowed below), lookups through `Bundle.main` from the chosen `.lproj`, and
+/// every root view is rebuilt. The choice is also saved as `AppleLanguages`,
 /// so the next launch starts in it natively.
 @MainActor @Observable
 final class LiveLanguage {
@@ -21,6 +23,7 @@ final class LiveLanguage {
         let code = language == .system ? Self.systemLocalization : language.rawValue
         LocalizedMainBundle.use(code)
         locale = Locale(identifier: code)
+        InterfaceLanguage.locale = locale
         revision += 1
     }
 
@@ -29,6 +32,15 @@ final class LiveLanguage {
         let global = CFPreferencesCopyValue("AppleLanguages" as CFString, kCFPreferencesAnyApplication,
                                             kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String]
         return Bundle.preferredLocalizations(from: Bundle.main.localizations, forPreferences: global ?? []).first ?? "en"
+    }
+}
+
+extension String {
+    /// Shadows Foundation's initializer in the app, which would keep the launch language, so every
+    /// string follows a live switch; see `InterfaceLanguage`.
+    init(localized keyAndValue: String.LocalizationValue, table: String? = nil, bundle: Bundle? = nil,
+         locale: Locale = .current, comment: StaticString? = nil) {
+        self = InterfaceLanguage.localized(keyAndValue, table: table, bundle: bundle, comment: comment)
     }
 }
 
