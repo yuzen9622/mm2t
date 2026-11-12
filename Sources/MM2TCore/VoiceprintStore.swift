@@ -6,16 +6,25 @@ public struct Person: Codable, Hashable, Sendable, Identifiable {
     public internal(set) var embeddings: [Embedding]
     /// The app's user, enrolled by reading a passage aloud. At most one person has this set.
     public internal(set) var isUser: Bool?
+
+    /// Where this person's stored vectors were heard. Someone known only from the room may score too
+    /// low to be named on a call until they are named once there.
+    public var channels: Set<VoiceChannel> { Set(embeddings.compactMap(\.channel)) }
 }
 
 public struct MatchThresholds: Hashable, Sendable {
     public let autoName: Double
     public let suggest: Double
+    /// Telling whether a voice is the enrolled user's, which compares it with one person rather than
+    /// everyone known, on vectors averaged from short turns rather than a stored voiceprint.
+    public let user: Double
 
-    public init(autoName: Double, suggest: Double) {
+    /// `user` defaults to `suggest`.
+    public init(autoName: Double, suggest: Double, user: Double? = nil) {
         precondition(suggest <= autoName, "suggest threshold must not exceed autoName threshold")
         self.autoName = autoName
         self.suggest = suggest
+        self.user = user ?? suggest
     }
 }
 
@@ -69,6 +78,12 @@ public actor VoiceprintStore {
             next.append(Person(id: PersonID(), name: name, embeddings: embeddings, isUser: true))
         }
         try save(next)
+    }
+
+    /// Adds vectors the user confirmed are their own voice in a meeting. Nothing happens before they enroll.
+    public func addUserEmbeddings(_ embeddings: [Embedding]) throws {
+        guard let user = user() else { return }
+        try addEmbeddings(embeddings, to: user.id)
     }
 
     /// How much a cluster sounds like the user: the best similarity between any of its vectors and

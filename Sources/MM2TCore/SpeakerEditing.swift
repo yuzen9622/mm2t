@@ -9,6 +9,8 @@ public enum SpeakerEditError: Error, Equatable {
     /// The pipeline rewrites speakers and saves its own copy of the meeting after each step,
     /// so an edit made while processing is pending would be lost.
     case meetingIsProcessing
+    /// Only a voice the mic heard can be the user; a call's remote speakers are other people.
+    case notHeardOnMic(SpeakerID)
 }
 
 /// User edits to a meeting's speakers. Each edit writes the speaker's voiceprints back to the
@@ -96,6 +98,39 @@ public struct SpeakerEditing: Sendable {
             $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range) : $0
         }
         meeting.suggestions.items.removeAll { $0.speaker == from.id || (person != nil && $0.speaker == into.id) }
+        meeting.suggestions.isStale = true
+        let outputs = meeting.outputs
+        if outputs.cleaned != nil || outputs.digests != nil || outputs.summary != nil {
+            meeting.outputs.isStale = true
+        }
+        try await library.save(meeting)
+        return meeting
+    }
+
+    /// The user says a speaker is them, as when a room recording missed their voice. The speaker's
+    /// speech becomes theirs and its vectors join their voiceprint, so the next meeting finds them.
+    /// Like a merge, the generated outputs were written with the old speakers and become stale.
+    @discardableResult
+    public func claimAsMe(_ speaker: SpeakerID, in meetingID: MeetingID) async throws -> Meeting {
+        var meeting = try await editableMeeting(meetingID)
+        let index = try speakerIndex(speaker, in: meeting)
+        let claimed = meeting.speakers[index]
+        guard meeting.separatedTrack == .me || meeting.micSegments?.contains(where: { $0.speaker == claimed.id }) == true
+        else { throw SpeakerEditError.notHeardOnMic(claimed.id) }
+        try await voiceprints.addUserEmbeddings(claimed.embeddings)
+
+        meeting.speakers.remove(at: index)
+        meeting.mergedSpeakers[claimed.id] = .me
+        for index in meeting.utterances.indices where meeting.utterances[index].speaker == claimed.id {
+            meeting.utterances[index].speaker = .me
+        }
+        meeting.remoteSegments = meeting.remoteSegments.map {
+            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range) : $0
+        }
+        meeting.micSegments = meeting.micSegments?.map {
+            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range) : $0
+        }
+        meeting.suggestions.items.removeAll { $0.speaker == claimed.id }
         meeting.suggestions.isStale = true
         let outputs = meeting.outputs
         if outputs.cleaned != nil || outputs.digests != nil || outputs.summary != nil {

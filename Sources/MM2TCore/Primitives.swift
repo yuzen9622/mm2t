@@ -68,12 +68,48 @@ public enum Track: String, Codable, Sendable, CaseIterable {
     case remote
 }
 
+/// Where a voice was heard. A call's codec changes how a voice sounds, so one person's vectors from
+/// the room and from calls score lower against each other than vectors heard the same way.
+public enum VoiceChannel: String, Codable, Hashable, Sendable {
+    /// The Mac's microphone, the speaker in the room with it.
+    case room
+    /// A call's remote audio.
+    case call
+}
+
 /// A speaker embedding vector from the diarizer.
 public struct Embedding: Hashable, Codable, Sendable {
     public let values: [Float]
-    public init(_ values: [Float]) { self.values = values }
-    public init(from decoder: Decoder) throws { values = try [Float](from: decoder) }
-    public func encode(to encoder: Encoder) throws { try values.encode(to: encoder) }
+    /// nil for vectors stored before the channel was recorded.
+    public let channel: VoiceChannel?
+
+    public init(_ values: [Float], channel: VoiceChannel? = nil) {
+        self.values = values
+        self.channel = channel
+    }
+
+    /// The same vector, marked as heard on `channel`.
+    public func heard(on channel: VoiceChannel) -> Embedding { Embedding(values, channel: channel) }
+
+    private enum CodingKeys: String, CodingKey { case values, channel }
+
+    /// A bare array is a vector stored before channels were recorded.
+    public init(from decoder: Decoder) throws {
+        if let values = try? [Float](from: decoder) {
+            self.init(values)
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(try container.decode([Float].self, forKey: .values),
+                  channel: try container.decodeIfPresent(VoiceChannel.self, forKey: .channel))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        guard let channel else { return try values.encode(to: encoder) }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(values, forKey: .values)
+        try container.encode(channel, forKey: .channel)
+    }
 
     public func cosineSimilarity(to other: Embedding) -> Double {
         guard values.count == other.values.count, !values.isEmpty else { return 0 }

@@ -38,6 +38,7 @@ public enum Alignment {
     static let repeatWindow: TimeInterval = 1
 
     /// `mic` without the stretches that repeat `remote`. Punctuation neither counts toward a run nor breaks one.
+    /// A remote word is the twin of one mic word only, so saying 對對對對 to a single 對 is not a repeat.
     static func dropping(repeatsOf remote: [TimedWord], from mic: [TimedWord]) -> [TimedWord] {
         func spoken(_ word: TimedWord) -> String? {
             let text = word.text.trimmingCharacters(in: .whitespaces.union(.punctuationCharacters).union(.symbols)).lowercased()
@@ -54,12 +55,17 @@ public enum Alignment {
             run = []
             length = 0
         }
+        var last: TimeInterval?
         for (index, word) in mic.enumerated() {
+            // A pause ends the stretch: what follows it is judged afresh.
+            if let last, word.range.start - last > repeatWindow { close() }
+            last = word.range.end
             guard let text = spoken(word) else {
                 if !run.isEmpty { run.append(index) }
                 continue
             }
-            if heard[text]?.contains(where: { abs($0 - word.range.start) <= repeatWindow }) == true {
+            if let twin = heard[text]?.firstIndex(where: { abs($0 - word.range.start) <= repeatWindow }) {
+                heard[text]!.remove(at: twin)
                 run.append(index)
                 length += 1
             } else {
