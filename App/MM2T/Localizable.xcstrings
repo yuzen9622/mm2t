@@ -851,6 +851,16 @@
         }
       }
     },
+    "Enter the summary server URL and model name, or switch back to Gemini.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入摘要伺服器網址與模型名稱，或改回使用 Gemini。"
+          }
+        }
+      }
+    },
     "Enter your %@.": {
       "localizations": {
         "zh-Hant": {
@@ -2851,6 +2861,16 @@
         }
       }
     },
+    "summary server API key": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "摘要伺服器 API 金鑰"
+          }
+        }
+      }
+    },
     "the on-device summary model": {
       "localizations": {
         "zh-Hant": {
@@ -2881,12 +2901,32 @@
         }
       }
     },
+    "the self-hosted summary model": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自架摘要模型"
+          }
+        }
+      }
+    },
     "the self-hosted transcription server": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "自架轉錄伺服器"
+          }
+        }
+      }
+    },
+    "the summary server API key": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "摘要伺服器 API 金鑰"
           }
         }
       }
