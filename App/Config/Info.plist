@@ -44,7 +44,7 @@
 	<string>580698568106-m2jsfuarmud82acdc762jgn7j7a5mq0j.apps.googleusercontent.com</string>
 	<!-- PLACEHOLDER: replace with the Application (client) ID of a Microsoft Entra app registration (public client, redirect http://localhost under "Mobile and desktop applications", delegated Calendars.Read). Until then Outlook shows as not available in this build. -->
 	<key>MM2TMicrosoftClientID</key>
-	<string>REPLACE_WITH_MICROSOFT_OAUTH_CLIENT_ID</string>
+	<string>f4ca8016-aca6-44b2-bc81-27c9e8e0918e</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>AGPL-3.0</string>
 </dict>
