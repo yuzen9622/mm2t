@@ -359,7 +359,7 @@ private struct RecoveredNotice: View {
     var body: some View {
         HStack(spacing: 10) {
             Icon("alert-triangle", size: 16).foregroundStyle(Palette.orange)
-            Text("\(count) interrupted recordings were recovered.").font(Typo.caption).fixedSize(horizontal: false, vertical: true)
+            Text("Recovered ^[\(count) interrupted recording](inflect: true).").font(Typo.caption).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             PillButton("Show Meetings", action: show).fixedSize()
         }

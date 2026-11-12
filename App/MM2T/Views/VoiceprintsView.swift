@@ -67,7 +67,7 @@ struct VoiceprintSummary: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("\(count) voiceprints").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    Text("^[\(count) voiceprint](inflect: true)").font(Typo.caption).foregroundStyle(Palette.secondary)
                     if channels.contains(.room) { ChannelTag(title: "In the room") }
                     if channels.contains(.call) { ChannelTag(title: "On calls") }
                 }

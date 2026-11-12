@@ -127,11 +127,22 @@ package struct LLMTasks: Sendable {
             schema: LLMPrompts.digestSchema(speakers))
         let ids = Set(transcript.utterances.map(\.id))
         let digests = try output.digests.map { digest in
-            PersonDigest(
-                speaker: try known(digest.speaker, in: speakers),
-                points: digest.points.map { SourcedText(text: $0.text, sources: Self.sources($0.sources, within: ids)) })
+            let speaker = try known(digest.speaker, in: speakers)
+            return PersonDigest(
+                speaker: speaker,
+                points: digest.points.map {
+                    SourcedText(text: Self.withoutOwnName($0.text, of: speaker), sources: Self.sources($0.sources, within: ids))
+                })
         }
         return digests.sorted { speakers.firstIndex(of: $0.speaker)! < speakers.firstIndex(of: $1.speaker)! }
+    }
+
+    /// A digest point sits under its speaker's heading, so a leading `{{speaker:r1}}` (the model's habit) only repeats it.
+    static func withoutOwnName(_ text: String, of speaker: SpeakerID) -> String {
+        let token = SpeakerMention.token(speaker)
+        guard text.hasPrefix(token) else { return text }
+        let rest = text.dropFirst(token.count).drop { " 　:：,，、".contains($0) }
+        return rest.isEmpty ? text : String(rest)
     }
 
     package func summarize(_ request: SummaryRequest) async throws -> Summary {
