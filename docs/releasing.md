@@ -92,6 +92,20 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
 
 `SUPublicEDKey` 還是佔位字串時，簽章模式的 release workflow 會在檢查公鑰的步驟失敗，App 也不會啟動 Sparkle。
 
+### 5. Developer ID 描述檔（選用）
+
+有了描述檔，App 會把 API 金鑰存進資料保護鑰匙圈（data protection keychain），同一個團隊簽出的每個版本都能直接讀取，更新後不會再跳出鑰匙圈密碼視窗。沒有設定時，金鑰照舊存在登入鑰匙圈。
+
+1. 到 [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list) 註冊 macOS App ID `dev.mm2t.app`（不需要勾選額外功能）。
+2. 在 **Profiles** 新增 **Developer ID** 類型的描述檔，App ID 選 `dev.mm2t.app`，憑證選第 2 步的 Developer ID Application 憑證，下載 `.provisionprofile`。
+3. 存成 secret：
+
+   ```bash
+   base64 -i mm2t_Developer_ID.provisionprofile | gh secret set MACOS_PROVISIONING_PROFILE_BASE64 --repo yuzen9622/mm2t
+   ```
+
+release workflow 會把描述檔嵌進 App、加上 `TEAM_ID.dev.mm2t.app` 鑰匙圈存取群組，並在匯出後檢查兩者都在。第一次以新版本啟動時，App 會把登入鑰匙圈裡的舊金鑰搬過去，macOS 可能會再問一次。
+
 ### Secret 一覽
 
 | Secret | 內容 |
@@ -102,6 +116,7 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
 | `APP_STORE_CONNECT_KEY_ID` | 上述金鑰的 Key ID |
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect API 的 Issuer ID |
 | `SPARKLE_ED_PRIVATE_KEY` | `generate_keys -x` 匯出的 Sparkle EdDSA 私鑰 |
+| `MACOS_PROVISIONING_PROFILE_BASE64` | 選用：`dev.mm2t.app` 的 Developer ID 描述檔（`.provisionprofile`）的 base64 |
 
 `GITHUB_TOKEN` 由 GitHub Actions 自動提供，不需要設定。
 
