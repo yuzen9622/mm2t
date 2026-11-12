@@ -210,8 +210,6 @@
   "Rename": "重新命名",
   "Rename %@": "重新命名「%@」",
   "Rename…": "重新命名⋯",
-  "Restart": "重新啟動",
-  "Restart mm2t to use the new language.": "重新啟動 mm2t 後才會換成新的語言。",
   "Resume": "繼續",
   "Retry": "重試",
   "Said ^[%lld time](inflect: true)": "出現 %lld 次",

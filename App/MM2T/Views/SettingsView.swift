@@ -505,12 +505,10 @@ private struct RemindersRow: View {
     }
 }
 
-/// The app's own UI language. macOS reads it at launch, so a change offers a restart.
+/// The app's own UI language. It switches at once; the next launch also starts in it.
 private struct LanguagePicker: View {
     private static let domain = Bundle.main.bundleIdentifier ?? "dev.mm2t.app"
-    /// What this run of the app shows, read before any change in it.
-    private static let atLaunch = AppLanguage.current(in: .standard, domain: domain)
-    @State private var choice = Self.atLaunch
+    @State private var choice = AppLanguage.current(in: .standard, domain: domain)
 
     var body: some View {
         HStack {
@@ -524,27 +522,7 @@ private struct LanguagePicker: View {
                 }
             }
         }
-        .onAppear { choice = AppLanguage.current(in: .standard, domain: Self.domain) }
-        .onChange(of: choice) { _, language in language.save(in: .standard) }
-        if choice != Self.atLaunch {
-            HStack(spacing: 8) {
-                Icon("refresh", size: 15).foregroundStyle(Palette.orange)
-                Text("Restart mm2t to use the new language.").fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                PillButton("Restart", kind: .primary, action: Self.relaunch)
-            }
-            .transition(.opacity)
-        }
-    }
-
-    /// Opens a new copy of the app once this one has quit.
-    private static func relaunch() {
-        let shell = Process()
-        shell.executableURL = URL(filePath: "/bin/sh")
-        shell.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
-                           Bundle.main.bundleURL.path, String(ProcessInfo.processInfo.processIdentifier)]
-        try? shell.run()
-        NSApp.terminate(nil)
+        .onChange(of: choice) { _, language in LiveLanguage.shared.apply(language) }
     }
 }
 

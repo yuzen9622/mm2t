@@ -46,7 +46,7 @@ struct RootGuard<Content: View>: View {
 
     var body: some View {
         if let app = delegate.app {
-            content(app)
+            content(app).liveLanguage()
         } else {
             ContentUnavailableView {
                 Label("mm2t could not start", systemImage: "exclamationmark.triangle")

@@ -186,9 +186,12 @@ struct CalendarCard: View {
 private struct MonthGridView: View {
     let model: DashboardModel
     @Namespace private var space
+    @Environment(\.locale) private var locale
 
     private var weekdays: [String] {
-        let calendar = Calendar.current
+        // The symbols follow the UI language, which can change while the app runs.
+        var calendar = Calendar.current
+        calendar.locale = locale
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         let first = calendar.firstWeekday - 1
         return Array(symbols[first...] + symbols[..<first])

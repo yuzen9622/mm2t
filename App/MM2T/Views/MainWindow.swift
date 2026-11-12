@@ -285,6 +285,15 @@ struct WindowChrome: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.styleMask.insert(.fullSizeContentView)
             window.isMovableByWindowBackground = true
+            // An empty unified toolbar makes AppKit set the traffic lights lower and further in, so
+            // they sit inside the floating sidebar instead of on its edge, and keeps them there on resize.
+            if window.toolbar == nil {
+                let toolbar = NSToolbar(identifier: "main")
+                toolbar.showsBaselineSeparator = false
+                window.toolbar = toolbar
+            }
+            window.toolbarStyle = .unified
+            window.titlebarSeparatorStyle = .none
             window.backgroundColor = NSColor(Palette.window)
         }
         return view

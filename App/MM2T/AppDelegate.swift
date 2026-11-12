@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floating = FloatingPanelController(app: app)
         DebugRecorder.start(app: app)
         #if DEBUG
+        // Exercises the live language switch: snapshots taken after it show whether every string followed.
+        if let code = ProcessInfo.processInfo.environment["MM2T_SWITCH_LANGUAGE"], let language = AppLanguage(rawValue: code) {
+            LiveLanguage.shared.apply(language, persist: false)
+        }
         if DebugSnapshot.isRequested {
             Task { await app.launch(watchMeetings: false) }
             DebugSnapshot.run(app: app)
