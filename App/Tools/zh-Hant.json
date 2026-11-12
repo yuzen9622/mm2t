@@ -288,5 +288,8 @@
   "the self-hosted transcription server": "自架轉錄伺服器",
   "the summary server API key": "摘要伺服器 API 金鑰",
   "· Now": "· 進行中",
-  "產品週會": "產品週會"
+  "產品週會": "產品週會",
+  "Add to Reminders": "加入「提醒事項」",
+  "In Reminders": "已在「提醒事項」",
+  "mm2t can't use Reminders. Allow it in System Settings to add to-dos there.": "mm2t 無法使用「提醒事項」。請到「系統設定」允許，才能把待辦事項加進去。"
 }

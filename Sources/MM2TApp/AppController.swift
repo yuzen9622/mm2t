@@ -42,6 +42,8 @@ public final class AppController {
     public let meetings: MeetingListModel
     public let people: VoiceprintsModel
     public let dashboard: DashboardModel
+    public let todoStatus: TodoStatus
+    public let reminders: RemindersSync
     public let enrollment: VoiceEnrollmentModel
 
     /// The app is not usable until setup is finished and the user's voice is enrolled.
@@ -66,6 +68,7 @@ public final class AppController {
         machine: MachineProfile = .current,
         validator: any KeyValidating,
         calendars: [any CalendarSource] = [],
+        reminders: any ReminderStore = SystemReminders(),
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
         now: @escaping () -> Date = Date.init,
@@ -119,9 +122,12 @@ public final class AppController {
             })
         meetings = MeetingListModel(library: library, voiceprints: voiceprints, queue: queue)
         people = VoiceprintsModel(store: voiceprints)
+        let todoStatus = TodoStatus(file: paths.root.appending(path: "todos.json"))
+        self.todoStatus = todoStatus
+        self.reminders = RemindersSync(store: reminders, status: todoStatus, file: paths.root.appending(path: "reminders.json"))
         dashboard = DashboardModel(
             library: library, voiceprints: voiceprints, settings: settings, calendars: calendars,
-            todosFile: paths.root.appending(path: "todos.json"), now: now)
+            todosFile: paths.root.appending(path: "todos.json"), status: todoStatus, now: now)
         enrollment = VoiceEnrollmentModel(
             voiceprints: voiceprints, recorder: voiceRecorder, permissions: permissions,
             scratch: paths.recordings.appending(path: "enrollment.wav"),
@@ -180,6 +186,7 @@ public final class AppController {
         recovered = outcome.recovered + unprocessed.filter { !outcome.recovered.contains($0) }
         await meetings.reload()
         await enrollment.refresh()
+        reminders.start()
         self.watchMeetings = watchMeetings
         startMonitorIfReady()
     }
@@ -203,6 +210,7 @@ public final class AppController {
     public func detail(_ id: MeetingID, labels: PresentationLabels, playback: (any MeetingPlayback)?) -> MeetingDetailModel {
         MeetingDetailModel(
             id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback,
+            todos: todoStatus, reminders: reminders,
             learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 
