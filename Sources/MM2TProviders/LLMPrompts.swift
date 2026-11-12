@@ -68,6 +68,35 @@ package enum LLMPrompts {
     標記「(重點)」的發言是使用者特別在意的內容：摘要必須涵蓋每一則重點發言，並把相關項目排在各區塊的最前面。
     """
 
+    /// Appended to the system prompt of an English meeting. The prompts are written in Chinese, and a
+    /// model reading them answers in Chinese unless the output language is stated outright.
+    static let englishOutput = """
+    Output language: English. This meeting is in English, so write every text you produce in English \
+    (title, headline, terms, decisions, discussion points, action items, digests, cleaned paragraphs, \
+    reasons), even though these instructions are written in Chinese. Keep the {{speaker:…}} tokens as they are.
+    """
+
+    /// A meeting counts as English when Chinese characters are under 5% of its words. A Latin word is
+    /// about five letters and a Chinese character about one word, so a Mandarin meeting full of
+    /// English terms stays Chinese.
+    static func isEnglish(_ utterances: [LLMUtterance]) -> Bool {
+        var cjk = 0, latin = 0
+        for scalar in utterances.lazy.flatMap(\.text.unicodeScalars) {
+            switch scalar.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: cjk += 1
+            case 0x41...0x5A, 0x61...0x7A: latin += 1
+            default: break
+            }
+        }
+        let words = Double(cjk) + Double(latin) / 5
+        return words > 0 && Double(cjk) < words * 0.05
+    }
+
+    static func system(_ task: String, for utterances: [LLMUtterance]) -> String {
+        let base = common + "\n\n" + task
+        return isEnglish(utterances) ? base + "\n\n" + englishOutput : base
+    }
+
     static func render(_ utterances: [LLMUtterance]) -> String {
         utterances.map(line).joined(separator: "\n")
     }

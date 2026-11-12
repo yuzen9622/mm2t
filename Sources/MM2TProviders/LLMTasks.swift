@@ -42,7 +42,7 @@ package struct LLMTasks: Sendable {
             let guesses: [Guess]
         }
         let output = try await whole(
-            Output.self, task: LLMPrompts.inferNames, input: LLMPrompts.nameRequest(request),
+            Output.self, system: LLMPrompts.system(LLMPrompts.inferNames, for: request.transcript.utterances), input: LLMPrompts.nameRequest(request),
             schema: LLMPrompts.nameSchema(request.unnamedSpeakers))
         let unnamed = Set(request.unnamedSpeakers)
         return output.guesses.compactMap { guess in
@@ -59,6 +59,8 @@ package struct LLMTasks: Sendable {
         let chunks = Self.chunks(transcript.utterances, maxCharacters: cleanChunkCharacters)
         // The glossary rides along with every chunk, so a long one is capped rather than crowding out the transcript.
         let glossary = Array(transcript.glossary.prefix(200))
+        // Decided once for the whole meeting: a short chunk alone could tip either way.
+        let system = LLMPrompts.system(LLMPrompts.cleanTranscript, for: transcript.utterances)
         var cleaned = [[CleanedTranscript.Paragraph]](repeating: [], count: chunks.count)
         var next = 0
         try await withThrowingTaskGroup(of: (Int, [CleanedTranscript.Paragraph]).self) { group in
@@ -68,7 +70,7 @@ package struct LLMTasks: Sendable {
                 next += 1
                 // The lines just before a chunk tell the model who was answering whom.
                 let context = index == 0 ? [] : Array(chunks[index - 1].suffix(Self.contextUtterances))
-                group.addTask { (index, try await clean(chunks[index], context: context, glossary: glossary)) }
+                group.addTask { (index, try await clean(chunks[index], context: context, glossary: glossary, system: system)) }
             }
             for _ in 0..<cleanConcurrency { add() }
             while let (index, paragraphs) = try await group.next() {
@@ -81,7 +83,7 @@ package struct LLMTasks: Sendable {
 
     static let contextUtterances = 6
 
-    private func clean(_ chunk: [LLMUtterance], context: [LLMUtterance], glossary: [String]) async throws -> [CleanedTranscript.Paragraph] {
+    private func clean(_ chunk: [LLMUtterance], context: [LLMUtterance], glossary: [String], system: String) async throws -> [CleanedTranscript.Paragraph] {
         struct Output: Decodable {
             struct Paragraph: Decodable { let speaker: String; let text: String; let sources: [String] }
             let paragraphs: [Paragraph]
@@ -89,7 +91,7 @@ package struct LLMTasks: Sendable {
         let speakers = Self.speakers(in: chunk)
         do {
             let output = try await generate(
-                Output.self, task: LLMPrompts.cleanTranscript,
+                Output.self, system: system,
                 input: LLMPrompts.cleanRequest(chunk, context: context, glossary: glossary),
                 schema: LLMPrompts.cleanSchema(speakers))
             let ids = Set(chunk.map(\.id))
@@ -103,8 +105,8 @@ package struct LLMTasks: Sendable {
         } catch is OutputTruncated where chunk.count > 1 {
             let half = chunk.count / 2
             let first = Array(chunk[..<half])
-            return try await clean(first, context: context, glossary: glossary)
-                + clean(Array(chunk[half...]), context: Array(first.suffix(Self.contextUtterances)), glossary: glossary)
+            return try await clean(first, context: context, glossary: glossary, system: system)
+                + clean(Array(chunk[half...]), context: Array(first.suffix(Self.contextUtterances)), glossary: glossary, system: system)
         } catch is OutputTruncated {
             throw ProviderError(service, .meetingTooLong)
         }
@@ -120,7 +122,7 @@ package struct LLMTasks: Sendable {
         }
         let speakers = Self.speakers(in: transcript.utterances)
         let output = try await whole(
-            Output.self, task: LLMPrompts.digestPerPerson,
+            Output.self, system: LLMPrompts.system(LLMPrompts.digestPerPerson, for: transcript.utterances),
             input: "逐字稿：\n" + LLMPrompts.render(transcript.utterances),
             schema: LLMPrompts.digestSchema(speakers))
         let ids = Set(transcript.utterances.map(\.id))
@@ -148,7 +150,7 @@ package struct LLMTasks: Sendable {
         }
         let speakers = Self.speakers(in: utterances)
         let output = try await whole(
-            Output.self, task: LLMPrompts.summarize, input: LLMPrompts.summaryRequest(request),
+            Output.self, system: LLMPrompts.system(LLMPrompts.summarize, for: utterances), input: LLMPrompts.summaryRequest(request),
             schema: LLMPrompts.summarySchema(speakers))
         let ids = Set(utterances.map(\.id))
         let sourced = { (points: [Output.Point]) in
@@ -198,16 +200,16 @@ package struct LLMTasks: Sendable {
     }
 
     /// A whole-transcript task has nothing smaller to retry with when its output hits the cap.
-    private func whole<T: Decodable>(_ type: T.Type, task: String, input: String, schema: JSON) async throws -> T {
+    private func whole<T: Decodable>(_ type: T.Type, system: String, input: String, schema: JSON) async throws -> T {
         do {
-            return try await generate(type, task: task, input: input, schema: schema)
+            return try await generate(type, system: system, input: input, schema: schema)
         } catch is OutputTruncated {
             throw ProviderError(service, .meetingTooLong)
         }
     }
 
-    private func generate<T: Decodable>(_ type: T.Type, task: String, input: String, schema: JSON) async throws -> T {
-        let text = try await generator.generate(system: LLMPrompts.common + "\n\n" + task, input: input, schema: schema)
+    private func generate<T: Decodable>(_ type: T.Type, system: String, input: String, schema: JSON) async throws -> T {
+        let text = try await generator.generate(system: system, input: input, schema: schema)
         guard let output = try? JSONDecoder().decode(T.self, from: Data(text.utf8)) else {
             throw ProviderError(service, .malformedResponse)
         }

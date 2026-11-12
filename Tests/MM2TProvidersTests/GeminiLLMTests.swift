@@ -156,6 +156,34 @@ extension StubServer.Request {
         #expect(guesses.isEmpty && server.requests.isEmpty)
     }
 
+    static let englishDirective = "Output language: English"
+
+    @Test func anEnglishMeetingIsAnsweredInEnglishByEveryTask() async throws {
+        let english = LLMTranscript(utterances: [
+            utterance("u1", "me", 0, "Okay, so the remote control has to be under twenty five euros."),
+            utterance("u2", "r1", 6, "Right, and I think we should drop the LCD screen to save cost."),
+            utterance("u3", "r2", 14, "I'll send the market research before the next meeting."),
+        ])
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"paragraphs":[],"digests":[],"guesses":[],"title":"t","terms":[],"headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
+        let llm = gemini(server)
+        _ = try await llm.cleanTranscript(english)
+        _ = try await llm.digestPerPerson(english)
+        _ = try? await llm.summarize(SummaryRequest(transcript: english, prioritized: []))
+        _ = try? await llm.inferNames(NameInferenceRequest(transcript: english, unnamedSpeakers: [SpeakerID("r1")], knownNames: [:]))
+
+        #expect(server.requests.count == 4)
+        for request in server.requests {
+            #expect(request.geminiSystem.contains(Self.englishDirective))
+        }
+    }
+
+    @Test func aMandarinMeetingFullOfEnglishTermsStaysInTraditionalChinese() async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"digests":[]}"#))
+        _ = try await gemini(server).digestPerPerson(transcript)
+        let request = try #require(server.requests.first)
+        #expect(!request.geminiSystem.contains(Self.englishDirective))
+    }
+
     @Test func digestsFollowFirstSpeakingOrder() async throws {
         let output = #"""
         {"digests":[
