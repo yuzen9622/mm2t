@@ -28,9 +28,7 @@ API 金鑰與自架伺服器權杖存放在 macOS 鑰匙圈。
 
 ### Google Calendar 與 Microsoft Outlook 日曆
 
-只有在你主動連接日曆時，App 才會透過系統瀏覽器向 Google 或 Microsoft 請求唯讀日曆權限。登入使用 PKCE 與本機 loopback 回呼；Google 的成功、取消及錯誤回呼都會先驗證 state。授權碼、PKCE verifier 和 refresh token 只送到對應服務的 HTTPS token 端點，refresh token 存放在 macOS 鑰匙圈，access token 只留在記憶體。日曆請求不會附上你的錄音或逐字稿。
-
-自行建置時，可由你提供 Google Desktop OAuth client_secret 以符合 Google 的 token 端點要求。此值只在 Google 的換取與更新 token 請求中使用，不會傳給 Microsoft。它會包含在本機 App bundle，並不具備可防止取出的保密性，也不作為 App 身分的證明；PKCE 與 state 驗證仍然保留。App 的登入診斷只顯示固定的錯誤類別與 HTTP 狀態，不記錄憑證、授權碼或完整回呼網址。
+只有在你主動連接日曆時，App 才會透過系統瀏覽器向 Google 或 Microsoft 請求唯讀日曆權限。登入使用 PKCE，不使用 client secret：Google 以自訂 URL scheme 回呼（`ASWebAuthenticationSession`），Microsoft 以本機 loopback 回呼，回呼都會先驗證 state。授權碼、PKCE verifier 和 refresh token 只送到對應服務的 HTTPS token 端點，refresh token 存放在 macOS 鑰匙圈，access token 只留在記憶體。日曆請求不會附上你的錄音或逐字稿。App 的登入診斷只顯示固定的錯誤類別與 HTTP 狀態，不記錄憑證、授權碼或完整回呼網址。
 
 ### ElevenLabs（雲端語音轉文字）
 
