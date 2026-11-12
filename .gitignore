@@ -13,5 +13,9 @@ __pycache__/
 *$py.class
 
 screenshots/
+generated_images/
 
 .env
+# Local Google Desktop OAuth build configuration. Never commit credentials.
+/App/Config/GoogleOAuth.local.plist
+/App/Config/.google-oauth-*
