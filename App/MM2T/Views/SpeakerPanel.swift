@@ -11,7 +11,9 @@ struct SpeakerPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(model.speakers) { speaker in
                 SpeakerRowView(speaker: speaker, others: model.speakers.filter { $0.id != speaker.id },
+                               canClaim: model.canClaimAsMe(speaker.id),
                                rename: { renaming = speaker },
+                               claim: { Task { await model.claimAsMe(speaker.id) } },
                                merge: { other in Task { await model.merge(speaker.id, into: other) } },
                                accept: { Task { await model.acceptSuggestion(for: speaker.id) } })
             }
@@ -35,7 +37,9 @@ struct SpeakerPanel: View {
 struct SpeakerRowView: View {
     let speaker: SpeakerRow
     let others: [SpeakerRow]
+    var canClaim = false
     let rename: () -> Void
+    var claim: () -> Void = {}
     let merge: (SpeakerID) -> Void
     let accept: () -> Void
     @State private var hovering = false
@@ -48,6 +52,9 @@ struct SpeakerRowView: View {
                 Spacer(minLength: 4)
                 Menu {
                     Button("Rename…", action: rename)
+                    if canClaim {
+                        Button("This Is Me", action: claim)
+                    }
                     Menu("Merge Into") {
                         ForEach(others) { other in Button(other.displayName) { merge(other.id) } }
                     }

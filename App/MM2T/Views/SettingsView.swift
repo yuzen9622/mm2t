@@ -46,8 +46,6 @@ struct SettingsView: View {
                         if store.settings.transcriptionOrder.contains(.local) {
                             OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
                         }
-                        Text("Sources are tried top to bottom. mm2t moves to the next one only when a source can't be reached.")
-                            .font(Typo.caption).foregroundStyle(Palette.secondary)
                     }
                     Panel(title: "Speaker separation") {
                         HStack {
@@ -63,8 +61,6 @@ struct SettingsView: View {
                     }
                     Panel(title: "Summaries") {
                         CredentialFieldView(field: app.setup.field(.geminiAPIKey), setup: app.setup)
-                        Text("Use a Gemini key from a paid plan. On the free tier, Google may use what you send to improve its products.")
-                            .font(Typo.caption).foregroundStyle(Palette.secondary)
                         Divider().overlay(Palette.border)
                         Toggle("Generate on this Mac", isOn: Binding(
                             get: { store.settings.llmLocation == .local },
@@ -222,10 +218,6 @@ struct OfflineModelView: View {
             HStack(spacing: 8) {
                 Icon("circle-check", size: 16).foregroundStyle(Palette.success)
                 Text("Model installed")
-            }
-            if model == .transcription {
-                Text("The first transcription after opening mm2t takes a few minutes while macOS prepares the model.")
-                    .font(Typo.caption).foregroundStyle(Palette.secondary)
             }
         case .downloading(let fraction):
             VStack(alignment: .leading, spacing: 8) {

@@ -24,9 +24,11 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
                     HStack(alignment: .top, spacing: 14) {
+                        // Equal halves: both cards stretch, so neither takes the other's room.
                         TodoCard(model: model, open: open)
+                            .frame(maxWidth: .infinity)
                         MeetingsCard(stats: model.stats, days: model.activity, revealed: revealed)
-                            .frame(width: 300)
+                            .frame(maxWidth: .infinity)
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     HStack(alignment: .top, spacing: 14) {
@@ -85,7 +87,7 @@ private struct Hint: View {
 }
 
 /// Plays `animation` once `revealed` turns on; under Reduce Motion the content just fades in.
-private struct Reveal: ViewModifier {
+struct Reveal: ViewModifier {
     let revealed: Bool
     var delay: Double = 0
     var offset: CGFloat = 0
@@ -605,24 +607,19 @@ private struct MeetingsCard: View {
                 }
             }
             Rectangle().fill(Palette.border).frame(height: 1).padding(.vertical, 2)
-            HStack {
+            let active = days.filter { $0.minutes > 0 }.count
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("Last 12 weeks").font(Typo.captionStrong).foregroundStyle(Palette.secondary)
+                Text(verbatim: "·").font(Typo.caption).foregroundStyle(Palette.muted)
+                Text(verbatim: "\(revealed ? active : 0)")
+                    .font(Typo.captionStrong).monospacedDigit()
+                    .contentTransition(.numericText(value: Double(revealed ? active : 0)))
+                    .motion(Motion.page, value: revealed)
+                Text("days with meetings").font(Typo.caption).foregroundStyle(Palette.secondary)
                 Spacer()
                 Legend()
             }
-            HStack(alignment: .bottom, spacing: 14) {
-                Heatmap(days: days, revealed: revealed)
-                let active = days.filter { $0.minutes > 0 }.count
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: "\(revealed ? active : 0)")
-                        .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .contentTransition(.numericText(value: Double(revealed ? active : 0)))
-                        .motion(Motion.page, value: revealed)
-                    Text("days with meetings").font(Typo.caption).foregroundStyle(Palette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Heatmap(days: days, revealed: revealed)
         }
     }
 }
@@ -691,8 +688,8 @@ private struct Legend: View {
     }
 }
 
-/// Twelve weeks of days, one column per week, tinted by how long the user spent in meetings. Cells
-/// keep one size so the map reads as a calendar at any window width.
+/// Twelve weeks of days, one column per week, tinted by how long the user spent in meetings. The
+/// weeks share the card's whole width; rows keep one height so the map stays a calendar strip.
 private struct Heatmap: View {
     let days: [ActivityDay]
     let revealed: Bool
@@ -715,13 +712,14 @@ private struct Heatmap: View {
                             .modifier(Reveal(revealed: revealed, delay: Double(column) * 0.025, scale: 0.4))
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
         }
-        .fixedSize()
+        .frame(maxWidth: .infinity)
     }
 
-    static let cell: CGFloat = 12
-    static let gap: CGFloat = 3
+    static let cell: CGFloat = 14
+    static let gap: CGFloat = 4
 }
 
 private struct ActivityCell: View {
@@ -732,7 +730,7 @@ private struct ActivityCell: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(fill)
-            .frame(width: Heatmap.cell, height: Heatmap.cell)
+            .frame(maxWidth: .infinity, minHeight: Heatmap.cell, maxHeight: Heatmap.cell)
             .onHover { hovering = $0 }
             .tip(verbatim: label, show: hovering && day != nil)
     }
@@ -742,11 +740,15 @@ private struct ActivityCell: View {
         return day.minutes > 0 ? Palette.orange.opacity(0.25 + 0.75 * day.minutes / peak) : Palette.field
     }
 
-    private var label: String {
-        guard let day else { return "" }
-        let date = day.date.formatted(.dateTime.month().day())
-        let time = Duration.seconds(day.minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
-        return day.minutes > 0 ? "\(date) · \(time)" : date
+    private var label: String { day?.tipLabel ?? "" }
+}
+
+extension ActivityDay {
+    /// The heatmap cell's tooltip: the date, and the time in meetings when there was any.
+    var tipLabel: String {
+        let date = date.formatted(.dateTime.month().day())
+        let time = Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+        return minutes > 0 ? "\(date) · \(time)" : date
     }
 }
 
@@ -787,23 +789,11 @@ private struct TermsCard: View {
     let revealed: Bool
 
     var body: some View {
-        let peak = Double(terms.map(\.count).max() ?? 1)
         DashCard(title: "Your words", icon: "book-2") {
             if terms.isEmpty {
                 Hint(text: "Terms from your vocabulary appear here once they come up in meetings.")
             } else {
-                FlowLayout(spacing: 6) {
-                    ForEach(Array(terms.enumerated()), id: \.element.id) { index, term in
-                        HStack(spacing: 5) {
-                            Text(verbatim: term.term).font(Typo.bodyStrong)
-                            Text(verbatim: "\(term.count)").font(Typo.caption).monospacedDigit().foregroundStyle(Palette.secondary)
-                        }
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                        .background(Palette.orange.opacity(0.08 + 0.22 * Double(term.count) / peak), in: Capsule())
-                        .modifier(Reveal(revealed: revealed, delay: Double(index) * 0.03, offset: 6))
-                    }
-                }
+                WordCloud(terms: terms, revealed: revealed)
             }
         }
     }

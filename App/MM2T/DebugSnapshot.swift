@@ -44,13 +44,17 @@ enum DebugSnapshot {
             }
             try? await Task.sleep(for: .milliseconds(1800))
             save(window(titled: true), to: directory.appending(path: "main-home.png"))
+            await saveHomeTips(app: app, to: directory)
             await saveHomeVariants(app: app, to: directory)
-            for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.settings, "settings"), (.meetings, "list")] {
+            for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.people, "people"), (.settings, "settings"), (.meetings, "list")] {
                 showSection?(section)
                 try? await Task.sleep(for: .milliseconds(900))
                 save(window(titled: true), to: directory.appending(path: "main-\(name).png"))
+                if section == .vocabulary { await saveVocabularyEdits(app: app, to: directory) }
             }
             saveCapsules(to: directory)
+            await saveIslands(to: directory)
+            await saveMenus(app: app, to: directory)
             saveTips(to: directory)
             selectMeeting?(meeting.id)
             await waitFor { detail?.presentation != nil }
@@ -75,6 +79,7 @@ enum DebugSnapshot {
 
             await app.capture.handle(SystemSignals(micBundleIDs: ["us.zoom.xos"]))
             try? await Task.sleep(for: .milliseconds(800))
+            await saveMenu(MenuBarContent(app: app), to: directory.appending(path: "menubar-prompting.png"))
             if let panel = NSApp.windows.first(where: { $0 is NSPanel && $0.isVisible && $0.level == .statusBar }) {
                 save(panel, to: directory.appending(path: "prompt-panel.png"))
                 report["promptPanelFrame"] = NSStringFromRect(panel.frame)
@@ -85,6 +90,144 @@ enum DebugSnapshot {
             finish(report, in: directory)
         }
         #endif
+    }
+
+    /// The dashboard with one tooltip showing at a time: over the month's paging buttons at the top
+    /// of the calendar card, and over a heatmap cell among its neighbours.
+    private static func saveHomeTips(app: AppController, to directory: URL) async {
+        #if DEBUG
+        let stage = SnapshotStage.shared
+        var tips: [(String, Text)] = [("calendar", Text("Previous Month")), ("calendar-next", Text("Next Month"))]
+        let days = app.dashboard.activity
+        if let day = days.dropFirst(days.count / 2).first(where: { $0.minutes > 0 }) ?? days.dropFirst(days.count / 2).first {
+            tips.append(("heatmap", Text(verbatim: day.tipLabel)))
+        }
+        if let last = days.last { tips.append(("heatmap-last", Text(verbatim: last.tipLabel))) }
+        for (name, tip) in tips {
+            stage.tip = tip
+            try? await Task.sleep(for: .milliseconds(700))
+            save(window(titled: true), to: directory.appending(path: "main-home-tip-\(name).png"))
+        }
+        stage.tip = nil
+        #endif
+    }
+
+    /// A vocabulary term being edited: once with a new spelling, once refused as a duplicate.
+    private static func saveVocabularyEdits(app: AppController, to directory: URL) async {
+        #if DEBUG
+        let terms = app.settings.settings.vocabulary
+        guard let term = terms.last else { return }
+        let stage = SnapshotStage.shared
+        for (name, draft) in [("edit", term + " 2"), ("edit-duplicate", terms.count > 1 ? terms[0].uppercased() : term + ",")] {
+            stage.editingTerm = .init(term: term, draft: draft)
+            try? await Task.sleep(for: .milliseconds(700))
+            save(window(titled: true), to: directory.appending(path: "main-vocabulary-\(name).png"))
+            stage.editingTerm = nil
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        #endif
+    }
+
+    /// The notch island at rest and opened, under a MacBook notch and on a screen without one.
+    private static func saveIslands(to directory: URL) async {
+        #if DEBUG
+        let speech = [0.9, 0.7, 0.95, 0.6, 0.8, 0.5]
+        let notch = NotchMetrics(width: 185, height: 32)
+        func island(_ metrics: NotchMetrics, open: Bool, @ViewBuilder _ content: () -> some View,
+                    leading: some View = RecordingDot(), trailing: some View = MiniMeter(level: 0.8)) -> some View {
+            VStack(spacing: 0) {
+                NotchIsland(metrics: metrics, stays: false, forcesOpen: open, expanded: content, leading: { leading }, trailing: { trailing })
+                Spacer(minLength: 0)
+            }
+            .frame(width: 720, height: open ? 150 : 50)
+            .background(alignment: .top) {
+                // The menu bar strip, so the island's top corners read against it.
+                LinearGradient(colors: [Color(white: 0.82), Color(white: 0.7)], startPoint: .top, endPoint: .bottom)
+            }
+            .overlay(alignment: .top) {
+                // Where the physical notch is, outlined so the merge can be judged.
+                if metrics.width > 0 {
+                    UnevenRoundedRectangle(bottomLeadingRadius: 8, bottomTrailingRadius: 8)
+                        .stroke(.red.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        .frame(width: metrics.width, height: metrics.height)
+                }
+            }
+            .tipLayer(prefersBelow: true)
+        }
+        func bar(paused: Bool = false) -> some View {
+            CapsuleBar(isPaused: paused, level: 0.8, elapsed: 768, remoteSilent: false, showsHighlight: true,
+                       hasHighlights: false, toggle: {}, highlight: {}, finish: {})
+                .environment(\.snapshotWaveform, speech)
+        }
+        let view = VStack(spacing: 10) {
+            island(notch, open: false) { bar() }
+            island(notch, open: false, { bar(paused: true) }, leading: Icon("player-pause-filled", size: 13).foregroundStyle(Palette.orange),
+                   trailing: MiniMeter(level: nil))
+            island(notch, open: true) { bar() }
+            island(notch, open: true) {
+                EndingSoon(deadline: Date().addingTimeInterval(4.9), keep: {}, stop: {})
+            }
+            island(notch, open: true) {
+                HStack(spacing: 10) {
+                    Status(icon: "video", text: LocalizedStringKey(stringLiteral: "Zoom 會議"))
+                    CapsulePill("Record", filled: true) {}
+                    CircleButton("Not This Time", icon: "x") {}
+                }
+            }
+            island(notch, open: true) { Working(text: "Transcribing") }
+            island(.none, open: false) { bar() }
+            island(.none, open: true) { bar() }
+        }
+        .padding(16)
+        .background(Color(white: 0.3))
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        // Let the islands measure their open content and settle their spring.
+        try? await Task.sleep(for: .milliseconds(1200))
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: directory.appending(path: "islands.png"))
+        #endif
+    }
+
+    /// The menu bar window in each capture state, drawn with fixed meters, in light and dark.
+    private static func saveMenus(app: AppController, to directory: URL) async {
+        #if DEBUG
+        let target = RecordingTarget(bundleID: "us.zoom.xos", name: "Zoom", platform: .zoom)
+        let meters = MeterReading(me: 0.72, remote: 0.45, elapsed: 1_528, highlights: 2, remoteSilent: false)
+        let states: [(String, CaptureState)] = [
+            ("idle", .idle), ("recording", .recording(target)), ("paused", .paused(target)),
+            ("endingSoon", .endingSoon(target, deadline: Date().addingTimeInterval(4.9))),
+            ("failed", .failed(.microphoneDenied)),
+        ]
+        for (name, state) in states {
+            await saveMenu(MenuBarContent(app: app, preview: (state, meters)), to: directory.appending(path: "menubar-\(name).png"))
+        }
+        await saveMenu(MenuBarContent(app: app, preview: (.idle, meters), previewSetUp: true), to: directory.appending(path: "menubar-idle-ready.png"))
+        await saveMenu(MenuBarContent(app: app, preview: (.idle, meters)), dark: true, to: directory.appending(path: "menubar-idle-dark.png"))
+        await saveMenu(MenuBarContent(app: app, preview: (.recording(target), meters)), dark: true,
+                       to: directory.appending(path: "menubar-recording-dark.png"))
+        #endif
+    }
+
+    private static func saveMenu(_ view: MenuBarContent, dark: Bool = false, to url: URL) async {
+        let host = NSHostingView(rootView: view)
+        host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        // Let the calendar load and the reveal animations settle before drawing.
+        try? await Task.sleep(for: .milliseconds(900))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        window.setContentSize(host.frame.size)
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     /// Calendar sources with fixed events around today, so the dashboard's calendar can be judged
@@ -120,6 +263,20 @@ enum DebugSnapshot {
             todosFile: directory.appending(path: "todos.json"), now: Date.init)
         await fresh.reloadCalendar()
         render(CalendarCard(model: fresh).frame(width: 700).padding(24).background(Palette.window), to: directory.appending(path: "calendar-connect.png"))
+        render(VStack(alignment: .leading, spacing: 14) {
+            VoiceprintSummary(count: 4, channels: [.room, .call])
+            VoiceprintSummary(count: 2, channels: [.room])
+            VoiceprintSummary(count: 3, channels: [.call])
+            VoiceprintSummary(count: 0, channels: [])
+        }.frame(width: 420, alignment: .leading).padding(16).background(Palette.card), to: directory.appending(path: "people-channels.png"))
+        let words = ["XD", "可以", "Google", "一個", "應該", "現在", "沒有", "什麼", "Galaxy", "這樣", "Nexus", "Samsung", "還有",
+                     "不過", "就是", "早安", "測試", "Android", "分享", "這是", "HTC", "東西", "影片", "Blogger", "ROM", "哈哈",
+                     "今天", "我想", "如果", "好笑", "心情", "墾丁", "watch", "公車", "朋友", "準備", "鍵盤", "台中", "上班", "環島"]
+        let terms = words.enumerated().map { TermRow(term: $1, count: max(1, 60 / ($0 + 1) + (words.count - $0) / 4)) }
+        for (name, width) in [("wordcloud", 520.0), ("wordcloud-narrow", 360.0)] {
+            render(WordCloud(terms: terms, revealed: true).frame(width: width).padding(16).background(Palette.card),
+                   to: directory.appending(path: "\(name).png"))
+        }
         render(CalendarSourceList(model: app.dashboard).frame(width: 308).padding(16).background(Palette.card),
                to: directory.appending(path: "calendar-sources.png"))
         #endif
@@ -151,7 +308,7 @@ enum DebugSnapshot {
         .padding(8)
         .frame(width: size.width, height: size.height)
         .background(Palette.window)
-        .environment(\.tipBounds, size)
+        .tipLayer()
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -237,6 +394,22 @@ enum DebugSnapshot {
         }
         NSApp.terminate(nil)
     }
+}
+
+/// What a snapshot run asks views to show that normally needs the pointer or the keyboard. Both
+/// stay nil outside a snapshot run.
+@MainActor @Observable
+final class SnapshotStage {
+    struct Editing: Equatable {
+        let term: String
+        let draft: String
+    }
+
+    static let shared = SnapshotStage()
+    /// Tooltips with this text show as if hovered.
+    var tip: Text?
+    /// The vocabulary term that opens for editing, with this text typed.
+    var editingTerm: Editing?
 }
 
 /// A snapshot run draws views only; it must not read the user's Keychain, which prompts for the

@@ -21,7 +21,7 @@ struct VoiceprintsView: View {
                                 Avatar(name: person.name, isNamed: true, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(person.name).font(Typo.bodyStrong)
-                                    Text("\(person.voiceprintCount) voiceprints").font(Typo.caption).foregroundStyle(Palette.secondary)
+                                    VoiceprintSummary(count: person.voiceprintCount, channels: person.channels)
                                 }
                                 Spacer()
                                 IconButton("Rename…", icon: "pencil") {
@@ -52,5 +52,43 @@ struct VoiceprintsView: View {
         } message: { _ in
             Text("Their voiceprints are removed from this Mac. Past meetings show the speaker's letter again.")
         }
+    }
+}
+
+/// How many vectors a person has and where they were heard. A voice known only from the room
+/// scores low on a call until it is named there once, so that gap is spelled out.
+struct VoiceprintSummary: View {
+    let count: Int
+    let channels: Set<VoiceChannel>
+
+    var body: some View {
+        if count == 0 {
+            Text("No voiceprint yet").font(Typo.caption).foregroundStyle(Palette.muted)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("\(count) voiceprints").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    if channels.contains(.room) { ChannelTag(title: "In the room") }
+                    if channels.contains(.call) { ChannelTag(title: "On calls") }
+                }
+                if !channels.contains(.call) {
+                    Text("No call voiceprint yet. Name them once during a call and they will be recognized.")
+                        .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private struct ChannelTag: View {
+    let title: LocalizedStringKey
+
+    var body: some View {
+        Text(title)
+            .font(Typo.captionStrong)
+            .foregroundStyle(Palette.orange)
+            .padding(.horizontal, 7)
+            .frame(height: 18)
+            .background(Palette.orangeSoft, in: Capsule())
     }
 }

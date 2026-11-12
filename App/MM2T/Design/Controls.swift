@@ -229,66 +229,89 @@ struct ProgressLine: View {
     }
 }
 
-/// The size of the window's content, so a tooltip can tell which sides of its control have room.
-/// Zero where no window set it; the tooltip then only avoids the top and left edges.
-private struct TipBoundsKey: EnvironmentKey {
-    static let defaultValue = CGSize.zero
+/// A tooltip that wants to show, reported up to the nearest `tipLayer()`.
+struct TipRequest: Identifiable {
+    let id: UUID
+    let anchor: Anchor<CGRect>
+    let text: Text
 }
 
-extension EnvironmentValues {
-    var tipBounds: CGSize {
-        get { self[TipBoundsKey.self] }
-        set { self[TipBoundsKey.self] = newValue }
-    }
+private struct TipKey: PreferenceKey {
+    static let defaultValue: [TipRequest] = []
+    static func reduce(value: inout [TipRequest], nextValue: () -> [TipRequest]) { value += nextValue() }
 }
 
-/// A small label naming what the pointer is over. It sits above its control, centered, and moves
-/// below or lines up with an edge when the window has no room there.
+/// A small label naming what the pointer is over. The control only reports where it is; the label
+/// is drawn by the `tipLayer()` at the root of its window, so neighbouring views, cards and scroll
+/// views can neither cover nor clip it.
 struct TipModifier: ViewModifier {
     let text: Text
     let show: Bool
-    @Environment(\.tipBounds) private var bounds
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        let shown = show || SnapshotStage.shared.tip == text
+        return content.anchorPreference(key: TipKey.self, value: .bounds) { shown ? [TipRequest(id: id, anchor: $0, text: text)] : [] }
+    }
+}
+
+/// Draws every tooltip of the views inside it, above all of them. Apply once at the root of each
+/// window (and of any sheet or popover) that shows tooltips. A label sits above its control,
+/// centered, and moves below or lines up with an edge when the layer has no room there;
+/// `prefersBelow` puts labels under their controls wherever there is room.
+struct TipLayer: ViewModifier {
+    var prefersBelow = false
 
     /// The label's height plus the gap to the control, and the widest half-label the app shows.
     private static let clearance: CGFloat = 36
     private static let reach: CGFloat = 64
 
     func body(content: Content) -> some View {
-        content.overlay {
+        content.overlayPreferenceValue(TipKey.self) { tips in
             GeometryReader { proxy in
-                let frame = proxy.frame(in: .global)
-                let below = frame.minY < Self.clearance
-                let horizontal: HorizontalAlignment = frame.midX < Self.reach ? .leading
-                    : bounds.width > 0 && frame.midX > bounds.width - Self.reach ? .trailing : .center
-                ZStack {
-                    if show {
-                        text
-                            .font(Typo.captionStrong)
-                            .foregroundStyle(.white)
-                            .fixedSize()
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(hex: 0x1B1B1D), in: Capsule())
-                            .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
-                            .offset(y: below ? 30 : -30)
-                            .transition(.scale(scale: 0.85, anchor: below ? .top : .bottom).combined(with: .opacity))
-                    }
+                ZStack(alignment: .topLeading) {
+                    // Pins the stack's origin to the layer's, which the labels' guides count from.
+                    Color.clear.frame(width: proxy.size.width, height: proxy.size.height)
+                    ForEach(tips) { tip in label(tip, rect: proxy[tip.anchor], bounds: proxy.size) }
                 }
-                // A frame the control's size with the label hanging out of it: the label keeps its own
-                // width, so aligning to an edge makes it grow away from the window's border.
-                .frame(width: proxy.size.width, height: proxy.size.height,
-                       alignment: Alignment(horizontal: horizontal, vertical: below ? .bottom : .top))
-                .motion(Motion.reveal, value: show)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                .motion(Motion.reveal, value: tips.map(\.id))
             }
             .allowsHitTesting(false)
         }
-        .zIndex(show ? 10 : 0)
+    }
+
+    private func label(_ tip: TipRequest, rect: CGRect, bounds: CGSize) -> some View {
+        let roomAbove = rect.minY >= Self.clearance
+        let roomBelow = rect.maxY + Self.clearance <= bounds.height
+        let below = prefersBelow ? roomBelow || !roomAbove : !roomAbove
+        let horizontal: HorizontalAlignment = rect.midX < Self.reach ? .leading
+            : rect.midX > bounds.width - Self.reach ? .trailing : .center
+        return tip.text
+            .font(Typo.captionStrong)
+            .foregroundStyle(.white)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(hex: 0x1B1B1D), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
+            .offset(y: below ? 30 : -30)
+            // A frame the control's size with the label hanging out of it: the label keeps its own
+            // width, so aligning to an edge makes it grow away from the layer's border.
+            .frame(width: rect.width, height: rect.height, alignment: Alignment(horizontal: horizontal, vertical: below ? .bottom : .top))
+            // Laid out over the control, not moved there by `position` or `offset`: those leave the
+            // view's frame elsewhere (the whole layer, or its corner), and the transition would grow
+            // the label out of that point instead of out of its control.
+            .alignmentGuide(.leading) { _ in -rect.minX }
+            .alignmentGuide(.top) { _ in -rect.minY }
+            .transition(.scale(scale: 0.85, anchor: below ? .bottom : .top).combined(with: .opacity))
     }
 }
 
 extension View {
     func tip(_ title: LocalizedStringKey, show: Bool) -> some View { modifier(TipModifier(text: Text(title), show: show)) }
     func tip(verbatim name: String, show: Bool) -> some View { modifier(TipModifier(text: Text(verbatim: name), show: show)) }
+    func tipLayer(prefersBelow: Bool = false) -> some View { modifier(TipLayer(prefersBelow: prefersBelow)) }
 }
 
 /// A speaker as a circled initial; orange once named, gray while still a letter code.

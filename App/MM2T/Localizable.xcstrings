@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ detected": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "偵測到 %@"
+          }
+        }
+      }
+    },
     "%@ failed: %@": {
       "localizations": {
         "zh-Hant": {
@@ -47,6 +57,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ · %2$lld 場會議"
+          }
+        }
+      }
+    },
+    "%@, said %lld times": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@，出現 %2$lld 次"
           }
         }
       }
@@ -217,6 +237,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "允許⋯"
+          }
+        }
+      }
+    },
+    "Already in your vocabulary": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已在詞彙中"
           }
         }
       }
@@ -447,6 +477,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連上 %@。"
+          }
+        }
+      }
+    },
+    "Couldn't record": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法錄音"
           }
         }
       }
@@ -821,12 +861,32 @@
         }
       }
     },
+    "In the room": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現場"
+          }
+        }
+      }
+    },
     "Join": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "加入"
+          }
+        }
+      }
+    },
+    "Keep Recording": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繼續錄音"
           }
         }
       }
@@ -927,6 +987,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "我"
+          }
+        }
+      }
+    },
+    "Meeting ended": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會議已結束"
           }
         }
       }
@@ -1061,6 +1131,26 @@
         }
       }
     },
+    "Next Up": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接下來"
+          }
+        }
+      }
+    },
+    "No call voiceprint yet. Name them once during a call and they will be recognized.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無通話聲紋，在通話中命名一次後就能辨識"
+          }
+        }
+      }
+    },
     "No meeting audio is reaching mm2t. Allow system audio recording in System Settings.": {
       "localizations": {
         "zh-Hant": {
@@ -1107,6 +1197,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "還沒有詞彙"
+          }
+        }
+      }
+    },
+    "No voiceprint yet": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無聲紋"
           }
         }
       }
@@ -1241,6 +1341,16 @@
         }
       }
     },
+    "On calls": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話"
+          }
+        }
+      }
+    },
     "On this Mac": {
       "localizations": {
         "zh-Hant": {
@@ -1257,6 +1367,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "本機模型"
+          }
+        }
+      }
+    },
+    "One term at a time": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次只能一個詞"
           }
         }
       }
@@ -1287,6 +1407,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "請先開啟瀏覽器再授權。授權後 mm2t 才能讀取目前分頁的網址。"
+          }
+        }
+      }
+    },
+    "Others": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對方"
           }
         }
       }
@@ -1327,6 +1457,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "暫停"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已暫停"
           }
         }
       }
@@ -1421,6 +1561,16 @@
         }
       }
     },
+    "Processing…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "處理中…"
+          }
+        }
+      }
+    },
     "Quit mm2t": {
       "localizations": {
         "zh-Hant": {
@@ -1471,6 +1621,26 @@
         }
       }
     },
+    "Ready": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待命中"
+          }
+        }
+      }
+    },
+    "Recent Meetings": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近的會議"
+          }
+        }
+      }
+    },
     "Recognizing speakers": {
       "localizations": {
         "zh-Hant": {
@@ -1517,6 +1687,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法開始錄音：%@"
+          }
+        }
+      }
+    },
+    "Recording in progress": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音中"
           }
         }
       }
@@ -1607,6 +1787,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "重試"
+          }
+        }
+      }
+    },
+    "Said %lld times": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出現 %lld 次"
           }
         }
       }
@@ -1751,6 +1941,16 @@
         }
       }
     },
+    "Setup isn't finished": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未完成設定"
+          }
+        }
+      }
+    },
     "Setup…": {
       "localizations": {
         "zh-Hant": {
@@ -1777,16 +1977,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "登入沒有完成，請再試一次。"
-          }
-        }
-      }
-    },
-    "Sources are tried top to bottom. mm2t moves to the next one only when a source can't be reached.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "由上而下依序嘗試；只有在連不上時才會改用下一個來源。"
           }
         }
       }
@@ -1931,6 +2121,16 @@
         }
       }
     },
+    "Stop Now": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即結束"
+          }
+        }
+      }
+    },
     "Subtitles (.srt)…": {
       "localizations": {
         "zh-Hant": {
@@ -2011,22 +2211,22 @@
         }
       }
     },
-    "The first transcription after opening mm2t takes a few minutes while macOS prepares the model.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每次開啟 mm2t 後的第一次轉錄，macOS 需要幾分鐘準備模型。"
-          }
-        }
-      }
-    },
     "The generated views will need regenerating.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "產生的內容需要重新產生。"
+          }
+        }
+      }
+    },
+    "The meeting ended. Recording stops in %lld seconds.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會議已結束，%lld 秒後停止錄音"
           }
         }
       }
@@ -2067,6 +2267,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "第三方授權聲明"
+          }
+        }
+      }
+    },
+    "This Is Me": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這是我"
           }
         }
       }
@@ -2171,16 +2381,7 @@
         }
       }
     },
-    "Use a Gemini key from a paid plan. On the free tier, Google may use what you send to improve its products.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請使用付費方案的 Gemini 金鑰。免費方案送出的內容可能被 Google 用於改進產品。"
-          }
-        }
-      }
-    },
+ 
     "Vocabulary": {
       "localizations": {
         "zh-Hant": {
@@ -2417,6 +2618,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "mm2t 會特別留意這些詞，並照你的寫法寫出來。會議中聽到的專有名詞，以及你在逐字稿裡修正過的詞，也會自動加進來。"
+          }
+        }
+      }
+    },
+    "mm2t needs your permissions and keys before it can take notes.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mm2t 需要你的權限與金鑰才能開始記錄。"
           }
         }
       }

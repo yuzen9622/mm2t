@@ -24,8 +24,6 @@ struct OnboardingView: View {
                     Panel(title: "API keys") {
                         CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
                         CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
-                        Text("Use a Gemini key from a paid plan. On the free tier, Google may use what you send to improve its products.")
-                            .font(Typo.caption).foregroundStyle(Palette.secondary)
                     }
                     if !setup.issues.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {

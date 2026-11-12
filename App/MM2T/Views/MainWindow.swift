@@ -30,6 +30,24 @@ enum SidebarItem: Hashable, CaseIterable {
     }
 }
 
+/// Where the main window should go next, asked for from outside it, such as the menu bar.
+@MainActor @Observable
+final class MainNavigation {
+    struct Request: Equatable {
+        let section: SidebarItem
+        var meeting: MeetingID?
+    }
+
+    static let shared = MainNavigation()
+    var request: Request?
+
+    /// Opens the main window on `section`, or on one meeting.
+    func open(_ section: SidebarItem, meeting: MeetingID? = nil) {
+        request = Request(section: section, meeting: meeting)
+        WindowOpener.open(WindowID.main)
+    }
+}
+
 struct MainWindow: View {
     let app: AppController
     @State private var section = SidebarItem.home
@@ -39,7 +57,7 @@ struct MainWindow: View {
     @Namespace private var sidebarSpace
 
     var body: some View {
-        GeometryReader { window in
+        Group {
             if app.needsOnboarding, !DebugSnapshot.isRequested {
                 SetupGate()
             } else {
@@ -52,7 +70,7 @@ struct MainWindow: View {
                     .background(Palette.window)
                     .clipped()
             }
-            .environment(\.tipBounds, window.size)
+            .tipLayer()
             }
         }
         .foregroundStyle(Palette.text)
@@ -64,6 +82,11 @@ struct MainWindow: View {
             app.meetings.meLabel = Copy.presentationLabels.me
             app.dashboard.meLabel = Copy.presentationLabels.me
             DebugSnapshot.mainWindowAppeared(select: { show(.meetings, meeting: $0) }, show: { show($0) })
+        }
+        .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
+            guard let request else { return }
+            show(request.section, meeting: request.meeting)
+            MainNavigation.shared.request = nil
         }
     }
 
@@ -225,8 +248,6 @@ struct ScreenHeader<Trailing: View>: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 60)
-        // Above the content that follows it, so a tooltip hanging below a header button is not covered.
-        .zIndex(1)
     }
 }
 

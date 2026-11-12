@@ -46,16 +46,40 @@ final class JobBanner {
     }
 }
 
-/// What the floating panel shows: the capture state first, then processing and its result.
+/// What the floating panel shows: the capture state first, then processing and its result, in an
+/// island that grows out of the notch.
 struct FloatingContent: View {
     let app: AppController
     let banner: JobBanner
+    let notch: NotchModel
 
     static func isShown(app: AppController, banner: JobBanner) -> Bool {
         app.capture.state != .idle || app.queue.activeJob != nil || banner.outcome != nil
     }
 
     var body: some View {
+        NotchIsland(metrics: notch.metrics, stays: staysOpen) {
+            expanded
+        } leading: {
+            leadingWing
+        } trailing: {
+            trailingWing
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .tipLayer(prefersBelow: true)
+    }
+
+    /// States that ask for an answer or report something open by themselves; the rest wait for
+    /// the pointer.
+    private var staysOpen: Bool {
+        switch app.capture.state {
+        case .prompting, .awaitingMicrophone, .endingSoon, .failed: true
+        case .idle: app.queue.activeJob == nil && banner.outcome != nil
+        case .starting, .recording, .paused, .stopping: false
+        }
+    }
+
+    @ViewBuilder private var expanded: some View {
         ZStack {
             switch app.capture.state {
             case .idle:
@@ -68,6 +92,9 @@ struct FloatingContent: View {
                 Working(text: "Starting…")
             case .recording, .paused:
                 RecordingCapsule(capture: app.capture)
+            case .endingSoon(_, let deadline):
+                EndingSoon(deadline: deadline, keep: { Task { await app.capture.keepRecording() } },
+                           stop: { Task { await app.capture.stop() } })
             case .stopping:
                 Working(text: "Saving…")
             case .failed(let failure):
@@ -75,12 +102,29 @@ struct FloatingContent: View {
             }
         }
         .transition(.opacity)
-        .capsuleChrome()
-        .fixedSize()
         .motion(Motion.reveal, value: stage)
-        // Room above the capsule for its buttons' tooltips.
-        .padding(.top, 34)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder private var leadingWing: some View {
+        switch app.capture.state {
+        case .recording: RecordingDot()
+        case .paused: Icon("player-pause-filled", size: 13).foregroundStyle(Palette.orange)
+        case .starting, .stopping: Spinner()
+        case .idle where app.queue.activeJob != nil: Spinner()
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder private var trailingWing: some View {
+        switch app.capture.state {
+        case .recording: MiniMeter(level: level)
+        case .paused: MiniMeter(level: nil)
+        default: EmptyView()
+        }
+    }
+
+    private var level: Double {
+        Double(max(app.capture.meters.me.meter(), app.capture.meters.remote.meter()))
     }
 
     /// Which capsule is showing, so a change of kind animates while meter ticks do not.
@@ -92,6 +136,7 @@ struct FloatingContent: View {
         case .starting: "starting"
         case .recording: "recording"
         case .paused: "paused"
+        case .endingSoon: "ending"
         case .stopping: "stopping"
         case .failed: "failed"
         }
@@ -121,6 +166,168 @@ struct FloatingContent: View {
 
     private func title(_ id: MeetingID) -> String {
         app.meetings.rows.first { $0.id == id }?.title ?? ""
+    }
+}
+
+/// A black shape that hangs from the screen's top edge and merges with the notch. At rest it is
+/// the notch plus a wing on each side for a glanceable status; under the pointer, or while
+/// `stays`, it springs open downward to show `expanded`. Without a notch it is a small pill
+/// hanging from the menu bar.
+struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
+    let metrics: NotchMetrics
+    let stays: Bool
+    /// Draws the island open without the pointer, for still pictures.
+    var forcesOpen = false
+    @ViewBuilder let expanded: Expanded
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let trailing: Trailing
+    @State private var hovering = false
+    @State private var openSize = CGSize.zero
+
+    /// The width of each wing beside the notch.
+    static var wing: CGFloat { 34 }
+
+    private var isOpen: Bool { stays || hovering || forcesOpen }
+    private var shape: NotchShape { NotchShape(ear: isOpen ? 12 : 6, radius: isOpen ? 22 : min(10, metrics.height / 2)) }
+    private var restWidth: CGFloat { metrics.width + Self.wing * 2 }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            expanded
+                .padding(.top, metrics.height + 4)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 14)
+                .frame(minWidth: restWidth)
+                .fixedSize()
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { openSize = $0 }
+                .opacity(isOpen ? 1 : 0)
+                .scaleEffect(isOpen ? 1 : 0.9, anchor: .top)
+                .allowsHitTesting(isOpen)
+            HStack(spacing: 0) {
+                leading.frame(width: Self.wing)
+                Color.clear.frame(width: metrics.width)
+                trailing.frame(width: Self.wing)
+            }
+            .frame(height: metrics.height)
+            .opacity(isOpen ? 0 : 1)
+        }
+        .frame(width: isOpen ? max(openSize.width, restWidth) : restWidth,
+               height: isOpen ? max(openSize.height, metrics.height) : metrics.height, alignment: .top)
+        .padding(.horizontal, shape.ear)
+        .clipShape(shape)
+        .background(.black, in: shape)
+        .contentShape(shape)
+        .onHover { hovering = $0 }
+        .font(Typo.bodyStrong)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        .motion(Motion.select, value: isOpen)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// The island's outline: a full-width top edge whose corners curve outward into the screen's edge
+/// like the notch's, straight sides and rounded bottom corners.
+struct NotchShape: Shape {
+    var ear: CGFloat
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(ear, radius) }
+        set { ear = newValue.first; radius = newValue.second }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(radius, rect.height / 2, (rect.width - ear * 2) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + ear, y: rect.minY + ear), control: CGPoint(x: rect.minX + ear, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX + ear, y: rect.maxY - radius))
+        path.addQuadCurve(to: CGPoint(x: rect.minX + ear + radius, y: rect.maxY), control: CGPoint(x: rect.minX + ear, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - ear - radius, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - ear, y: rect.maxY - radius), control: CGPoint(x: rect.maxX - ear, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - ear, y: rect.minY + ear))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control: CGPoint(x: rect.maxX - ear, y: rect.minY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The resting island's sign that it is recording: a red dot that breathes.
+struct RecordingDot: View {
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        Circle().fill(Palette.danger).frame(width: 8, height: 8)
+            .opacity(dim ? 0.45 : 1)
+            .animation(reduce ? nil : .easeInOut(duration: 1).repeatForever(), value: dim)
+            .onAppear { dim = true }
+            .accessibilityLabel("Recording")
+    }
+}
+
+/// Four bars that follow the louder track, sized for the resting island's wing; flat while paused.
+struct MiniMeter: View {
+    let level: Double?
+    private static let shape: [Double] = [0.55, 1, 0.75, 0.4]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Self.shape.indices, id: \.self) { index in
+                Capsule()
+                    .fill(.white.opacity(level == nil ? 0.45 : 1))
+                    .frame(width: 2.5, height: 3 + 11 * (level ?? 0) * Self.shape[index])
+            }
+        }
+        .frame(height: 14)
+        .animation(.easeOut(duration: 0.12), value: level)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The small orange ring that turns while something is under way.
+struct Spinner: View {
+    @State private var spinning = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.15, to: 1)
+            .stroke(Palette.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .animation(reduce ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)
+            .onAppear { spinning = true }
+    }
+}
+
+/// The meeting app went quiet: recording stops at `deadline` unless the user keeps it going.
+struct EndingSoon: View {
+    let deadline: Date
+    let keep: () -> Void
+    let stop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                let left = max(1, Int(deadline.timeIntervalSince(context.date).rounded(.up)))
+                HStack(spacing: 8) {
+                    Text(verbatim: "\(left)")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: true))
+                        .frame(width: 24, height: 24)
+                        .overlay(Circle().strokeBorder(Palette.orange, lineWidth: 2))
+                    Text("The meeting ended. Recording stops in \(left) seconds.")
+                        .contentTransition(.numericText(countsDown: true))
+                }
+                .motion(Motion.select, value: left)
+            }
+            .padding(.leading, 6)
+            CapsulePill("Keep Recording", filled: true, action: keep)
+            CapsulePill("Stop Now", action: stop)
+        }
     }
 }
 
@@ -154,18 +361,10 @@ struct Status: View {
 
 struct Working: View {
     let text: LocalizedStringKey
-    @State private var spinning = false
-    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .trim(from: 0.15, to: 1)
-                .stroke(Palette.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .frame(width: 14, height: 14)
-                .rotationEffect(.degrees(spinning ? 360 : 0))
-                .animation(reduce ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)
-                .onAppear { spinning = true }
+            Spinner()
             Text(text).contentTransition(.opacity)
         }
         .padding(.horizontal, 10)
