@@ -105,7 +105,6 @@ struct MenuBarContent: View {
 
     private var footer: some View {
         VStack(spacing: 8) {
-            Rectangle().fill(Palette.border).frame(height: 1)
             HStack(spacing: 2) {
                 IconButton("Meetings", icon: "messages") { go(.meetings) }
                 IconButton("Settings", icon: "settings") { go(.settings) }

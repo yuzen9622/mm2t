@@ -28,6 +28,9 @@ enum SidebarItem: Hashable, CaseIterable {
         case .settings: "Settings"
         }
     }
+
+    /// The places the sidebar lists; settings opens as a dialog from the sidebar's foot instead.
+    static let destinations: [SidebarItem] = [.home, .meetings, .people, .vocabulary]
 }
 
 /// Where the main window should go next, asked for from outside it, such as the menu bar.
@@ -40,11 +43,27 @@ final class MainNavigation {
 
     static let shared = MainNavigation()
     var request: Request?
+    /// Settings open as a dialog over the main window, on this section.
+    var settingsOpen = false
+    var settingsSection = SettingsSection.general
 
-    /// Opens the main window on `section`, or on one meeting.
+    /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
     func open(_ section: SidebarItem, meeting: MeetingID? = nil) {
         request = Request(section: section, meeting: meeting)
         WindowOpener.open(WindowID.main)
+    }
+}
+
+/// The main window's content sits in one centered column that grows with the window up to a
+/// reading width, instead of running edge to edge.
+enum ContentColumn {
+    static let share: CGFloat = 0.6
+    /// The narrowest the column gets while there is room: what the window's minimum size leaves.
+    static let minimum: CGFloat = 620
+    static let maximum: CGFloat = 920
+
+    static func width(window: CGFloat, available: CGFloat) -> CGFloat {
+        min(available, max(minimum, min(maximum, window * share)))
     }
 }
 
@@ -55,20 +74,31 @@ struct MainWindow: View {
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
     @State private var movedUp = false
     @Namespace private var sidebarSpace
+    @Environment(\.openURL) private var openURL
+
+    static let sidebarWidth: CGFloat = 196
 
     var body: some View {
+        @Bindable var navigation = MainNavigation.shared
         Group {
             if app.needsOnboarding, !DebugSnapshot.isRequested, !WindowSharing.allowsCapture {
                 SetupGate()
             } else {
             HStack(spacing: 0) {
                 sidebar
-                Divider().overlay(Palette.border)
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .topLeading) { title }
-                    .background(Palette.window)
-                    .clipped()
+                GeometryReader { proxy in
+                    // A meeting's transcript and its side panels use the whole width.
+                    let column = meeting == nil
+                        ? ContentColumn.width(window: proxy.size.width + Self.sidebarWidth, available: proxy.size.width)
+                        : proxy.size.width
+                    content
+                        .frame(width: column)
+                        .frame(maxHeight: .infinity)
+                        .overlay(alignment: .topLeading) { title }
+                        .frame(maxWidth: .infinity)
+                }
+                .background(Palette.window)
+                .clipped()
             }
             .tipLayer()
             }
@@ -78,6 +108,9 @@ struct MainWindow: View {
         .background(WindowChrome())
         .ignoresSafeArea()
         .frame(minWidth: 820, minHeight: 540)
+        .sheet(isPresented: $navigation.settingsOpen) {
+            SettingsDialog(app: app)
+        }
         .onAppear {
             app.meetings.meLabel = Copy.presentationLabels.me
             app.dashboard.meLabel = Copy.presentationLabels.me
@@ -91,23 +124,41 @@ struct MainWindow: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach([SidebarItem.home, .meetings, .people, .vocabulary], id: \.self) { row($0) }
-            Spacer()
-            row(.settings)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 26, height: 26)
+                    .accessibilityHidden(true)
+                Text(verbatim: "mm2t").font(Typo.heading)
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SidebarItem.destinations, id: \.self) { row($0) }
+            }
+            // One highlight that travels to the selected row. Drawing it per row made the old one
+            // fade out while the new one faded in, which read as a shadow passing rather than a move.
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Palette.orangeSoft)
+                    .matchedGeometryEffect(id: section, in: sidebarSpace, isSource: false)
+            }
+            .motion(Motion.select, value: section)
+
+            Spacer(minLength: 12)
+            HStack(spacing: 2) {
+                IconButton("Settings", icon: "settings") { show(.settings) }
+                IconButton("Help", icon: "help-circle") { openURL(AppLinks.help) }
+                Spacer(minLength: 0)
+            }
         }
-        // One highlight that travels to the selected row. Drawing it per row made the old one
-        // fade out while the new one faded in, which read as a shadow passing rather than a move.
-        .background {
-            RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
-                .fill(Palette.orangeSoft)
-                .matchedGeometryEffect(id: section, in: sidebarSpace, isSource: false)
-        }
-        .motion(Motion.select, value: section)
         .padding(.horizontal, 10)
-        .padding(.top, 52)
+        .padding(.top, 46)
         .padding(.bottom, 12)
-        .frame(width: 176)
+        .frame(width: Self.sidebarWidth)
         .background(Palette.sidebar)
     }
 
@@ -116,6 +167,10 @@ struct MainWindow: View {
     }
 
     private func show(_ item: SidebarItem, meeting: MeetingID? = nil) {
+        if item == .settings {
+            MainNavigation.shared.settingsOpen = true
+            return
+        }
         let order = SidebarItem.allCases
         movedUp = order.firstIndex(of: item)! < order.firstIndex(of: section)!
         section = item
@@ -141,7 +196,7 @@ struct MainWindow: View {
     @ViewBuilder private var content: some View {
         ZStack {
             switch section {
-            case .home:
+            case .home, .settings:
                 HomeView(app: app, open: { show(.meetings, meeting: $0) }).transition(.opacity)
             case .meetings:
                 if let meeting {
@@ -156,8 +211,6 @@ struct MainWindow: View {
                 VoiceprintsView(model: app.people).transition(.opacity)
             case .vocabulary:
                 VocabularyView(store: app.settings).transition(.opacity)
-            case .settings:
-                SettingsView(app: app).transition(.opacity)
             }
         }
         .motion(Motion.page, value: section)
@@ -189,17 +242,19 @@ struct SidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
-                Icon(item.icon, size: 17)
-                Text(item.title).font(isSelected ? Typo.bodyStrong : Typo.body)
+            HStack(spacing: 10) {
+                Icon(item.icon, size: 16)
+                    .foregroundStyle(isSelected ? Palette.orange : Palette.secondary)
+                Text(item.title)
+                    .font(isSelected ? Typo.bodyStrong : Typo.body)
+                    .foregroundStyle(isSelected ? Palette.text : Palette.secondary)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(isSelected ? Palette.orange : Palette.secondary)
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: 32)
             .background {
                 if hovering, !isSelected {
-                    RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Palette.hover)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.hover)
                 }
             }
             .matchedGeometryEffect(id: item, in: space, isSource: true)
@@ -208,6 +263,7 @@ struct SidebarRow: View {
         .buttonStyle(Pressable())
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

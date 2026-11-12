@@ -46,12 +46,13 @@ enum DebugSnapshot {
             save(window(titled: true), to: directory.appending(path: "main-home.png"))
             await saveHomeTips(app: app, to: directory)
             await saveHomeVariants(app: app, to: directory)
-            for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.people, "people"), (.settings, "settings"), (.meetings, "list")] {
+            for (section, name) in [(SidebarItem.vocabulary, "vocabulary"), (.people, "people"), (.meetings, "list")] {
                 showSection?(section)
                 try? await Task.sleep(for: .milliseconds(900))
                 save(window(titled: true), to: directory.appending(path: "main-\(name).png"))
                 if section == .vocabulary { await saveVocabularyEdits(app: app, to: directory) }
             }
+            await saveSettings(app: app, to: directory)
             saveCapsules(to: directory)
             await saveIslands(to: directory)
             await saveMenus(app: app, to: directory)
@@ -109,6 +110,36 @@ enum DebugSnapshot {
             save(window(titled: true), to: directory.appending(path: "main-home-tip-\(name).png"))
         }
         stage.tip = nil
+        #endif
+    }
+
+    /// The settings dialog over the main window on each section, a search across sections, and
+    /// every section drawn at full length (the dialog scrolls). Key rows show their checked state.
+    private static func saveSettings(app: AppController, to directory: URL) async {
+        #if DEBUG
+        let navigation = MainNavigation.shared
+        let stage = SnapshotStage.shared
+        stage.keysVerified = true
+        navigation.settingsSection = .general
+        navigation.settingsOpen = true
+        try? await Task.sleep(for: .milliseconds(1200))
+        for section in SettingsSection.allCases {
+            navigation.settingsSection = section
+            try? await Task.sleep(for: .milliseconds(900))
+            save(window(titled: true)?.attachedSheet, to: directory.appending(path: "settings-\(section.rawValue).png"))
+        }
+        stage.settingsQuery = "Gemini"
+        try? await Task.sleep(for: .milliseconds(700))
+        save(window(titled: true)?.attachedSheet, to: directory.appending(path: "settings-search.png"))
+        stage.settingsQuery = nil
+        navigation.settingsOpen = false
+        try? await Task.sleep(for: .milliseconds(600))
+        for section in SettingsSection.allCases {
+            render(SettingsPage(app: app, section: section, query: "", showLicenses: .constant(false))
+                .frame(width: 560).padding(24).background(Palette.window).foregroundStyle(Palette.text).font(Typo.body),
+                   to: directory.appending(path: "settings-\(section.rawValue)-full.png"))
+        }
+        stage.keysVerified = false
         #endif
     }
 
@@ -254,6 +285,9 @@ enum DebugSnapshot {
         main.setContentSize(NSSize(width: 820, height: 540))
         try? await Task.sleep(for: .milliseconds(900))
         save(main, to: directory.appending(path: "main-home-min.png"))
+        main.setContentSize(NSSize(width: 1440, height: 900))
+        try? await Task.sleep(for: .milliseconds(900))
+        save(main, to: directory.appending(path: "main-home-wide.png"))
         main.setContentSize(NSSize(width: 980, height: 680))
         NSApp.appearance = NSAppearance(named: .darkAqua)
         try? await Task.sleep(for: .milliseconds(900))
@@ -414,6 +448,10 @@ final class SnapshotStage {
     var tip: Text?
     /// The vocabulary term that opens for editing, with this text typed.
     var editingTerm: Editing?
+    /// Typed into the settings dialog's search field.
+    var settingsQuery: String?
+    /// Key rows show the check mark of a key that passed its check.
+    var keysVerified = false
 }
 
 /// A snapshot run draws views only; it must not read the user's Keychain, which prompts for the
