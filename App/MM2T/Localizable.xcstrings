@@ -246,7 +246,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "已在詞彙中"
+            "value": "已經在詞彙表裡了"
           }
         }
       }
@@ -886,7 +886,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "現場"
+            "value": "會議室現場"
           }
         }
       }
@@ -1041,16 +1041,6 @@
         }
       }
     },
-    "Meetings…": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "會議⋯"
-          }
-        }
-      }
-    },
     "Merge Into": {
       "localizations": {
         "zh-Hant": {
@@ -1166,7 +1156,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚無通話聲紋，在通話中命名一次後就能辨識"
+            "value": "還沒有線上通話的聲紋。在通話中為他命名一次，之後就能認出來。"
           }
         }
       }
@@ -1226,7 +1216,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "尚無聲紋"
+            "value": "還沒有聲紋"
           }
         }
       }
@@ -1366,7 +1356,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "通話"
+            "value": "線上通話"
           }
         }
       }
@@ -1396,7 +1386,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "一次只能一個詞"
+            "value": "一次只能新增一個詞"
           }
         }
       }
@@ -1436,7 +1426,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "對方"
+            "value": "其他人"
           }
         }
       }
@@ -1586,7 +1576,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "處理中…"
+            "value": "處理中⋯"
           }
         }
       }
@@ -1646,7 +1636,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "待命中"
+            "value": "準備就緒"
           }
         }
       }
@@ -1716,7 +1706,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "錄音中"
+            "value": "正在錄音"
           }
         }
       }
@@ -1971,16 +1961,6 @@
         }
       }
     },
-    "Setup…": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "設定精靈⋯"
-          }
-        }
-      }
-    },
     "Show Meetings": {
       "localizations": {
         "zh-Hant": {
@@ -2131,22 +2111,12 @@
         }
       }
     },
-    "Stop": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "停止"
-          }
-        }
-      }
-    },
     "Stop Now": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "立即結束"
+            "value": "立即停止"
           }
         }
       }
@@ -2246,7 +2216,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "會議已結束，%lld 秒後停止錄音"
+            "value": "會議已結束，錄音將在 %lld 秒後停止。"
           }
         }
       }
@@ -2646,7 +2616,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "mm2t 需要你的權限與金鑰才能開始記錄。"
+            "value": "mm2t 需要先取得權限與 API 金鑰，才能開始記錄會議。"
           }
         }
       }
