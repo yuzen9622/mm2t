@@ -238,7 +238,7 @@ enum DebugSnapshot {
     /// without signing in anywhere. Outlook stays unavailable, as in a build without its client ID.
     static var sampleCalendars: [any CalendarSource]? {
         #if DEBUG
-        guard isRequested else { return nil }
+        guard isRequested || WindowSharing.allowsCapture else { return nil }
         return [SampleCalendar(.apple, .connected), SampleCalendar(.google, .connected), SampleCalendar(.microsoft, .unavailable)]
         #else
         return nil

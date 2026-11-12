@@ -17,7 +17,16 @@ enum WindowSharing {
         NSApp.windows.forEach(exclude)
     }
 
+    /// Debug-only escape hatch for recording promo footage (`MM2T_ALLOW_CAPTURE=1`): windows stay
+    /// capturable and the app uses sample calendars and no stored keys. Release builds always exclude.
+    #if DEBUG
+    static let allowsCapture = ProcessInfo.processInfo.environment["MM2T_ALLOW_CAPTURE"] == "1"
+    #else
+    static let allowsCapture = false
+    #endif
+
     static func exclude(_ window: NSWindow) {
+        if allowsCapture { return }
         if window.sharingType != .none { window.sharingType = .none }
     }
 }

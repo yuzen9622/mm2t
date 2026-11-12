@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
-            app = try DebugSnapshot.isRequested
+            app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
                 ? AppController.live(credentials: NoCredentials(), signedInPage: signedIn, calendars: DebugSnapshot.sampleCalendars)
                 : AppController.live(signedInPage: signedIn)
             startupError = nil
@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowSharing.install()
         guard let app else { return }
         floating = FloatingPanelController(app: app)
+        DebugRecorder.start(app: app)
         #if DEBUG
         if DebugSnapshot.isRequested {
             Task { await app.launch(watchMeetings: false) }
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup comes first: the main window shows nothing else until it is finished.
         Task {
             await app.enrollment.refresh()
-            if app.needsOnboarding { WindowOpener.open(WindowID.onboarding) }
+            if app.needsOnboarding, !WindowSharing.allowsCapture { WindowOpener.open(WindowID.onboarding) }
         }
     }
 

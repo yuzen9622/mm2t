@@ -58,7 +58,7 @@ struct MainWindow: View {
 
     var body: some View {
         Group {
-            if app.needsOnboarding, !DebugSnapshot.isRequested {
+            if app.needsOnboarding, !DebugSnapshot.isRequested, !WindowSharing.allowsCapture {
                 SetupGate()
             } else {
             HStack(spacing: 0) {
