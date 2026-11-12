@@ -121,7 +121,7 @@ struct CalendarCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: 28) {
                 ZStack {
                     MonthGridView(model: model)
                         .id(model.month)
@@ -130,7 +130,6 @@ struct CalendarCard: View {
                 .frame(width: gridWidth, height: Self.gridHeight, alignment: .top)
                 .clipped()
                 .motion(Motion.page, value: model.month)
-                Rectangle().fill(Palette.border).frame(width: 1, height: Self.gridHeight)
                 Group {
                     if model.hasConnectedCalendar {
                         DayAgenda(model: model)
@@ -606,7 +605,7 @@ private struct MeetingsCard: View {
                     ShareFigure(share: stats.myShare.map { revealed ? $0 : 0 })
                 }
             }
-            Rectangle().fill(Palette.border).frame(height: 1).padding(.vertical, 2)
+            Color.clear.frame(height: 6)
             let active = days.filter { $0.minutes > 0 }.count
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("Last 12 weeks").font(Typo.captionStrong).foregroundStyle(Palette.secondary)

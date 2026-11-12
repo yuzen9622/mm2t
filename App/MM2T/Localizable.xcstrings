@@ -231,6 +231,16 @@
         }
       }
     },
+    "About": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關於"
+          }
+        }
+      }
+    },
     "Accessibility": {
       "localizations": {
         "zh-Hant": {
@@ -361,6 +371,16 @@
         }
       }
     },
+    "App language": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 語言"
+          }
+        }
+      }
+    },
     "Apple Calendar": {
       "localizations": {
         "zh-Hant": {
@@ -377,6 +397,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "自動新增 %lld"
+          }
+        }
+      }
+    },
+    "Automation": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動化"
           }
         }
       }
@@ -417,6 +447,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "連結你的行事曆"
+          }
+        }
+      }
+    },
+    "Buy Me a Coffee": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請我喝杯咖啡"
           }
         }
       }
@@ -507,6 +547,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "整理逐字稿"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉"
           }
         }
       }
@@ -921,6 +971,16 @@
         }
       }
     },
+    "General": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般"
+          }
+        }
+      }
+    },
     "Generate on this Mac": {
       "localizations": {
         "zh-Hant": {
@@ -977,6 +1037,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "推測名字"
+          }
+        }
+      }
+    },
+    "Help": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "說明"
+          }
+        }
+      }
+    },
+    "Hide mm2t from screen sharing and screenshots": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在螢幕分享與截圖中隱藏 mm2t"
           }
         }
       }
@@ -1051,12 +1131,32 @@
         }
       }
     },
+    "Language": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "語言"
+          }
+        }
+      }
+    },
     "Last 12 weeks": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "最近 12 週"
+          }
+        }
+      }
+    },
+    "Legal": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "法律條款"
           }
         }
       }
@@ -1087,6 +1187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在載入行事曆…"
+          }
+        }
+      }
+    },
+    "Made by %@": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作者：%@"
           }
         }
       }
@@ -1327,6 +1437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "沒有符合的結果"
+          }
+        }
+      }
+    },
+    "No settings match “%@”.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有符合「%@」的設定。"
           }
         }
       }
@@ -1671,6 +1791,26 @@
         }
       }
     },
+    "Privacy": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隱私"
+          }
+        }
+      }
+    },
+    "Privacy Policy": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隱私權政策"
+          }
+        }
+      }
+    },
     "Process": {
       "localizations": {
         "zh-Hant": {
@@ -1911,6 +2051,26 @@
         }
       }
     },
+    "Restart": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新啟動"
+          }
+        }
+      }
+    },
+    "Restart mm2t to use the new language.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新啟動 mm2t 後才會換成新的語言。"
+          }
+        }
+      }
+    },
     "Resume": {
       "localizations": {
         "zh-Hant": {
@@ -2111,6 +2271,16 @@
         }
       }
     },
+    "Source code": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原始碼"
+          }
+        }
+      }
+    },
     "Speaker labels from transcription": {
       "localizations": {
         "zh-Hant": {
@@ -2291,6 +2461,16 @@
         }
       }
     },
+    "System": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跟隨系統"
+          }
+        }
+      }
+    },
     "System audio recording": {
       "localizations": {
         "zh-Hant": {
@@ -2307,6 +2487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "詞彙表裡的詞在會議中出現後，會顯示在這裡。"
+          }
+        }
+      }
+    },
+    "Terms of Service": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務條款"
           }
         }
       }
@@ -2531,6 +2721,16 @@
         }
       }
     },
+    "Version": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本"
+          }
+        }
+      }
+    },
     "Vocabulary": {
       "localizations": {
         "zh-Hant": {
@@ -2587,6 +2787,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "等待處理"
+          }
+        }
+      }
+    },
+    "While on, screen shares, recordings and screenshots leave mm2t's windows out.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟時，螢幕分享、螢幕錄影與截圖都不會出現 mm2t 的視窗。"
           }
         }
       }
@@ -2697,6 +2907,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "macOS 不允許 mm2t 讀取行事曆。"
+          }
+        }
+      }
+    },
+    "macOS permissions": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 權限"
           }
         }
       }
