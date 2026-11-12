@@ -8,6 +8,13 @@ public enum LLMLocation: String, Codable, Sendable, CaseIterable {
     case local
 }
 
+/// Which hosted service runs the LLM tasks when `llmLocation` is `.cloud`.
+public enum CloudLLM: String, Codable, Sendable, CaseIterable {
+    case gemini
+    /// The user's own OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp).
+    case openAICompatible
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
     /// Tried in order; each one listed must be configured. The chain falls through only when a
@@ -22,6 +29,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public private(set) var dismissedVocabulary: [String] = []
     public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
+    public var cloudLLM: CloudLLM = .gemini
+    /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
+    public var openAIBaseURL: URL?
+    public var openAIModel = ""
+    public var transcriptionLanguage: TranscriptionLanguage = .auto
     public var hasCompletedOnboarding = false
 
     public init() {}
@@ -37,12 +49,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
         dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
         diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
+        cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
+        openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
+        openAIModel = try c.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
+        transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
         case diarizationOrder, llmLocation, hasCompletedOnboarding
+        case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
@@ -52,6 +69,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
               ["http", "https"].contains(scheme), url.host() != nil else { return nil }
         return url
     }
+
+    /// Same parsing for the OpenAI-compatible server's API root.
+    public static func openAIBaseURL(from text: String) -> URL? { selfHostedURL(from: text) }
 
     public enum TermSource: Sendable { case manual, learned }
 

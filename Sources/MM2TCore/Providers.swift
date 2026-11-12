@@ -131,6 +131,23 @@ public enum TranscriptionSource: String, Codable, Sendable, CaseIterable {
     case local
 }
 
+/// The language of the speech, as a hint to every transcription source.
+public enum TranscriptionLanguage: String, Codable, Sendable, CaseIterable {
+    /// The model detects it, which suits mixed Mandarin and English.
+    case auto
+    case chinese
+    case english
+
+    /// ISO 639-1; nil leaves detection to the provider.
+    public var code: String? {
+        switch self {
+        case .auto: nil
+        case .chinese: "zh"
+        case .english: "en"
+        }
+    }
+}
+
 public enum TranscriptionError: Error, Equatable, Sendable {
     /// The provider could not be reached; the fallback chain moves to the next source.
     case unreachable(String)
