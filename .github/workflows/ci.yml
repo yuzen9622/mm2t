@@ -41,7 +41,7 @@ jobs:
           xcodebuild build \
             -project App/MM2T.xcodeproj -scheme mm2t -configuration Debug \
             -derivedDataPath .build/xcode-release \
-            CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+            CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= SWIFT_EMIT_LOC_STRINGS=YES
       - name: Every UI string has a zh-Hant translation
         run: |
           python3 App/Tools/strings.py .build/xcode-release
