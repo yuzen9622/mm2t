@@ -424,6 +424,11 @@ struct NoCredentials: CredentialStoring {
 }
 
 #if DEBUG
+/// Sample event titles follow the app's language, so English captures show English events.
+private func sample(_ zh: String, _ en: String) -> String {
+    Locale.preferredLanguages.first?.hasPrefix("zh") == true ? zh : en
+}
+
 /// A calendar source for snapshots: fixed meetings on the days around today.
 private struct SampleCalendar: CalendarSource {
     let kind: CalendarSourceKind
@@ -450,25 +455,25 @@ private struct SampleCalendar: CalendarSource {
         }
         let events: [CalendarEvent] = switch kind {
         case .google: [
-            at(0, 9.5, 30, "每日站會", link: "https://meet.google.com/abc-defg-hij"),
+            at(0, 9.5, 30, sample("每日站會", "Daily standup"), link: "https://meet.google.com/abc-defg-hij"),
             // Around the moment of the snapshot, so a live meeting and its Join button show.
-            CalendarEvent(id: "google-live", title: "新款手機行銷策略討論", start: live, end: live.addingTimeInterval(3600),
+            CalendarEvent(id: "google-live", title: sample("新款手機行銷策略討論", "Remote control kickoff"), start: live, end: live.addingTimeInterval(3600),
                           isAllDay: false, calendar: "", link: URL(string: "https://meet.google.com/qrs-tuvw-xyz"), source: .google),
-            CalendarEvent(id: "google-next", title: "與 Mei 一對一", start: live.addingTimeInterval(5400), end: live.addingTimeInterval(7200),
+            CalendarEvent(id: "google-next", title: sample("與 Mei 一對一", "1:1 with Mei"), start: live.addingTimeInterval(5400), end: live.addingTimeInterval(7200),
                           isAllDay: false, calendar: "", link: URL(string: "https://meet.google.com/jkl-mnop-qrs"), source: .google),
-            at(1, 10, 60, "供應商報價會議", link: "https://meet.google.com/xyz-abcd-efg"),
-            at(3, 14, 90, "通路合作提案", link: "https://meet.google.com/qrs-tuvw-xyz"),
-            at(-2, 11, 60, "直播腳本檢討"),
-            at(8, 15, 60, "通路促銷週會", link: "https://meet.google.com/lmn-opqr-stu"),
+            at(1, 10, 60, sample("供應商報價會議", "Vendor pricing call"), link: "https://meet.google.com/xyz-abcd-efg"),
+            at(3, 14, 90, sample("通路合作提案", "Channel partner pitch"), link: "https://meet.google.com/qrs-tuvw-xyz"),
+            at(-2, 11, 60, sample("直播腳本檢討", "Livestream script review")),
+            at(8, 15, 60, sample("通路促銷週會", "Weekly promo sync"), link: "https://meet.google.com/lmn-opqr-stu"),
         ]
         case .apple: [
-            at(0, 9.5, 30, "每日站會", "工作"),
-            at(0, 11, 60, "Q4 預算審查", "工作", link: "https://teams.microsoft.com/l/meetup-join/sample"),
-            at(0, 14, 60, "設計評論", "工作", link: "https://zoom.us/j/5550100"),
-            at(1, 0, 0, "產品外訓", "家庭", allDay: true),
-            at(5, 13, 45, "牙醫", "家庭"),
-            at(-6, 10, 60, "季度規劃", "工作"),
-            at(12, 9, 60, "董事會簡報", "工作", link: "https://zoom.us/j/5550101"),
+            at(0, 9.5, 30, sample("每日站會", "Daily standup"), sample("工作", "Work")),
+            at(0, 11, 60, sample("Q4 預算審查", "Q4 budget review"), sample("工作", "Work"), link: "https://teams.microsoft.com/l/meetup-join/sample"),
+            at(0, 14, 60, sample("設計評論", "Design critique"), sample("工作", "Work"), link: "https://zoom.us/j/5550100"),
+            at(1, 0, 0, sample("產品外訓", "Product offsite"), sample("家庭", "Family"), allDay: true),
+            at(5, 13, 45, sample("牙醫", "Dentist"), sample("家庭", "Family")),
+            at(-6, 10, 60, sample("季度規劃", "Quarterly planning"), sample("工作", "Work")),
+            at(12, 9, 60, sample("董事會簡報", "Board briefing"), sample("工作", "Work"), link: "https://zoom.us/j/5550101"),
         ]
         case .microsoft: []
         }

@@ -12,8 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
             app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
-                ? AppController.live(credentials: NoCredentials(), signedInPage: signedIn, calendars: DebugSnapshot.sampleCalendars)
-                : AppController.live(signedInPage: signedIn)
+                ? AppController.live(defaults: DebugRecorder.defaults, credentials: NoCredentials(), signedInPage: signedIn,
+                                     calendars: DebugSnapshot.sampleCalendars)
+                : AppController.live(defaults: DebugRecorder.defaults, signedInPage: signedIn)
             startupError = nil
         } catch {
             app = nil

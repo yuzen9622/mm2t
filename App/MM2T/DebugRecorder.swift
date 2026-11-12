@@ -20,6 +20,17 @@ enum DebugRecorder {
     private static let writer = DispatchQueue(label: "mm2t.debug-recorder", qos: .userInitiated, attributes: .concurrent)
     #endif
 
+    /// Where settings are read and written. In a Debug build `MM2T_DEFAULTS_SUITE` names a separate
+    /// defaults suite, so promo captures and benchmark runs never read or change the user's settings.
+    static var defaults: UserDefaults {
+        #if DEBUG
+        if let suite = ProcessInfo.processInfo.environment["MM2T_DEFAULTS_SUITE"], let store = UserDefaults(suiteName: suite) {
+            return store
+        }
+        #endif
+        return .standard
+    }
+
     static func start(app: AppController) {
         #if DEBUG
         guard directory != nil, timer == nil else { return }
