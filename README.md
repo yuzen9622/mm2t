@@ -1,15 +1,70 @@
-# mm2t
+<div align="center">
+  <img src="docs/assets/icon.png" alt="mm2t" width="128"/>
 
-mm2t 是原生 macOS 會議記錄 App。它常駐選單列，在 Google Meet、Microsoft Teams、Zoom、Webex 開會時錄下你的麥克風和會議 App 的聲音，會後產生帶發言者的逐字稿、整理版逐字稿、依人彙整和會議摘要。
+  <h1>mm2t</h1>
 
-- 不派 Bot 進會議，也不錄畫面。
-- 兩條音軌分開錄：「我」（麥克風）和「遠端」（只擷取會議 App 或瀏覽器的聲音）。
-- 說話者分群和聲紋比對都在 Mac 上執行。認出過的人，下次會議會自動填上名字。
-- 錄音、聲紋資料庫和會議紀錄只存在你的 Mac。
-- 自備 API 金鑰（BYOK）：語音轉文字預設用 ElevenLabs Scribe v2，摘要等文字整理用 Google Gemini。也可以改用自架的轉錄伺服器。
-- 錄音時螢幕頂端會出現膠囊，顯示時間、兩軌音量和控制按鈕。所有 mm2t 視窗都不會出現在螢幕分享畫面裡。
+  <p><strong>開會時專心說話，紀錄交給 mm2t。</strong></p>
 
-![會議清單](docs/screenshots/main-list.png)
+  <p>常駐 Mac 選單列的會議記錄工具。偵測到會議就開始錄音，會後產出分好說話者的逐字稿與摘要。</p>
+
+  <p>
+    <a href="https://github.com/yuzen9622/mm2t/releases/latest"><strong>下載 mm2t</strong></a>
+    &nbsp;·&nbsp; macOS 14.2 以上 &nbsp;·&nbsp; 免費、開放原始碼
+  </p>
+</div>
+
+<p align="center">
+  <img src="docs/assets/hero.gif" alt="在 mm2t 中確認說話者名字並查看會議摘要" width="880"/>
+</p>
+
+## 不需要邀請任何人進會議
+
+mm2t 直接在你的 Mac 上錄音，不會有 Bot 加入會議，也不錄畫面。支援 Google Meet、Microsoft Teams、Zoom 與 Webex，會議一開始，螢幕頂端就會詢問要不要記錄；會議結束後倒數幾秒自動停止。
+
+mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不用擔心被看到。
+
+<p align="center">
+  <img src="docs/assets/feature-recording-capsule.png" alt="偵測到 Zoom 會議時的提示，以及會議結束時的倒數" width="720"/>
+</p>
+
+## 知道每一句話是誰說的
+
+你的麥克風和會議另一端的聲音分成兩條音軌錄製，再由 Mac 本機辨識不同的說話者。替說話者命名一次，mm2t 會記住他的聲紋，下次開會自動標上名字。
+
+<p align="center">
+  <img src="docs/assets/feature-speakers.png" alt="標好說話者名字的逐字稿" width="880"/>
+</p>
+
+## 會議結束，紀錄就整理好了
+
+每場會議會產出四種內容：
+
+| | |
+| --- | --- |
+| 逐字稿 | 依時間排列，標示說話者 |
+| 整理版逐字稿 | 去掉贅字與口頭禪，方便閱讀 |
+| 依人彙整 | 每個人說了哪些重點 |
+| 摘要 | 決議、討論重點與待辦事項，每一條都附上時間點 |
+
+<p align="center">
+  <img src="docs/assets/feature-summary.png" alt="會議摘要：決議、討論重點與待辦事項" width="880"/>
+</p>
+
+所有會議依時間排列在同一個清單，可以用標題、內容或與會者搜尋。
+
+## 資料留在你的 Mac
+
+錄音、聲紋與會議紀錄都只存在本機，mm2t 沒有自己的伺服器。語音轉文字與摘要使用你自己的 API 金鑰（ElevenLabs、Google Gemini），費用直接由你的帳號支付；也可以改用自架的轉錄伺服器，讓音訊完全不離開你的設備。詳見 [隱私權政策](PRIVACY.md)。
+
+## 30 秒看懂 mm2t
+
+<p align="center">
+  <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4"><img src="docs/assets/poster.png" alt="播放 mm2t 介紹影片" width="880"/></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4">觀看中文版</a> &nbsp;·&nbsp; <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-en.mp4">Watch in English</a>
+</p>
 
 ## 安裝
 
@@ -21,7 +76,7 @@ mm2t 是原生 macOS 會議記錄 App。它常駐選單列，在 Google Meet、M
 
 目前的版本還沒有 Developer ID 簽章與 Apple 公證，第一次打開時 macOS 會擋下來：在「應用程式」中按住 Control 點一下 `mm2t.app` 選 **打開**；若沒有「打開」選項，到 **系統設定 > 隱私權與安全性** 按 **仍要打開**。每個 Release 頁面都有完整步驟。
 
-正式簽章的版本會用 Sparkle 檢查更新（未簽章版本不會自動更新，請回 GitHub Releases 下載新版）。mm2t 用 [Sparkle](https://sparkle-project.org) 檢查更新。第二次啟動時它會詢問你要不要自動檢查；之後也可以從選單列選單的 **檢查更新⋯** 手動檢查。
+目前的版本不會自動更新，有新版時請回 [GitHub Releases](https://github.com/yuzen9622/mm2t/releases) 下載。
 
 ## 第一次使用：授予權限
 
@@ -53,86 +108,9 @@ mm2t 不經過任何 mm2t 自己的伺服器。你填入自己的金鑰，費用
 
 部署方式見 [server/README.md](server/README.md)。部署好之後，在 mm2t 的設定裡填入伺服器網址（例如 Tailscale 網址 `http://gpu.tailnet:8000`），有設定 `MM2T_SERVER_TOKEN` 的話一併填入權杖。轉錄來源可以排順序：自架伺服器連不上時，mm2t 會改用下一個來源，並在結果中標示實際使用的來源。
 
-## 從原始碼建置
-
-需求：
-
-- macOS 14.2 以上
-- Xcode 26 以上（Swift 6.2 工具鏈）
-
-```bash
-git clone https://github.com/yuzen9622/mm2t.git
-cd mm2t
-
-# 執行 Swift package 的測試
-swift test
-
-# 建置 App（以 ad-hoc 簽章，只能在自己的 Mac 上執行）
-xcodebuild -project App/MM2T.xcodeproj -scheme mm2t -configuration Debug \
-  -derivedDataPath .build/xcode build \
-  CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
-open .build/xcode/Build/Products/Debug/mm2t.app
-```
-
-macOS 依程式碼簽章記住權限。用 ad-hoc 簽章時，每次重新建置都可能需要重新授權。如果你有 Apple Development 憑證，改傳 `CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=<你的 Team ID>`，權限就能保留。
-
-從原始碼建置的 App 不會檢查更新：`App/Config/Info.plist` 裡的 `SUPublicEDKey` 是佔位字串時，mm2t 不啟動 Sparkle。
-
-說話者分群模型（約 210 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
-
-### Google Calendar 的 OAuth 設定
-
-App 沒有後端，任何放進 App bundle 的 client secret 都能被取出，所以 Google 改用不需要 secret 的 **iOS 類型** OAuth client（Google 官方給 macOS App 的做法），流程是 PKCE S256 + state 驗證。
-
-1. Google Cloud Console → API 和服務 → 憑證 → 建立 OAuth 用戶端 ID，應用程式類型選 **iOS**，軟體包 ID 填 `dev.mm2t.app`。
-2. 確認已啟用 Google Calendar API，OAuth 同意畫面加入 `https://www.googleapis.com/auth/calendar.readonly`。
-3. 把用戶端 ID 填進 `App/Config/Info.plist` 的 `MM2TGoogleClientID`，照一般方式建置即可。
-
-回呼網址是用戶端 ID 反轉後的自訂 scheme（例如 `com.googleusercontent.apps.1234-abc:/oauth2redirect`），由 `ASWebAuthenticationSession` 直接交回 App，不需在 Info.plist 註冊 URL type。如果登入顯示 `client_secret_required`，代表填的是「電腦版應用程式」client，請換成 iOS client。
-
-### UI 字串翻譯
-
-UI 字串以英文寫在程式碼裡，繁體中文翻譯放在 `App/Tools/zh-Hant.json`。建置之後執行下面的指令，它會重新產生 `App/MM2T/Localizable.xcstrings`，並在有字串缺翻譯或有翻譯沒用到時回傳非零：
-
-```bash
-python3 App/Tools/strings.py .build/xcode
-```
-
-## 架構
-
-```
-App/MM2T/          SwiftUI App：選單列、膠囊、主視窗、設定、Sparkle 更新
-Sources/
-  MM2TApp/         App 層的控制器與 view model：錄音流程、處理佇列、設定、權限引導
-  MM2TCore/        領域模型與核心邏輯，不碰系統或網路
-  MM2TProviders/   雲端與自架服務的用戶端，以及鑰匙圈
-  MM2TSystem/      macOS 系統邊界：Core Audio 錄音、會議偵測訊號、權限
-  MM2TDiarization/ 本機說話者分群與聲紋向量（FluidAudio）
-  MM2TLocal/       本機轉錄與本機 LLM（開發中）
-  mm2t-probe/      診斷用 CLI：權限、音訊程序、錄音自我測試
-server/            自架轉錄伺服器（Python、FastAPI、faster-whisper）
-Evaluation/        說話者分群的評測資料與腳本
-```
-
-會議結束後，`MeetingProcessingPipeline`（`MM2TCore`）依序執行下列步驟，每一步的結果都會存檔，失敗時可以從失敗的那一步重試，錄音不會被刪除：
-
-1. 在 Mac 上把遠端音軌分成不同說話者，並與聲紋資料庫比對。
-2. 把兩條音軌分別送去轉錄，附上已知人名和自訂詞彙作為提示（`TranscriptionChain` 依設定的順序嘗試各來源）。
-3. 對齊逐字時間戳記與說話者。
-4. 請 LLM 推測還沒認出的說話者名字，只當作建議。
-5. 產生整理版逐字稿、依人彙整和摘要。
-
-主要模組：
-
-- `MeetingDetector`：輸入系統訊號快照（哪些程序在用麥克風、前景視窗標題、瀏覽器網址），輸出「偵測到會議」或「會議結束」事件。判斷邏輯是純函式。
-- `AudioRecorder`：用 Core Audio Process Tap 擷取目標程序的聲音，另外錄麥克風。兩軌邊錄邊寫入磁碟，App 當掉或電腦休眠時已錄的部分不會遺失。
-- `VoiceprintStore`：本機聲紋資料庫。只有你改名、接受建議或合併說話者時才會寫入。
-- `TranscriptionProvider` 與 `LLMProvider`：轉錄與 LLM 的介面。ElevenLabs Scribe、自架伺服器、Gemini 都實作在介面之後。
-- `SpeakerEditing`：改名、接受建議、合併說話者。LLM 產出一律以說話者代號表示，顯示時才換成名字，所以改名立即生效，不用重新產生。
-
 ## 參與貢獻
 
-歡迎回報問題和送 pull request。外部貢獻需要簽署貢獻者授權協議（CLA），流程見 [CONTRIBUTING.md](CONTRIBUTING.md)。
+歡迎回報問題和送 pull request。外部貢獻需要簽署貢獻者授權協議（CLA），流程見 [CONTRIBUTING.md](CONTRIBUTING.md)。從原始碼建置、架構與翻譯流程見 [開發指南](docs/development.md)。
 
 ## 授權
 
