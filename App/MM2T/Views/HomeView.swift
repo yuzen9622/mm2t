@@ -14,12 +14,7 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenHeader {
-                PillButton("Start Recording", icon: "microphone", kind: .primary) {
-                    Task { await app.capture.startNow(title: String(localized: "Recording")) }
-                }
-                .disabled(app.capture.state != .idle)
-            }
+            ScreenHeader { EmptyView() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
@@ -137,8 +132,11 @@ struct CalendarCard: View {
                         ConnectCalendars(model: model)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                // minWidth 0: today's rows (Join, "Now") must never widen the card. A child wider
+                // than its column is centred on it, which shifted the whole home screen sideways.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: Self.gridHeight, alignment: .top)
+                .clipped()
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -355,16 +353,19 @@ private struct EventRow: View {
                     Icon(SourceGlyph.icon(event.source), size: 12)
                     Text(verbatim: [Copy.calendarSource(event.source), event.calendar].filter { !$0.isEmpty }.joined(separator: " · "))
                         .lineLimit(1)
-                    if isLive { Text("· Now").foregroundStyle(Palette.orange).fixedSize() }
+                    if isLive { Text("· Now").foregroundStyle(Palette.orange).lineLimit(1).layoutPriority(1) }
                 }
                 .font(Typo.caption)
                 .foregroundStyle(Palette.secondary)
             }
             Spacer(minLength: 6)
             if let link = event.link, !isPast {
-                PillButton("Join", icon: "video", kind: isLive || isSoon ? .primary : .ghost) { NSWorkspace.shared.open(link) }
-                    .fixedSize()
-                    .help(link.absoluteString)
+                ViewThatFits(in: .horizontal) {
+                    PillButton("Join", icon: "video", kind: isLive || isSoon ? .primary : .ghost) { NSWorkspace.shared.open(link) }
+                        .fixedSize()
+                    IconButton("Join", icon: "video", isOn: isLive || isSoon) { NSWorkspace.shared.open(link) }
+                }
+                .help(link.absoluteString)
             }
         }
         .padding(.horizontal, 8)
@@ -412,8 +413,7 @@ private struct SourcesButton: View {
             .padding(.leading, 6)
             .padding(.trailing, 12)
             .frame(height: 30)
-            .background(hovering ? Palette.hover : .clear, in: Capsule())
-            .overlay(Capsule().strokeBorder(Palette.border))
+            .background(hovering ? Palette.selected : Palette.tonal, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(Pressable())

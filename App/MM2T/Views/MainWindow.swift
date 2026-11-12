@@ -76,7 +76,7 @@ struct MainWindow: View {
     @Namespace private var sidebarSpace
     @Environment(\.openURL) private var openURL
 
-    static let sidebarWidth: CGFloat = 196
+    static let sidebarWidth: CGFloat = 220
 
     var body: some View {
         @Bindable var navigation = MainNavigation.shared
@@ -123,27 +123,31 @@ struct MainWindow: View {
         }
     }
 
+    /// A floating panel on the window's ground, set apart by tone and a soft shadow, never by a line.
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
+            HStack(spacing: 10) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 30, height: 30)
                     .accessibilityHidden(true)
                 Text(verbatim: "mm2t").font(Typo.heading)
             }
             .padding(.horizontal, 6)
-            .padding(.bottom, 20)
+            .padding(.bottom, 18)
 
-            VStack(alignment: .leading, spacing: 2) {
+            RecordButton(capture: app.capture)
+                .padding(.bottom, 18)
+
+            VStack(alignment: .leading, spacing: 3) {
                 ForEach(SidebarItem.destinations, id: \.self) { row($0) }
             }
             // One highlight that travels to the selected row. Drawing it per row made the old one
             // fade out while the new one faded in, which read as a shadow passing rather than a move.
             .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Palette.orangeSoft)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Palette.selected)
                     .matchedGeometryEffect(id: section, in: sidebarSpace, isSource: false)
             }
             .motion(Motion.select, value: section)
@@ -155,11 +159,14 @@ struct MainWindow: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 46)
+        .padding(.horizontal, 12)
+        .padding(.top, 40)
         .padding(.bottom, 12)
-        .frame(width: Self.sidebarWidth)
-        .background(Palette.sidebar)
+        .frame(width: Self.sidebarWidth - 16)
+        .frame(maxHeight: .infinity)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Palette.shadow.opacity(0.6), radius: 10, y: 2)
+        .padding(8)
     }
 
     private func row(_ item: SidebarItem) -> some View {
@@ -251,7 +258,7 @@ struct SidebarRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            .frame(height: 36)
             .background {
                 if hovering, !isSelected {
                     RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.hover)
@@ -318,5 +325,38 @@ struct EmptyState: View {
             Text(title).foregroundStyle(Palette.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Starts a recording from anywhere in the main window; while one runs it says so instead.
+private struct RecordButton: View {
+    let capture: CaptureController
+    @State private var hovering = false
+
+    var body: some View {
+        let idle = capture.state == .idle
+        Button {
+            Task { await capture.startNow(title: String(localized: "Recording")) }
+        } label: {
+            HStack(spacing: 8) {
+                if idle {
+                    Icon("microphone", size: 16)
+                } else {
+                    Circle().fill(.white).frame(width: 7, height: 7)
+                }
+                Text(idle ? "Start Recording" : "Recording").font(Typo.bodyStrong)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(Palette.orange.opacity(hovering && idle ? 0.88 : 1),
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(Pressable())
+        .disabled(!idle)
+        .onHover { hovering = $0 }
+        .motion(Motion.touch, value: hovering)
     }
 }

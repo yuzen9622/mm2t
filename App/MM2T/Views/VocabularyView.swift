@@ -153,8 +153,8 @@ private struct TermChip: View {
         .padding(.trailing, editing ? 12 : 8)
         .frame(height: 32)
         .background(editing ? Palette.field : Palette.card, in: Capsule())
-        .overlay(Capsule().strokeBorder(refused ? Palette.danger : editing || hovering ? Palette.orange.opacity(0.45) : Palette.border,
-                                        lineWidth: editing ? 1.5 : 1))
+        .overlay(Capsule().strokeBorder(refused ? Palette.danger : editing ? Palette.orange.opacity(0.6) : .clear, lineWidth: 1.5))
+        .shadow(color: Palette.shadow.opacity(hovering && !editing ? 0.8 : 0.4), radius: hovering ? 6 : 3, y: 1)
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
         .motion(Motion.reveal, value: editing)

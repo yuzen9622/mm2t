@@ -7,7 +7,11 @@ enum Palette {
     static let sidebar = dynamic(0xEEEDE8, 0x151516)
     static let card = dynamic(0xFFFFFF, 0x262628)
     static let field = dynamic(0xEDECE7, 0x303033)
-    static let border = Color(nsColor: NSColor(name: nil) { $0.isDark ? .white.withAlphaComponent(0.10) : .black.withAlphaComponent(0.08) })
+    /// Surfaces are told apart by tone, never by an outline: a raised panel, a selected row, a quiet button.
+    static let panel = dynamic(0xFFFFFF, 0x222224)
+    static let selected = Color(nsColor: NSColor(name: nil) { $0.isDark ? .white.withAlphaComponent(0.09) : .black.withAlphaComponent(0.06) })
+    static let tonal = Color(nsColor: NSColor(name: nil) { $0.isDark ? .white.withAlphaComponent(0.06) : .black.withAlphaComponent(0.045) })
+    static let shadow = Color(nsColor: NSColor(name: nil) { $0.isDark ? .black.withAlphaComponent(0.35) : .black.withAlphaComponent(0.06) })
     static let hover = Color(nsColor: NSColor(name: nil) { $0.isDark ? .white.withAlphaComponent(0.07) : .black.withAlphaComponent(0.05) })
     static let text = dynamic(0x1C1C1E, 0xF5F5F7)
     static let secondary = dynamic(0x6C6C70, 0xA1A1A6)

@@ -190,7 +190,9 @@ struct SettingsDialog: View {
         .padding(12)
         .frame(width: 208)
         .frame(maxHeight: .infinity)
-        .background(Palette.sidebar)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Palette.shadow.opacity(0.5), radius: 8, y: 2)
+        .padding(10)
     }
 }
 
@@ -211,7 +213,7 @@ private struct SettingsSectionRow: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .background(isSelected ? Palette.orangeSoft : hovering ? Palette.hover : .clear,
+            .background(isSelected ? Palette.selected : hovering ? Palette.hover : .clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
