@@ -29,13 +29,24 @@ public actor WeSpeakerEmbedder: SpeakerEmbedder {
         return try await voiceprints(audio: audio, segments: segments, includingBrief: false).kept
     }
 
+    /// Shortest piece a brief vector is built from. Nemotron cuts a turn at every pause, so
+    /// conversation is mostly 1-2 s turns: a user who never spoke 2 s at a stretch left no vector
+    /// at all. Means of 1-2.5 s pieces measured for `MatchThresholds.weSpeaker.user`; 0.7 s pieces
+    /// of the user's own voice scored 0.23-0.38, so shorter is left out.
+    public static let briefMinimumPiece: TimeInterval = 1
+
     /// `kept` are the voiceprints; `brief` are the vectors of speakers with at least one clean piece
-    /// but under `minimumSpeech` of them, too unsteady to store or to name anyone by.
+    /// but under `minimumSpeech` of 2-8 s pieces, too unsteady to store or to name anyone by. Brief
+    /// vectors also take pieces from `briefMinimumPiece`, enough to tell the user apart.
     func voiceprints(audio: TrackAudio, segments: [Diarization.Segment], includingBrief: Bool) async throws
         -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]]) {
-        let clean = SpeakerTurns.cleanPieces(segments, within: audio.duration).filter { !$0.value.isEmpty }
-        let enough = Set(clean.filter { $0.value.reduce(0) { $0 + $1.duration } >= minimumSpeech }.keys)
-        let pieces = includingBrief ? clean : clean.filter { enough.contains($0.key) }
+        let stored = SpeakerTurns.cleanPieces(segments, within: audio.duration).filter { !$0.value.isEmpty }
+        let enough = Set(stored.filter { $0.value.reduce(0) { $0 + $1.duration } >= minimumSpeech }.keys)
+        var pieces = stored.filter { enough.contains($0.key) }
+        if includingBrief {
+            let short = SpeakerTurns.cleanPieces(segments, within: audio.duration, minPiece: Self.briefMinimumPiece)
+            pieces.merge(short.filter { !enough.contains($0.key) && !$0.value.isEmpty }) { kept, _ in kept }
+        }
         guard !pieces.isEmpty else { return ([:], [:]) }
 
         let owners = pieces.flatMap { cluster, ranges in ranges.map { (cluster, $0) } }

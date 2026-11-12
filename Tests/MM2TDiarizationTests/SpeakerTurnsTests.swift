@@ -54,6 +54,13 @@ import Testing
         #expect(pieces[ClusterID("S2")] == [], "1.5 s of clean speech is too short for one piece")
     }
 
+    @Test func cleanPiecesCanKeepShortTurns() {
+        let pieces = SpeakerTurns.cleanPieces([segment("S1", 0, 1.2), segment("S1", 3, 3.7), segment("S2", 5, 6.5)],
+                                              within: 60, minPiece: 1)
+        #expect(pieces[ClusterID("S1")] == [TimeRange(start: 0, end: 1.2)], "0.7 s is still too short")
+        #expect(pieces[ClusterID("S2")] == [TimeRange(start: 5, end: 6.5)])
+    }
+
     @Test func cleanPiecesStopAtTheEndOfTheAudio() {
         let pieces = SpeakerTurns.cleanPieces([segment("S1", 0, 30)], within: 11)
         #expect(pieces[ClusterID("S1")] == [TimeRange(start: 0, end: 8), TimeRange(start: 8, end: 11)])

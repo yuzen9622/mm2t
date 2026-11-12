@@ -38,10 +38,12 @@ enum SpeakerTurns {
         return merged(regions, within: 0)
     }
 
-    /// Single-speaker stretches of each cluster cut into 2-8 s pieces, dropping remainders under 2 s,
-    /// as `embeddings.py clean_pieces` built the spans the voiceprint numbers were measured on.
-    static func cleanPieces(_ segments: [Diarization.Segment], within duration: TimeInterval) -> [ClusterID: [TimeRange]] {
-        let minPiece = 2.0, maxPiece = 8.0
+    /// Single-speaker stretches of each cluster cut into pieces of `minPiece` to 8 s, dropping
+    /// shorter remainders. 2 s is how `embeddings.py clean_pieces` built the spans the voiceprint
+    /// numbers were measured on.
+    static func cleanPieces(_ segments: [Diarization.Segment], within duration: TimeInterval,
+                            minPiece: TimeInterval = 2) -> [ClusterID: [TimeRange]] {
+        let maxPiece = 8.0
         let byCluster = Dictionary(grouping: segments, by: \.cluster).mapValues { merged($0.map(\.range), within: 0) }
         return byCluster.reduce(into: [:]) { result, entry in
             let others = merged(byCluster.filter { $0.key != entry.key }.values.flatMap { $0 }, within: 0)
