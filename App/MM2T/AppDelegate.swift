@@ -1,5 +1,6 @@
 import AppKit
 import MM2TApp
+import MM2TProviders
 import Observation
 
 @MainActor
@@ -14,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
                 ? AppController.live(defaults: DebugRecorder.defaults, credentials: NoCredentials(), signedInPage: signedIn,
                                      calendars: DebugSnapshot.sampleCalendars)
-                : AppController.live(defaults: DebugRecorder.defaults, signedInPage: signedIn)
+                : AppController.live(defaults: DebugRecorder.defaults, credentials: Self.credentials, signedInPage: signedIn)
             startupError = nil
         } catch {
             app = nil
@@ -23,12 +24,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
+    /// Debug builds keep their own keychain items. They are signed differently from the release app,
+    /// so reading the release app's items made macOS ask for the login keychain password on every
+    /// launch. MM2T_KEYCHAIN_SERVICE points a debug run at a throwaway service for experiments.
+    private static var credentials: KeychainCredentialStore {
+        #if DEBUG
+        let service = ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_SERVICE"]
+            ?? KeychainCredentialStore.defaultService + ".debug"
+        return KeychainCredentialStore(service: service)
+        #else
+        return KeychainCredentialStore()
+        #endif
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        WindowSharing.install()
+        WindowSharing.install(settings: app?.settings)
         guard let app else { return }
         floating = FloatingPanelController(app: app)
         DebugRecorder.start(app: app)
         #if DEBUG
+        // Exercises the live language switch: snapshots taken after it show whether every string followed.
+        if let code = ProcessInfo.processInfo.environment["MM2T_SWITCH_LANGUAGE"], let language = AppLanguage(rawValue: code) {
+            LiveLanguage.shared.apply(language, persist: false)
+        }
         if DebugSnapshot.isRequested {
             Task { await app.launch(watchMeetings: false) }
             DebugSnapshot.run(app: app)

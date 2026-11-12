@@ -196,6 +196,19 @@ extension StubServer.Request {
         #expect(digests[1].points == [SourcedText(text: "負責寫 migration plan", sources: [UtteranceID("u3")])])
     }
 
+    @Test func digestPointsDoNotRepeatTheNameTheyAreGroupedUnder() async throws {
+        let output = #"""
+        {"digests":[
+          {"speaker":"r2","points":[
+            {"text":"{{speaker:r2}} 負責寫 migration plan","sources":["u3"]},
+            {"text":"{{speaker:r2}}：下週五前交付","sources":["u3"]},
+            {"text":"請 {{speaker:r1}} 先確認預算","sources":["u3"]}]}]}
+        """#
+        let server = StubServer(status: 200, body: Fixture.gemini(output))
+        let points = try await gemini(server).digestPerPerson(transcript).first?.points.map(\.text)
+        #expect(points == ["負責寫 migration plan", "下週五前交付", "請 {{speaker:r1}} 先確認預算"])
+    }
+
     @Test func summaryPutsHighlightsUpFrontAndDropsUnknownOwners() async throws {
         let output = #"""
         {"headline":" 決定禮拜四前升級 cluster，{{speaker:r2}} 寫 migration plan。 ",

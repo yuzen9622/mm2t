@@ -49,7 +49,7 @@ python3 App/Tools/strings.py .build/xcode
 
 ## 發布新版本
 
-推送 `vX.Y.Z` tag 就會觸發 GitHub Actions 建置 DMG 並建立 Release，細節與一次性設定見 [releasing.md](releasing.md)。
+在 `release` 分支上推送 `vX.Y.Z` tag 就會觸發 GitHub Actions 建置 DMG 並建立 Release，細節與一次性設定見 [releasing.md](releasing.md)。
 
 ## 架構
 

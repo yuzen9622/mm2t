@@ -53,14 +53,13 @@ struct PillLabel: View {
         .padding(.horizontal, 14)
         .frame(height: 30)
         .background(background, in: Capsule())
-        .overlay(Capsule().strokeBorder(kind == .primary ? .clear : Palette.border))
         .contentShape(Capsule())
     }
 
     private var background: Color {
         switch kind {
         case .primary: Palette.orange.opacity(hovering ? 0.88 : 1)
-        case .ghost, .danger: hovering ? Palette.hover : .clear
+        case .ghost, .danger: hovering ? Palette.selected : Palette.tonal
         }
     }
 }
@@ -107,9 +106,8 @@ struct CardModifier: ViewModifier {
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                .strokeBorder(lifts && hovering ? Palette.orange.opacity(0.45) : Palette.border))
-            .offset(y: lifts && hovering ? -1.5 : 0)
+            .shadow(color: Palette.shadow.opacity(lifts && hovering ? 1 : 0.6), radius: lifts && hovering ? 14 : 6, y: lifts && hovering ? 6 : 2)
+            .offset(y: lifts && hovering ? -2 : 0)
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
             .onHover { hovering = $0 }
             .motion(Motion.touch, value: hovering)
@@ -126,7 +124,7 @@ struct SearchField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Icon("search", size: 15).foregroundStyle(Palette.muted)
+            Icon("search", size: 15).foregroundStyle(focused ? Palette.orange : Palette.muted)
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
                 .font(Typo.body)
@@ -139,8 +137,7 @@ struct SearchField: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 32)
-        .background(Palette.field, in: Capsule())
-        .overlay(Capsule().strokeBorder(focused ? Palette.orange.opacity(0.6) : .clear, lineWidth: 1.5))
+        .background(focused ? Palette.selected : Palette.field, in: Capsule())
         .motion(Motion.touch, value: focused)
         .motion(Motion.reveal, value: text.isEmpty)
     }

@@ -10,7 +10,7 @@ struct OnboardingView: View {
     var body: some View {
         let setup = app.setup
         VStack(spacing: 0) {
-            ScrollView {
+            FadingScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Panel(title: "Permissions") {
                         PermissionRows(setup: setup)

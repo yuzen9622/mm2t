@@ -68,7 +68,7 @@ public struct MeetingRenderer: Sendable {
         staleNotice(&out)
         for digest in digests {
             out.heading(2, displayName(digest.speaker))
-            for point in digest.points { out.bullet(sourced(point.text, point.sources)) }
+            for point in digest.points { out.bullet(substitute(point.text)) }
         }
     }
 
@@ -76,24 +76,19 @@ public struct MeetingRenderer: Sendable {
         guard let summary = meeting.outputs.summary else { return out.line("Not generated yet.") }
         staleNotice(&out)
         out.heading(2, "Decisions")
-        for item in summary.decisions { out.bullet(sourced(item.text, item.sources)) }
+        for item in summary.decisions { out.bullet(substitute(item.text)) }
         out.heading(2, "Discussion points")
-        for item in summary.discussionPoints { out.bullet(sourced(item.text, item.sources)) }
+        for item in summary.discussionPoints { out.bullet(substitute(item.text)) }
         out.heading(2, "Action items")
         for item in summary.actionItems {
             let owner = item.owner.map { " (owner: \(displayName($0)))" } ?? ""
-            out.bullet(sourced(item.text + owner, item.sources))
+            out.bullet(substitute(item.text + owner))
         }
     }
 
     private func staleNotice(_ out: inout Output) {
         guard meeting.outputs.isStale else { return }
         out.line("Speakers changed since this was generated. Regenerate to update it.")
-    }
-
-    private func sourced(_ text: String, _ sources: [UtteranceID]) -> String {
-        let time = meeting.timeRange(of: sources).map { " [\(Output.timestamp($0.start))]" } ?? ""
-        return substitute(text) + time
     }
 
     private func substitute(_ text: String) -> String {

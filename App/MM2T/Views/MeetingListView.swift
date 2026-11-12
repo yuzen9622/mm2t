@@ -24,7 +24,7 @@ struct MeetingListView: View {
                 EmptyState(icon: "messages", title: model.query.isEmpty ? "No meetings yet" : "No results")
                     .transition(.opacity)
             } else {
-                ScrollView {
+                FadingScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(model.rows) { row in
                             MeetingCard(row: row, isRecovered: app.recovered.contains(row.id),
