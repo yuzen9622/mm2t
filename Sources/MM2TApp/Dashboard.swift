@@ -45,6 +45,11 @@ public struct TermRow: Hashable, Sendable, Identifiable {
     public let term: String
     public let count: Int
     public var id: String { term }
+
+    public init(term: String, count: Int) {
+        self.term = term
+        self.count = count
+    }
 }
 
 public struct CalendarSourceState: Hashable, Sendable, Identifiable {
@@ -76,6 +81,8 @@ public final class DashboardModel {
     public var meLabel = "Me"
 
     public static let activityDays = 84
+    /// How many of the most used terms the word cloud shows.
+    public static let cloudSize = 40
 
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let voiceprints: VoiceprintStore
@@ -310,7 +317,7 @@ public final class DashboardModel {
             VoiceRow(id: $0.key, name: $0.value.name, seconds: $0.value.seconds, meetings: $0.value.meetings,
                      fraction: longest > 0 ? $0.value.seconds / longest : 0)
         }
-        result.terms = zip(vocabulary, counts).filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.prefix(14).map { TermRow(term: $0.0, count: $0.1) }
+        result.terms = zip(vocabulary, counts).filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.prefix(Self.cloudSize).map { TermRow(term: $0.0, count: $0.1) }
         return result
     }
 }

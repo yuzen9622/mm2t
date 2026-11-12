@@ -6,6 +6,8 @@ public struct PersonRow: Hashable, Sendable, Identifiable {
     public let id: PersonID
     public let name: String
     public let voiceprintCount: Int
+    /// Where the stored vectors were heard; empty for vectors stored before this was recorded.
+    public let channels: Set<VoiceChannel>
 }
 
 /// The local biometric database: view, rename, delete (stories 44, 45).
@@ -22,7 +24,7 @@ public final class VoiceprintsModel {
 
     public func reload() async {
         rows = await store.allPersons()
-            .map { PersonRow(id: $0.id, name: $0.name, voiceprintCount: $0.embeddings.count) }
+            .map { PersonRow(id: $0.id, name: $0.name, voiceprintCount: $0.embeddings.count, channels: $0.channels) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 

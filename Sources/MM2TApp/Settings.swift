@@ -86,6 +86,23 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// Replaces `term` in place with the user's spelling, which is theirs from then on. A learned
+    /// spelling they corrected is dismissed so it is not learned again. Refuses an empty text and
+    /// one that is already another term. Returns whether the term changed.
+    @discardableResult
+    public mutating func renameVocabulary(_ term: String, to text: String) -> Bool {
+        let new = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = vocabulary.firstIndex(of: term), !new.isEmpty, new != term,
+              !vocabulary.contains(where: { $0 != term && Self.same($0, new) }) else { return false }
+        vocabulary[index] = new
+        if learnedVocabulary.contains(term) {
+            learnedVocabulary.removeAll { $0 == term }
+            if !Self.same(term, new) { dismissedVocabulary.append(term) }
+        }
+        dismissedVocabulary.removeAll { Self.same($0, new) }
+        return true
+    }
+
     private static func same(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
     }

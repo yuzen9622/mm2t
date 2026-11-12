@@ -57,19 +57,22 @@ public enum CaptureState: Equatable, Sendable {
     case starting(RecordingTarget)
     case recording(RecordingTarget)
     case paused(RecordingTarget)
+    /// The meeting ended; recording goes on until `deadline` so the user can keep it going.
+    case endingSoon(RecordingTarget, deadline: Date)
     case stopping(RecordingTarget)
     case failed(CaptureFailure)
 
     public var target: RecordingTarget? {
         switch self {
-        case .awaitingMicrophone(let t), .starting(let t), .recording(let t), .paused(let t), .stopping(let t): t
+        case .awaitingMicrophone(let t), .starting(let t), .recording(let t), .paused(let t), .endingSoon(let t, _),
+             .stopping(let t): t
         case .idle, .prompting, .failed: nil
         }
     }
 
     public var isCapturing: Bool {
         switch self {
-        case .recording, .paused: true
+        case .recording, .paused, .endingSoon: true
         default: false
         }
     }
@@ -101,6 +104,8 @@ public final class CaptureController {
     /// A meeting the user dismissed stays dismissed until it has been over this long, so the
     /// detector ending and re-detecting one call (a rejoin, a device switch) does not prompt again.
     public static let dismissalCooldown: TimeInterval = 120
+    /// How long the capsule counts down after a meeting ends before the recording stops; zero stops at once.
+    public static let endCountdown = Duration.seconds(5)
     /// How often a recording in progress is checked for a new piece to transcribe.
     static let liveInterval = Duration.seconds(15)
 
@@ -120,6 +125,8 @@ public final class CaptureController {
     @ObservationIgnored private var dismissed: (meeting: DetectedMeeting, endedAt: Date?)?
     @ObservationIgnored private var session: (any RecordingSession)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private let endCountdown: Duration
+    @ObservationIgnored private var countdown: (task: Task<Void, Never>, resumeTo: CaptureState)?
 
     public init(
         recorder: any Recorder,
@@ -127,10 +134,12 @@ public final class CaptureController {
         library: MeetingLibrary,
         recordingsDirectory: URL,
         now: @escaping () -> Date = Date.init,
+        endCountdown: Duration = CaptureController.endCountdown,
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
         onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
     ) {
         self.makeLive = makeLive
+        self.endCountdown = endCountdown
         self.recorder = recorder
         self.permissions = permissions
         self.library = library
@@ -172,7 +181,9 @@ public final class CaptureController {
         case .prompting(let prompted) where prompted == meeting:
             state = .idle
         case .recording(let target), .paused(let target):
-            if target.bundleID == meeting.bundleID { await stop() }
+            // A recording of the whole Mac's sound was most likely started for this meeting.
+            guard target.bundleID == meeting.bundleID || target.bundleID == nil else { break }
+            if endCountdown == .zero { await stop() } else { beginCountdown(target) }
         default:
             break
         }
@@ -271,6 +282,26 @@ public final class CaptureController {
         }
     }
 
+    private func beginCountdown(_ target: RecordingTarget) {
+        let resumeTo = state
+        let seconds = Double(endCountdown.components.seconds) + Double(endCountdown.components.attoseconds) / 1e18
+        state = .endingSoon(target, deadline: now().addingTimeInterval(seconds))
+        let task = Task { [weak self, endCountdown] in
+            try? await Task.sleep(for: endCountdown)
+            guard !Task.isCancelled, let self, case .endingSoon = self.state else { return }
+            await self.stop()
+        }
+        countdown = (task, resumeTo)
+    }
+
+    /// Answers the end-of-meeting countdown with "keep recording".
+    public func keepRecording() async {
+        guard case .endingSoon = state, let countdown else { return }
+        countdown.task.cancel()
+        self.countdown = nil
+        state = countdown.resumeTo
+    }
+
     public func pause() async {
         guard case .recording(let target) = state, let session else { return }
         await session.pause()
@@ -292,6 +323,8 @@ public final class CaptureController {
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
         guard state.isCapturing, let target = state.target, let session else { return }
+        countdown?.task.cancel()
+        countdown = nil
         state = .stopping(target)
         eventTask?.cancel()
         eventTask = nil

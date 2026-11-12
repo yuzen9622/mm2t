@@ -372,7 +372,9 @@ struct World {
     let now: Box<Date>
     let app: AppController
 
-    init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30)) throws {
+    /// `endCountdown` is zero unless a test is about the countdown, so a meeting ending stops at once.
+    init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
+         endCountdown: Duration = .zero) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
         if keys {
@@ -385,7 +387,7 @@ struct World {
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: FakeInstaller(catalog.modelsDownloaded),
             offlineInstallers: catalog.offlineDownloaded.mapValues(FakeInstaller.init),
-            machine: machine, validator: validator, now: { now.get })
+            machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }
 
     var capture: CaptureController { app.capture }

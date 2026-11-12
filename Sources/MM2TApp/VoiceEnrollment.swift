@@ -160,7 +160,7 @@ public final class VoiceEnrollmentModel {
                 state = .rejected(.tooShort)
                 return
             }
-            try await voiceprints.enrollUser(name: name, embeddings: embeddings)
+            try await voiceprints.enrollUser(name: name, embeddings: embeddings.map { $0.heard(on: .room) })
             hasVoice = true
             state = .enrolled
         } catch {

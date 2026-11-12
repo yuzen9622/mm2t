@@ -21,6 +21,26 @@ import Testing
         #expect(settings.dismissedVocabulary.isEmpty)
     }
 
+    @Test func editingATermKeepsItsPlaceAndMakesItTheUsers() {
+        var settings = AppSettings()
+        settings.addVocabulary("mm2t, Typeless", source: .manual)
+        settings.addVocabulary("Kubernetis", source: .learned)
+        settings.addVocabulary("Zoom", source: .manual)
+
+        let renamed = settings.renameVocabulary("Kubernetis", to: " Kubernetes ")
+        #expect(renamed)
+        #expect(settings.vocabulary == ["mm2t", "Typeless", "Kubernetes", "Zoom"])
+        #expect(settings.source(of: "Kubernetes") == .manual)
+        settings.addVocabulary("Kubernetis", source: .learned)
+        #expect(!settings.vocabulary.contains("Kubernetis"), "the misspelling the user fixed is not learned again")
+
+        let duplicate = settings.renameVocabulary("Zoom", to: "typeless")
+        let empty = settings.renameVocabulary("Zoom", to: "  ")
+        #expect(!duplicate, "a term that already exists is refused")
+        #expect(!empty)
+        #expect(settings.vocabulary == ["mm2t", "Typeless", "Kubernetes", "Zoom"])
+    }
+
     @Test func aLearnedTermTheUserTypesBecomesTheirs() {
         var settings = AppSettings()
         settings.addVocabulary("Sparkle", source: .learned)

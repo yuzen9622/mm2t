@@ -85,6 +85,12 @@ public final class MeetingDetailModel {
 
     public var canEditSpeakers: Bool { meeting != nil && !isProcessing }
 
+    /// Whether "this is me" applies: only a voice the mic heard can be the user.
+    public func canClaimAsMe(_ speaker: SpeakerID) -> Bool {
+        guard canEditSpeakers, let meeting else { return false }
+        return meeting.separatedTrack == .me || meeting.micSegments?.contains { $0.speaker == speaker } == true
+    }
+
     /// Generated views were written for speakers that a merge or re-separation has since changed.
     public var isStale: Bool {
         guard let meeting else { return false }
@@ -164,6 +170,11 @@ public final class MeetingDetailModel {
 
     public func merge(_ source: SpeakerID, into target: SpeakerID) async {
         await edit { try await $0.merge(source, into: target, in: self.id) }
+    }
+
+    /// "This is me": the speaker's speech becomes the user's and teaches their voiceprint.
+    public func claimAsMe(_ speaker: SpeakerID) async {
+        await edit { try await $0.claimAsMe(speaker, in: self.id) }
     }
 
     public func export(_ view: TranscriptView, as format: ExportFormat) -> String? {

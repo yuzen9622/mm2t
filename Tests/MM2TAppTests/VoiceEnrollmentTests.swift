@@ -37,7 +37,7 @@ final class FakeVoiceRecorder: VoiceSampleRecording, @unchecked Sendable {
 
         #expect(model.state == .enrolled && model.hasVoice)
         let user = try #require(await world.app.voiceprints.user())
-        #expect(user.name == "我" && user.embeddings == [Embedding([0, 1, 0])])
+        #expect(user.name == "我" && user.embeddings == [Embedding([0, 1, 0], channel: .room)])
         #expect(!FileManager.default.fileExists(atPath: world.root.appending(path: "enrollment.wav").path), "the reading itself is not kept")
     }
 

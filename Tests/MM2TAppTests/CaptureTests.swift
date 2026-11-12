@@ -88,6 +88,51 @@ import Testing
         #expect(try await world.library.list().count == 1)
     }
 
+    @Test func theMeetingEndingCountsDownAndTheUserCanKeepRecording() async throws {
+        let world = try World(endCountdown: .seconds(30))
+        await world.capture.handle(Signals.zoom())
+        await world.capture.startPrompted()
+        await world.capture.pause()
+        await world.capture.handle(Signals.quiet)
+
+        guard case .endingSoon(let target, let deadline) = world.capture.state else {
+            Issue.record("expected a countdown, got \(world.capture.state)")
+            return
+        }
+        #expect(world.capture.state.isCapturing && target.bundleID == "us.zoom.xos")
+        #expect(deadline == world.now.get.addingTimeInterval(30))
+        #expect(try await world.library.list().isEmpty, "nothing is saved while the user can still keep going")
+
+        await world.capture.keepRecording()
+        #expect(world.capture.state == .paused(target), "keeping it returns to where it was")
+        await world.capture.stop()
+        let saved = try await world.library.list().count
+        #expect(world.capture.state == .idle && saved == 1)
+    }
+
+    @Test func theCountdownStopsTheRecordingWhenNobodyAnswers() async throws {
+        let world = try World(endCountdown: .milliseconds(50))
+        await world.capture.handle(Signals.zoom())
+        await world.capture.startPrompted()
+        await world.capture.handle(Signals.quiet)
+        if case .endingSoon = world.capture.state {} else { Issue.record("expected a countdown, got \(world.capture.state)") }
+
+        for _ in 0..<200 where !(try await world.library.list().count == 1) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(try await world.library.list().count == 1)
+    }
+
+    @Test func aWholeMacRecordingCountsDownWhenTheMeetingItWasStartedForEnds() async throws {
+        let world = try World(endCountdown: .seconds(30))
+        await world.capture.startNow(title: "錄音")
+        await world.capture.handle(Signals.zoom())
+        await world.capture.handle(Signals.quiet)
+        if case .endingSoon(let target, _) = world.capture.state {
+            #expect(target.bundleID == nil)
+        } else {
+            Issue.record("expected a countdown, got \(world.capture.state)")
+        }
+    }
+
     @Test func anotherAppReleasingTheMicDoesNotStopAManualRecording() async throws {
         let world = try World()
         await world.capture.startManually(RecordingTarget(bundleID: "com.google.Chrome", name: "Chrome", platform: nil))

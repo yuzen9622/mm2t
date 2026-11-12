@@ -68,7 +68,8 @@ public final class AppController {
         calendars: [any CalendarSource] = [],
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        endCountdown: Duration = CaptureController.endCountdown
     ) throws {
         self.paths = paths
         let settings = SettingsStore(defaults: defaults)
@@ -83,7 +84,7 @@ public final class AppController {
         self.queue = queue
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
-            now: now,
+            now: now, endCountdown: endCountdown,
             makeLive: { directory in
                 // Only with hosted speech recognition and the on-device speaker model: an on-device
                 // speech model would compete with the meeting for the machine, and pieces carry no
