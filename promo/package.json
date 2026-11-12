@@ -1,0 +1,24 @@
+{
+  "name": "mm2t-promo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "30-second promotional video for mm2t, built with Remotion from real app captures.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "audio": "../.build/promo-venv/bin/python scripts/soundtrack.py",
+    "render": "scripts/render.sh",
+    "render:zh": "scripts/render.sh zh",
+    "render:en": "scripts/render.sh en"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.543",
+    "@remotion/google-fonts": "4.0.543",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.543"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}
