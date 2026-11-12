@@ -27,7 +27,7 @@ public enum Subtitles {
             return nil
         }
         let cues = lines.flatMap { range, speaker, text in
-            cues(text, in: range).map { Cue(range: $0.range, text: "\(name(speaker)): \($0.text)") }
+            Self.cues(text, in: range).map { Cue(range: $0.range, text: "\(name(speaker)): \($0.text)") }
         }
         return cues.enumerated().map { index, cue in
             "\(index + 1)\n\(timestamp(cue.range.start)) --> \(timestamp(cue.range.end))\n\(cue.text)\n"
