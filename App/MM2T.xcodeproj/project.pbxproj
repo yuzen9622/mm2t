@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000107 /* MM2T.icon in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000304 /* MM2T.icon */; };
 		A10000000000000000000101 /* MM2TApp in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000201 /* MM2TApp */; };
 		A10000000000000000000102 /* MM2TCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000202 /* MM2TCore */; };
 		A10000000000000000000103 /* MM2TSystem in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000203 /* MM2TSystem */; };
@@ -16,6 +17,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000304 /* MM2T.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = MM2T.icon; path = "DesignAssets/mm2t-icon/MM2T.icon"; sourceTree = "<group>"; };
 		A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = THIRD_PARTY_NOTICES.md; path = ../THIRD_PARTY_NOTICES.md; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000302 /* mm2t.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mm2t.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000303 /* Config */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Config; sourceTree = "<group>"; };
@@ -45,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000401 /* MM2T */,
+				A10000000000000000000304 /* MM2T.icon */,
 				A10000000000000000000303 /* Config */,
 				A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */,
 				A10000000000000000000602 /* Products */,
@@ -129,6 +132,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000105 /* THIRD_PARTY_NOTICES.md in Resources */,
+				A10000000000000000000107 /* MM2T.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -187,6 +191,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Config/MM2T.entitlements;
+				ASSETCATALOG_COMPILER_APPICON_NAME = MM2T;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -211,6 +216,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Config/MM2T.entitlements;
+				ASSETCATALOG_COMPILER_APPICON_NAME = MM2T;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;

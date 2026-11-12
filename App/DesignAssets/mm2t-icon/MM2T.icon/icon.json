@@ -1,0 +1,49 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:0.96471,0.96078,0.94510,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "system-light"
+            },
+            {
+              "appearance" : "tinted",
+              "value" : "system-light"
+            }
+          ],
+          "glass" : false,
+          "image-name" : "03-transcript.svg",
+          "name" : "03-transcript"
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "system-light"
+            }
+          ],
+          "glass" : false,
+          "image-name" : "02-voice-signal.svg",
+          "name" : "02-voice-signal"
+        }
+      ],
+      "name" : "Sound to text",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}
