@@ -18,15 +18,19 @@ import Testing
         #expect(!plain.contains("**"))
     }
 
-    @Test func summaryItemsPointBackToTheirSourceInTheRawTranscript() async throws {
+    @Test func summaryItemsCarryNoTimestampsButStillPointBackToTheirSource() async throws {
         let world = try await World()
         let meeting = try await world.processed()
 
         let decision = try #require(meeting.outputs.summary?.decisions.first)
         #expect(meeting.timeRange(of: decision.sources) == TimeRange(start: 40.5, end: 41.3))
         let summary = await world.render(meeting, .summary, .markdown)
-        #expect(summary.contains("## Decisions\n\n- Ship it, proposed by Alice [00:00:40]"))
-        #expect(summary.contains("- Follow up (owner: B) [00:00:40]"))
+        #expect(summary.contains("## Decisions\n\n- Ship it, proposed by Alice\n"))
+        #expect(summary.contains("- Follow up (owner: B)\n"))
+        #expect(!summary.contains("[00:"), "story: summary copy has no timestamps")
+        let perPerson = await world.render(meeting, .perPerson, .markdown)
+        #expect(!perPerson.contains("[00:"))
+        #expect(await world.render(meeting, .cleaned, .markdown).contains("[00:"), "only transcript views keep them")
     }
 
     @Test func viewsNotYetGeneratedSaySo() async throws {

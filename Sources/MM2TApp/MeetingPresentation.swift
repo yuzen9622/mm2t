@@ -167,18 +167,18 @@ public struct MeetingPresentation: Sendable {
             if meeting.outputs.isStale { out.line(labels.stale) }
             for digest in digests {
                 out.heading(2, digest.speakerName)
-                for point in digest.points { out.bullet(point.text, time: point.jump?.time) }
+                for point in digest.points { out.bullet(point.text) }
             }
         case .summary:
             guard let summary else { return out.finished(labels.notGenerated) }
             if meeting.outputs.isStale { out.line(labels.stale) }
             for (title, items) in [(labels.decisions, summary.decisions), (labels.discussionPoints, summary.discussionPoints)] {
                 out.heading(2, title)
-                for item in items { out.bullet(item.text, time: item.jump?.time) }
+                for item in items { out.bullet(item.text) }
             }
             out.heading(2, labels.actionItems)
             for item in summary.actionItems {
-                out.bullet(item.text + (item.speakerName.map { " (\(labels.owner($0)))" } ?? ""), time: item.jump?.time)
+                out.bullet(item.text + (item.speakerName.map { " (\(labels.owner($0)))" } ?? ""))
             }
         }
         return out.text
@@ -216,9 +216,8 @@ private struct ExportText {
         }
     }
 
-    mutating func bullet(_ content: String, time: TimeInterval?) {
-        line("- " + content + (time.map { " [\(MeetingPresentation.timestamp($0))]" } ?? ""))
-    }
+    /// Only the transcript views carry timestamps; the summary and by-person views are copied without them.
+    mutating func bullet(_ content: String) { line("- " + content) }
 
     mutating func finished(_ last: String) -> String {
         line(last)

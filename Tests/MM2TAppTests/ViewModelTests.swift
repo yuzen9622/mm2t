@@ -206,17 +206,24 @@ import Testing
 
             決議
 
-            - 由 我 拍板 [00:00:30]
+            - 由 我 拍板
 
             討論重點
 
-            - 預算 [00:00:00]
+            - 預算
 
             待辦事項
 
-            - 整理報價 (負責人：A) [00:00:30]
+            - 整理報價 (負責人：A)
 
             """)
+
+        for format in [ExportFormat.markdown, .plainText] {
+            let perPerson = try #require(detail.export(.perPerson, as: format))
+            #expect(!perPerson.contains("[00:"), "by-person copy carries no timestamps")
+            #expect(try #require(detail.export(.summary, as: format)).contains("[00:") == false)
+            #expect(try #require(detail.export(.cleaned, as: format)).contains("[00:"), "the cleaned transcript keeps them")
+        }
 
         await detail.merge(SpeakerID("r2"), into: SpeakerID("r1"))
         #expect(detail.export(.perPerson, as: .plainText)?.contains("說話者已變更，請重新產生") == true)
