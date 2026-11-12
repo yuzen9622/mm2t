@@ -32,6 +32,10 @@
 	<string>mm2t records only the audio your meeting app plays, as the track for remote participants in your meeting notes.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>mm2t shows today’s and tomorrow’s events on its home screen so you can open meeting links directly. Your events never leave this Mac.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>mm2t adds a meeting’s to-dos to a “mm2t” list in Reminders when you ask, and marks them done in both places. Your reminders never leave this Mac.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>mm2t adds a meeting’s to-dos to a “mm2t” list in Reminders when you ask, and marks them done in both places. Your reminders never leave this Mac.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>mm2t reads the address of your browser’s current tab to tell whether you’re in a Google Meet, Teams, Zoom, or Webex meeting on the web.</string>
 	<key>SUFeedURL</key>

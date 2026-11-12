@@ -69,7 +69,9 @@ struct TranscriptContent: View {
         if let summary = presentation.summary {
             section(Copy.presentationLabels.decisions, summary.decisions, speakers: false)
             section(Copy.presentationLabels.discussionPoints, summary.discussionPoints, speakers: false)
-            section(Copy.presentationLabels.actionItems, summary.actionItems, speakers: true)
+            if !summary.actionItems.isEmpty {
+                TodoSection(title: Copy.presentationLabels.actionItems, rows: summary.actionItems, model: model)
+            }
         } else {
             NotGenerated()
         }
