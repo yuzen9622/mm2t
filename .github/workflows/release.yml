@@ -1,4 +1,5 @@
-# Builds, signs, notarizes and publishes a release when a vX.Y.Z tag is pushed.
+# Builds, signs, notarizes and publishes a release when a vX.Y.Z tag is pushed. The tagged commit
+# must be on the `release` branch, and CHANGELOG.md must have a section for the version.
 # Without the MACOS_CERTIFICATE_P12_BASE64 secret it publishes an ad-hoc signed, unnotarized DMG
 # and no appcast instead. Secrets and one-time setup: docs/releasing.md.
 name: Release
@@ -26,6 +27,9 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The full history lets the next step check the tag against the release branch.
+          fetch-depth: 0
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -41,6 +45,19 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "DMG=$WORK/mm2t-$version.dmg" >> "$GITHUB_ENV"
           mkdir -p "$WORK"
+
+      - name: Check the tag is on the release branch
+        run: |
+          git fetch --no-tags origin release
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/release; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on the release branch. Merge it into release, then tag from there. See docs/releasing.md."
+            exit 1
+          fi
+
+      - name: Read this version's changelog section
+        run: |
+          python3 .github/scripts/changelog.py CHANGELOG.md "$VERSION" > "$WORK/changelog.md" \
+            || { echo "::error::CHANGELOG.md has no entries for $VERSION. Move [Unreleased] under a ## [$VERSION] heading before tagging. See docs/releasing.md."; exit 1; }
 
       - name: Choose signed or unsigned mode
         id: mode
@@ -183,17 +200,7 @@ jobs:
           xcrun stapler staple "$APP"
 
       - name: Build the DMG
-        run: |
-          stage="$WORK/dmg"
-          mkdir -p "$stage"
-          ditto "$APP" "$stage/mm2t.app"
-          ln -s /Applications "$stage/Applications"
-          # hdiutil on hosted runners sometimes fails with "Resource busy"; a retry clears it.
-          for attempt in 1 2 3; do
-            hdiutil create -volname mm2t -srcfolder "$stage" -fs APFS -format ULFO -ov "$DMG" && break
-            if [[ $attempt -eq 3 ]]; then exit 1; fi
-            sleep 10
-          done
+        run: .github/scripts/build_dmg.sh "$APP" "$DMG"
 
       - name: Sign, notarize and staple the DMG
         if: steps.mode.outputs.signed == 'true'
@@ -207,10 +214,11 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
 
       - name: Write release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > "$WORK/notes.md"
+          {
+            cat "$WORK/changelog.md"
+            printf '\n**Full changelog**: https://github.com/%s/blob/%s/CHANGELOG.md\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
+          } > "$WORK/notes.md"
 
       - name: Add install instructions for the unsigned app
         if: steps.mode.outputs.signed != 'true'

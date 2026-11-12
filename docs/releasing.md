@@ -1,12 +1,31 @@
 # 發布新版本
 
+## 分支與版本記錄
+
+| 分支 | 用途 |
+| --- | --- |
+| `development` | 日常整合分支。所有 pull request 都以它為目標，CI 在上面執行。 |
+| `release` | 唯一用來發布的分支。只接受從 `development` 合併進來的內容，tag 只能打在這個分支上。 |
+| `main` | 預設分支，內容永遠等於最新一次發布的 commit，方便讀者看到穩定版本。 |
+
+流程是 `development` → `release`（打 tag、發布）→ `main`（發布後同步）。Release workflow 會檢查 tag 指向的 commit 已經在 `release` 上，不在的話直接失敗。
+
+版本說明來自 [CHANGELOG.md](../CHANGELOG.md)（[Keep a Changelog 1.1.0](https://keepachangelog.com/zh-TW/1.1.0/) 格式，版本號依循 [SemVer](https://semver.org/lang/zh-TW/)）：
+
+- **每個 pull request** 把自己的變更寫在 `## [Unreleased]` 底下，歸入 `Added`、`Changed`、`Deprecated`、`Removed`、`Fixed`、`Security` 其中一類，一條一行，用繁體中文（臺灣用語）寫使用者看得懂的描述。
+- **發布時** 把 `[Unreleased]` 的內容移到新的 `## [X.Y.Z] - YYYY-MM-DD` 標題底下，留下空的 `[Unreleased]`，並更新檔案底部的比較連結。
+- Release workflow 取出該版本的區段，當作 GitHub Release 的內文與 Sparkle appcast 的版本說明。**CHANGELOG.md 沒有這個版本的區段（或區段是空的），workflow 會在建置前就失敗。**
+
+## 發布流程
+
 推送 `vX.Y.Z` 格式的 git tag 後，`.github/workflows/release.yml` 會：
 
+0. 確認 tag 指向的 commit 在 `release` 分支上，且 CHANGELOG.md 有這個版本的內容。
 1. 以 tag 的版本號設定 `CFBundleShortVersionString` 與 `CFBundleVersion`（兩者都是 `X.Y.Z`），用 Release 組態封存（archive）App。
 2. 以 Developer ID Application 憑證匯出並簽章 App。
 3. 把 App 送去公證，完成後 staple。
-4. 建立 `mm2t-X.Y.Z.dmg`（APFS、lzfse 壓縮，內含 App 與「應用程式」捷徑），簽章、公證、staple。
-5. 下載上一個 Release 的 `appcast.xml`，加入新版本的項目與 EdDSA 簽章，並把 GitHub 自動產生的版本說明嵌入項目中。
+4. 用 `.github/scripts/build_dmg.sh` 建立 `mm2t-X.Y.Z.dmg`，再簽章、公證、staple。DMG 是固定大小的安裝視窗：左邊 App、右邊「應用程式」捷徑、背景有「拖入 Applications 以安裝」的提示，磁碟區圖示取自 App 圖示。APFS、lzfse 壓縮。
+5. 下載上一個 Release 的 `appcast.xml`，加入新版本的項目與 EdDSA 簽章，並把 CHANGELOG.md 該版本的區段嵌入項目作為版本說明。
 6. 建立 GitHub Release，上傳 DMG 與 `appcast.xml`。
 
 ## 未簽章模式（暫時）
@@ -16,7 +35,7 @@
 1. 用 Release 組態封存 App，以 ad-hoc 簽章（`CODE_SIGN_IDENTITY=-`）。因為 ad-hoc 簽章沒有 Team ID，hardened runtime 的 library validation 會拒絕載入 Sparkle 與 llama 等 framework，所以 workflow 會加上 `com.apple.security.cs.disable-library-validation` entitlement，再用 `codesign --force --sign -` 重新簽 App 本身（framework 保留 Xcode 給的 ad-hoc 簽章）。
 2. 建立同樣格式的 `mm2t-X.Y.Z.dmg`，不簽章、不公證。
 3. 跳過 Sparkle 公鑰檢查與 appcast，Release 只上傳 DMG。
-4. 在 GitHub 自動產生的版本說明前面，加上未簽章 App 的安裝說明（按右鍵 **打開**、**系統設定 > 隱私權與安全性 > 仍要打開**，或 `xattr -dr com.apple.quarantine /Applications/mm2t.app`）。
+4. 在 CHANGELOG 版本說明前面，加上未簽章 App 的安裝說明（按右鍵 **打開**、**系統設定 > 隱私權與安全性 > 仍要打開**，或 `xattr -dr com.apple.quarantine /Applications/mm2t.app`）。
 
 未簽章版本的限制：
 
@@ -107,21 +126,29 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
 
 ## 每次發布
 
-1. 確認 `main` 上的 CI 通過，且要發布的 commit 已推送。
-2. 建立並推送 tag。版本號必須是 `X.Y.Z`，而且大於上一版，因為 Sparkle 依 `CFBundleVersion` 判斷新舊：
+1. 在 `development` 上整理 CHANGELOG.md：把 `[Unreleased]` 移到 `## [0.2.0] - YYYY-MM-DD`，更新底部連結，開 pull request 合併進 `development`，確認 CI 通過。
+2. 把 `development` 合併進 `release`（建議開 `development` → `release` 的 pull request，等 CI 通過後用 fast-forward 或 merge commit 合併）。
+3. 在 `release` 的最新 commit 上建立並推送 tag。版本號必須是 `X.Y.Z`，而且大於上一版，因為 Sparkle 依 `CFBundleVersion` 判斷新舊：
 
    ```bash
+   git switch release && git pull
    git tag -a v0.2.0 -m "mm2t 0.2.0"
    git push origin v0.2.0
    ```
 
-3. 看 workflow 執行。公證通常要幾分鐘，最久可能一小時：
+4. 看 workflow 執行。公證通常要幾分鐘，最久可能一小時：
 
    ```bash
    gh run watch --repo yuzen9622/mm2t
    ```
 
-4. 到 [Releases](https://github.com/yuzen9622/mm2t/releases) 檢查新版本有 `mm2t-X.Y.Z.dmg` 與 `appcast.xml`。需要的話，修改版本說明。
+5. 到 [Releases](https://github.com/yuzen9622/mm2t/releases) 檢查新版本有 `mm2t-X.Y.Z.dmg` 與 `appcast.xml`，版本說明與 CHANGELOG.md 一致。
+6. 發布成功後，把 `main` 同步到這次發布的 commit：
+
+   ```bash
+   git push origin release:main
+   ```
+
 
 `App/MM2T.xcodeproj` 裡的 `MARKETING_VERSION` 與 `CURRENT_PROJECT_VERSION` 只用於本機建置，發布時由 tag 覆寫，不需要每次修改。
 
@@ -141,6 +168,8 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
 ## 發布失敗時
 
 - **Workflow 在某一步失敗**：修正後在 Actions 頁面按 **Re-run all jobs**。Release 已經存在時，workflow 會覆蓋上傳 DMG 與 `appcast.xml`，而不是建立新的 Release。
+- **「not on the release branch」**：tag 指向的 commit 還沒合併進 `release`。先合併，再刪掉並重打 tag。
+- **「CHANGELOG.md has no entries」**：CHANGELOG.md 沒有 `## [X.Y.Z]` 區段或區段是空的。補上後重打 tag。
 - **需要改 tag 指向的 commit**：先刪除 Release 與 tag，再重新建立：
 
   ```bash
@@ -153,5 +182,7 @@ Sparkle 用這組金鑰確認更新檔真的由你發布。**私鑰遺失的話�
 - **「the X.Y.Z item has no sparkle:edSignature」**：`SPARKLE_ED_PRIVATE_KEY` 和 `Info.plist` 裡的 `SUPublicEDKey` 不是同一組。`generate_appcast` 遇到這種情況不會報錯，只會產生沒有簽章的項目，Sparkle 會拒絕安裝，所以 workflow 會在這裡停下。
 
 ## 建置環境
+
+DMG 由 pip 安裝固定版本的 [dmgbuild](https://github.com/dmgbuild/dmgbuild) 產生，直接寫入視窗設定，不需要 Finder 或 AppleScript。版面設定與背景圖在 `.github/dmg/`（`settings.py`、`background.png`、`background@2x.png`）；要改背景文字或圖形時，編輯並執行 `.github/dmg/make_background.py` 重新產生兩張圖，圖中箭頭位置要和 `settings.py` 的圖示座標一致。
 
 Workflow 在 GitHub 的 `macos-26` runner 上執行，用 `maxim-lobanov/setup-xcode` 選擇 runner 上最新的穩定版 Xcode。Swift package 需要 Swift 6.2 以上（Xcode 26 以上）。如果程式碼開始用到 runner 上 Xcode 還沒有的 Swift 或 SDK 功能，請改用更新的 runner 標籤，或改用自架 runner。
