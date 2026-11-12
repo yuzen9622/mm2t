@@ -116,7 +116,7 @@ struct RenameSheet: View {
                     .disabled(trimmed.isEmpty)
             }
             if !people.isEmpty {
-                ScrollView {
+                FadingScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(people) { person in
                             PersonPick(name: person.name) {

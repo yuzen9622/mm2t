@@ -38,7 +38,7 @@ struct VocabularyView: View {
                 if terms.isEmpty {
                     EmptyState(icon: "book-2", title: filter == .learned ? "Nothing learned yet" : "No terms yet")
                 } else {
-                    ScrollView {
+                    FadingScrollView {
                         FlowLayout(spacing: 8) {
                             ForEach(terms, id: \.self) { term in
                                 TermChip(term: term, isLearned: store.settings.source(of: term) == .learned,

@@ -15,7 +15,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader { EmptyView() }
-            ScrollView {
+            FadingScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
                     HStack(alignment: .top, spacing: 14) {
@@ -298,7 +298,7 @@ private struct DayAgenda: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
             } else {
-                ScrollView {
+                FadingScrollView {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(events) { EventRow(event: $0, now: context.date) }

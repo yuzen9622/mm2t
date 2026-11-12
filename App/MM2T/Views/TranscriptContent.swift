@@ -8,7 +8,7 @@ struct TranscriptContent: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            FadingScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     switch model.selectedView {
                     case .raw: raw

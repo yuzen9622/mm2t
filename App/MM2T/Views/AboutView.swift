@@ -5,7 +5,7 @@ struct AboutView: View {
         .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
 
     var body: some View {
-        ScrollView {
+        FadingScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text(verbatim: "mm2t \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     .font(Typo.title)

@@ -14,7 +14,7 @@ struct VoiceprintsView: View {
             if model.rows.isEmpty {
                 EmptyState(icon: "users", title: "Naming a speaker in a meeting saves their voiceprint on this Mac.")
             } else {
-                ScrollView {
+                FadingScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(model.rows) { person in
                             HStack(spacing: 12) {
