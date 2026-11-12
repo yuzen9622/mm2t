@@ -24,15 +24,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
-    /// Debug builds can point at a throwaway keychain service (MM2T_KEYCHAIN_SERVICE) so keychain
-    /// experiments never touch the real stored keys.
+    /// Debug builds keep their own keychain items. They are signed differently from the release app,
+    /// so reading the release app's items made macOS ask for the login keychain password on every
+    /// launch. MM2T_KEYCHAIN_SERVICE points a debug run at a throwaway service for experiments.
     private static var credentials: KeychainCredentialStore {
         #if DEBUG
-        if let service = ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_SERVICE"] {
-            return KeychainCredentialStore(service: service)
-        }
-        #endif
+        let service = ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_SERVICE"]
+            ?? KeychainCredentialStore.defaultService + ".debug"
+        return KeychainCredentialStore(service: service)
+        #else
         return KeychainCredentialStore()
+        #endif
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
