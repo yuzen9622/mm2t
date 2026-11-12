@@ -69,7 +69,9 @@ mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不
 </p>
 
 <p align="center">
-  <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4">觀看中文版</a> &nbsp;·&nbsp; <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-en.mp4">Watch in English</a>
+  <video width="880">
+  <source src="./docs/assets/video/mm2t-zh.mp4" type="video/mp4" >
+  </video>
 </p>
 
 ## 安裝
