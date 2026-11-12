@@ -116,10 +116,6 @@ mm2t 不經過任何 mm2t 自己的伺服器。你填入自己的金鑰，費用
 
 部署方式見 [server/README.md](server/README.md)。部署好之後，在 mm2t 的設定裡填入伺服器網址（例如 Tailscale 網址 `http://gpu.tailnet:8000`），有設定 `MM2T_SERVER_TOKEN` 的話一併填入權杖。轉錄來源可以排順序：自架伺服器連不上時，mm2t 會改用下一個來源，並在結果中標示實際使用的來源。
 
-## 參與貢獻
-
-歡迎回報問題和送 pull request。外部貢獻需要簽署貢獻者授權協議（CLA），流程見 [CONTRIBUTING.md](CONTRIBUTING.md)。從原始碼建置、架構與翻譯流程見 [開發指南](docs/development.md)。
-
 ## 授權
 
 mm2t 以 [GNU Affero General Public License v3.0](LICENSE) 授權。使用的第三方軟體與模型列在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
