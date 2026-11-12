@@ -52,6 +52,7 @@ enum DebugSnapshot {
                 save(window(titled: true), to: directory.appending(path: "main-\(name).png"))
                 if section == .vocabulary { await saveVocabularyEdits(app: app, to: directory) }
             }
+            await saveScrolledList(to: directory)
             await saveSettings(app: app, to: directory)
             saveCapsules(to: directory)
             await saveIslands(to: directory)
@@ -126,12 +127,22 @@ enum DebugSnapshot {
         for section in SettingsSection.allCases {
             navigation.settingsSection = section
             try? await Task.sleep(for: .milliseconds(900))
-            save(window(titled: true)?.attachedSheet, to: directory.appending(path: "settings-\(section.rawValue).png"))
+            save(window(titled: true), to: directory.appending(path: "settings-\(section.rawValue).png"))
         }
         stage.settingsQuery = "Gemini"
         try? await Task.sleep(for: .milliseconds(700))
-        save(window(titled: true)?.attachedSheet, to: directory.appending(path: "settings-search.png"))
+        save(window(titled: true), to: directory.appending(path: "settings-search.png"))
         stage.settingsQuery = nil
+        // The language switched while the dialog is open: every string in it, the calendar rows
+        // included, must follow at once.
+        let language = AppLanguage.current(in: .standard, domain: Bundle.main.bundleIdentifier ?? "dev.mm2t.app")
+        let chinese = LiveLanguage.shared.locale.identifier.hasPrefix("zh")
+        navigation.settingsSection = .permissions
+        LiveLanguage.shared.apply(chinese ? .english : .traditionalChinese, persist: false)
+        try? await Task.sleep(for: .milliseconds(1200))
+        save(window(titled: true), to: directory.appending(path: "settings-permissions-switched.png"))
+        LiveLanguage.shared.apply(language, persist: false)
+        try? await Task.sleep(for: .milliseconds(900))
         navigation.settingsOpen = false
         try? await Task.sleep(for: .milliseconds(600))
         for section in SettingsSection.allCases {
@@ -140,6 +151,30 @@ enum DebugSnapshot {
                    to: directory.appending(path: "settings-\(section.rawValue)-full.png"))
         }
         stage.keysVerified = false
+        #endif
+    }
+
+    /// The meeting list scrolled part way, where both edges fade, and to its end, where only the top does.
+    private static func saveScrolledList(to directory: URL) async {
+        #if DEBUG
+        func scrollViews(in view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+        }
+        guard let root = window(titled: true)?.contentView,
+              let list = scrollViews(in: root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
+        else { return }
+        list.contentView.scroll(to: NSPoint(x: 0, y: 170))
+        list.reflectScrolledClipView(list.contentView)
+        try? await Task.sleep(for: .milliseconds(600))
+        save(window(titled: true), to: directory.appending(path: "main-list-scrolled.png"))
+        if let document = list.documentView {
+            list.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.frame.height - list.contentView.bounds.height)))
+            list.reflectScrolledClipView(list.contentView)
+            try? await Task.sleep(for: .milliseconds(600))
+            save(window(titled: true), to: directory.appending(path: "main-list-end.png"))
+        }
+        list.contentView.scroll(to: .zero)
+        list.reflectScrolledClipView(list.contentView)
         #endif
     }
 
