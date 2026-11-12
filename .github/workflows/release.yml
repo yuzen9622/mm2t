@@ -1,10 +1,13 @@
 # Builds, signs, notarizes and publishes a release when a vX.Y.Z tag is pushed.
-# Secrets and one-time setup: docs/releasing.md.
+# Without the MACOS_CERTIFICATE_P12_BASE64 secret it publishes an ad-hoc signed, unnotarized DMG
+# and no appcast instead. Secrets and one-time setup: docs/releasing.md.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  # Re-run a release by hand: pick the vX.Y.Z tag under "Use workflow from".
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -39,7 +42,21 @@ jobs:
           echo "DMG=$WORK/mm2t-$version.dmg" >> "$GITHUB_ENV"
           mkdir -p "$WORK"
 
+      - name: Choose signed or unsigned mode
+        id: mode
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+        run: |
+          if [[ -n "$MACOS_CERTIFICATE_P12_BASE64" ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID secrets found: signed, notarized release with an appcast."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MACOS_CERTIFICATE_P12_BASE64 is not set: publishing an ad-hoc signed, unnotarized DMG without an appcast."
+          fi
+
       - name: Check the Sparkle public key is filled in
+        if: steps.mode.outputs.signed == 'true'
         run: |
           key=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" App/Config/Info.plist)
           if [[ $(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c) -ne 32 ]]; then
@@ -48,6 +65,7 @@ jobs:
           fi
 
       - name: Import the Developer ID certificate
+        if: steps.mode.outputs.signed == 'true'
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -74,6 +92,7 @@ jobs:
           echo "SIGNING_HASH=$(awk '{print $2}' <<< "$identity")" >> "$GITHUB_ENV"
 
       - name: Write the App Store Connect API key
+        if: steps.mode.outputs.signed == 'true'
         env:
           APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
         run: |
@@ -81,6 +100,7 @@ jobs:
           echo "NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
 
       - name: Archive
+        if: steps.mode.outputs.signed == 'true'
         run: |
           xcodebuild archive \
             -project App/MM2T.xcodeproj -scheme mm2t -configuration Release \
@@ -91,6 +111,7 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--options=runtime --timestamp --keychain $KEYCHAIN"
 
       - name: Export with Developer ID signing
+        if: steps.mode.outputs.signed == 'true'
         run: |
           cat > "$WORK/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -127,7 +148,32 @@ jobs:
           fi
           echo "APP=$app" >> "$GITHUB_ENV"
 
+      - name: Archive with ad-hoc signing
+        if: steps.mode.outputs.signed != 'true'
+        run: |
+          xcodebuild archive \
+            -project App/MM2T.xcodeproj -scheme mm2t -configuration Release \
+            -derivedDataPath "$DERIVED" -clonedSourcePackagesDirPath "$DERIVED/SourcePackages" \
+            -archivePath "$WORK/mm2t.xcarchive" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$VERSION" \
+            CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+          app="$WORK/mm2t.xcarchive/Products/Applications/mm2t.app"
+          # Ad-hoc code has no Team ID, so the hardened runtime's library validation makes dyld refuse
+          # llama.framework ("different Team IDs"). Re-sign only the app itself with an entitlement that
+          # allows ad-hoc frameworks; the frameworks keep the ad-hoc signatures Xcode gave them.
+          codesign --display --entitlements - --xml "$app" > "$WORK/entitlements.plist"
+          /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$WORK/entitlements.plist"
+          codesign --force --sign - --options runtime --entitlements "$WORK/entitlements.plist" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          shipped=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist")
+          if [[ "$shipped" != "$VERSION" ]]; then
+            echo "::error::The app says $shipped but the tag says $VERSION"
+            exit 1
+          fi
+          echo "APP=$app" >> "$GITHUB_ENV"
+
       - name: Notarize and staple the app
+        if: steps.mode.outputs.signed == 'true'
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -136,10 +182,7 @@ jobs:
           .github/scripts/notarize.sh "$WORK/mm2t.zip"
           xcrun stapler staple "$APP"
 
-      - name: Build, sign, notarize and staple the DMG
-        env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      - name: Build the DMG
         run: |
           stage="$WORK/dmg"
           mkdir -p "$stage"
@@ -151,6 +194,13 @@ jobs:
             if [[ $attempt -eq 3 ]]; then exit 1; fi
             sleep 10
           done
+
+      - name: Sign, notarize and staple the DMG
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
           codesign --sign "$SIGNING_HASH" --keychain "$KEYCHAIN" --timestamp "$DMG"
           .github/scripts/notarize.sh "$DMG"
           xcrun stapler staple "$DMG"
@@ -162,7 +212,32 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > "$WORK/notes.md"
 
+      - name: Add install instructions for the unsigned app
+        if: steps.mode.outputs.signed != 'true'
+        run: |
+          cat - "$WORK/notes.md" > "$WORK/notes-unsigned.md" <<'EOF'
+          > [!IMPORTANT]
+          > 這個版本**沒有** Apple Developer ID 簽章，也沒有經過 Apple 公證，第一次打開時 macOS 會擋下來。App 也不會自動檢查更新，新版本請回到 GitHub Releases 下載。
+
+          ## 安裝
+
+          1. 下載 `mm2t-X.Y.Z.dmg`，打開後把 `mm2t.app` 拖到「應用程式」資料夾。
+          2. 在「應用程式」資料夾中，按住 Control 鍵點一下 `mm2t.app`（或按右鍵），選擇 **打開**，再在對話框中按 **打開**。
+          3. 如果對話框只有「完成」或「移到垃圾桶」，沒有「打開」：先按 **完成**，到 **系統設定 > 隱私權與安全性**，捲到「安全性」區塊，在「已阻擋 mm2t」旁按 **仍要打開**，輸入密碼後再按一次 **打開**。
+          4. 以上方法都無效時，打開「終端機」執行下面的指令，移除下載隔離標記後再打開 App：
+
+             ```bash
+             xattr -dr com.apple.quarantine /Applications/mm2t.app
+             ```
+
+          更新到新版本後，macOS 可能會再次詢問麥克風、系統音訊錄製等權限，這是未簽章 App 的正常現象。
+
+          EOF
+          sed -i '' "s/mm2t-X\.Y\.Z\.dmg/mm2t-$VERSION.dmg/" "$WORK/notes-unsigned.md"
+          mv "$WORK/notes-unsigned.md" "$WORK/notes.md"
+
       - name: Update the appcast
+        if: steps.mode.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
@@ -187,10 +262,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The unsigned mode has no appcast.
+          assets=("$DMG")
+          if [[ -n "${APPCAST:-}" ]]; then assets+=("$APPCAST"); fi
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$DMG" "$APPCAST" --clobber
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$DMG" "$APPCAST" \
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
               --title "mm2t $VERSION" --notes-file "$WORK/notes.md" --verify-tag --latest
           fi
 
