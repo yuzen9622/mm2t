@@ -177,6 +177,8 @@ public final class DashboardModel {
         } catch CalendarError.cancelled {
         } catch CalendarError.unreachable {
             calendarSources[index].problem = .unreachable
+        } catch let failure as GoogleOAuthFailure {
+            calendarSources[index].problem = .googleOAuth(failure)
         } catch {
             calendarSources[index].problem = .signInFailed
         }
@@ -221,6 +223,8 @@ public final class DashboardModel {
                     problems[kind] = .some(nil)
                 case .failure(CalendarError.signedOut):
                     problems[kind] = .signedOut
+                case .failure(let failure as GoogleOAuthFailure):
+                    problems[kind] = .googleOAuth(failure)
                 case .failure:
                     problems[kind] = .unreachable
                 }

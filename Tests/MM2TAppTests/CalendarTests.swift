@@ -232,7 +232,7 @@ private func date(_ text: String) -> Date {
 
         let google = OAuthService.google.tokenRequest(clientID: "cid", [("grant_type", "refresh_token")])
         #expect(String(decoding: try #require(google.httpBody), as: UTF8.self) == "client_id=cid&grant_type=refresh_token",
-                "Google gets no scope and no client secret")
+                "An unconfigured Google client gets no scope or client secret")
     }
 
     @Test func aSourceWithoutClientIDIsUnavailableAndDisconnectRemovesTheToken() async throws {

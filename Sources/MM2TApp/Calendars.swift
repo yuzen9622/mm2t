@@ -25,6 +25,7 @@ public enum CalendarConnection: Hashable, Sendable {
 /// Why the last connect or fetch of a source went wrong.
 public enum CalendarProblem: Hashable, Sendable {
     case signInFailed
+    case googleOAuth(GoogleOAuthFailure)
     case unreachable
     /// The service no longer accepts the stored sign-in; it was removed and the source disconnected.
     case signedOut

@@ -11,9 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
+            let googleReturned = String(localized: "Google authorization returned to mm2t. Return to the app to check the connection result.")
             app = try DebugSnapshot.isRequested
-                ? AppController.live(credentials: NoCredentials(), signedInPage: signedIn, calendars: DebugSnapshot.sampleCalendars)
-                : AppController.live(signedInPage: signedIn)
+                ? AppController.live(credentials: NoCredentials(), signedInPage: signedIn, googleSignInPage: googleReturned, calendars: DebugSnapshot.sampleCalendars)
+                : AppController.live(signedInPage: signedIn, googleSignInPage: googleReturned)
             startupError = nil
         } catch {
             app = nil

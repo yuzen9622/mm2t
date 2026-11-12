@@ -5,10 +5,69 @@ import MM2TProviders
 import Network
 
 // Google Calendar and Outlook (Microsoft 365) as calendar sources: OAuth 2.0 for installed apps
-// (authorization code with PKCE, loopback redirect, no client secret), then each service's own
-// events API. Only the refresh token is kept, in the Keychain; access tokens live in memory.
+// (authorization code with PKCE and a loopback redirect), then each service's own events API.
+// Google Desktop clients may require a bundled client secret for protocol compatibility;
+// it is not proof of app identity and never replaces PKCE or state validation.
+// User refresh tokens are kept in the Keychain; access tokens live in memory.
 
 // MARK: OAuth
+
+// Only allowlisted categories leave the OAuth boundary. Never retain response bodies,
+// error descriptions, authorization codes, callback URLs, or credentials in diagnostics.
+public struct GoogleOAuthFailure: Error, Hashable, Sendable {
+    public enum Reason: String, Sendable {
+        case clientSecretRequired = "client_secret_required"
+        case invalidClient = "invalid_client"
+        case invalidRequest = "invalid_request"
+        case invalidGrant = "invalid_grant"
+        case unauthorizedClient = "unauthorized_client"
+        case invalidScope = "invalid_scope"
+        case accessDenied = "access_denied"
+        case unsupportedGrantType = "unsupported_grant_type"
+        case invalidCallback = "invalid_callback"
+        case invalidResponse = "invalid_response"
+        case missingRefreshToken = "missing_refresh_token"
+        case credentialStorage = "credential_storage_failed"
+        case unknown = "oauth_error"
+    }
+
+    public let reason: Reason
+    public let httpStatus: Int?
+
+    init(_ reason: Reason, httpStatus: Int? = nil) {
+        self.reason = reason
+        self.httpStatus = httpStatus
+    }
+
+    public var diagnostic: String {
+        httpStatus.map { "HTTP \($0) / \(reason.rawValue)" } ?? reason.rawValue
+    }
+
+    static func response(status: Int, data: Data) -> GoogleOAuthFailure {
+        let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let error = fields?["error"] as? String
+        let description = (fields?["error_description"] as? String ?? "").lowercased()
+        if error == "invalid_request", description.contains("client_secret"), description.contains("missing") {
+            return GoogleOAuthFailure(.clientSecretRequired, httpStatus: status)
+        }
+        return GoogleOAuthFailure(reason(for: error), httpStatus: status)
+    }
+
+    static func authorization(error: String) -> GoogleOAuthFailure {
+        GoogleOAuthFailure(reason(for: error))
+    }
+
+    private static func reason(for error: String?) -> Reason {
+        let allowed: [String: Reason] = [
+            "invalid_client": .invalidClient, "invalid_request": .invalidRequest,
+            "invalid_grant": .invalidGrant, "unauthorized_client": .unauthorizedClient,
+            "invalid_scope": .invalidScope, "access_denied": .accessDenied,
+            "unsupported_grant_type": .unsupportedGrantType,
+        ]
+        return error.flatMap { allowed[$0] } ?? .unknown
+    }
+}
+
 
 public enum OAuthClientID {
     /// The Info.plist value, or nil while it is still the shipped placeholder or an unset build setting.
@@ -16,6 +75,14 @@ public enum OAuthClientID {
         guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
               !text.hasPrefix("REPLACE_"), !text.contains("$(") else { return nil }
         return text
+    }
+}
+
+/// A Desktop client compatibility value, not a confidential app identity credential.
+/// Loaded from the locally prepared build plist; never included in diagnostics.
+public enum GoogleOAuthClientSecret {
+    public static func resolve(_ value: Any?) -> Secret? {
+        OAuthClientID.resolve(value).map { Secret($0) }
     }
 }
 
@@ -62,11 +129,14 @@ struct OAuthService: Sendable {
         return components.url!
     }
 
-    func tokenRequest(clientID: String, _ fields: [(String, String)]) -> URLRequest {
+    func tokenRequest(clientID: String, clientSecret: Secret? = nil, _ fields: [(String, String)]) -> URLRequest {
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var all = [("client_id", clientID)] + fields
+        if kind == .google, let clientSecret, !clientSecret.isEmpty {
+            all.append(("client_secret", clientSecret.revealed))
+        }
         if scopeOnTokenRequests { all.append(("scope", scope)) }
         request.httpBody = Data(all.map { "\($0)=\(Self.formEncode($1))" }.joined(separator: "&").utf8)
         return request
@@ -311,6 +381,7 @@ public actor OnlineCalendar: CalendarSource {
     public nonisolated let kind: CalendarSourceKind
     private let service: OAuthService
     private let clientID: String?
+    private let clientSecret: Secret?
     private let credentials: any CredentialStoring
     private let signedInPage: String
     private let openBrowser: @Sendable (URL) async -> Void
@@ -319,9 +390,9 @@ public actor OnlineCalendar: CalendarSource {
 
     /// `clientID` nil (the Info.plist placeholder) makes the source unavailable in this build.
     /// `signedInPage` is the text the browser shows once sign-in hands back to the app.
-    public static func google(clientID: String?, credentials: any CredentialStoring, signedInPage: String,
+    public static func google(clientID: String?, clientSecret: Secret? = nil, credentials: any CredentialStoring, signedInPage: String,
                               openBrowser: @escaping @Sendable (URL) async -> Void) -> OnlineCalendar {
-        OnlineCalendar(service: .google, clientID: clientID, credentials: credentials, signedInPage: signedInPage, openBrowser: openBrowser)
+        OnlineCalendar(service: .google, clientID: clientID, clientSecret: clientSecret, credentials: credentials, signedInPage: signedInPage, openBrowser: openBrowser)
     }
 
     public static func microsoft(clientID: String?, credentials: any CredentialStoring, signedInPage: String,
@@ -329,11 +400,12 @@ public actor OnlineCalendar: CalendarSource {
         OnlineCalendar(service: .microsoft, clientID: clientID, credentials: credentials, signedInPage: signedInPage, openBrowser: openBrowser)
     }
 
-    init(service: OAuthService, clientID: String?, credentials: any CredentialStoring, signedInPage: String,
+    init(service: OAuthService, clientID: String?, clientSecret: Secret? = nil, credentials: any CredentialStoring, signedInPage: String,
          openBrowser: @escaping @Sendable (URL) async -> Void, session: URLSession = .shared) {
         kind = service.kind
         self.service = service
         self.clientID = clientID
+        self.clientSecret = service.kind == .google ? clientSecret : nil
         self.credentials = credentials
         self.signedInPage = signedInPage
         self.openBrowser = openBrowser
@@ -365,13 +437,34 @@ public actor OnlineCalendar: CalendarSource {
             return try await group.next()!
         }
         let value = { (name: String) in items.first { $0.name == name }?.value }
+        if kind == .google {
+            // An error or cancellation is also an authorization response: validate its
+            // state before accepting it, just as we do before exchanging a code.
+            guard value("state") == state else { throw GoogleOAuthFailure(.invalidCallback) }
+            if let error = value("error") {
+                if error == "access_denied" { throw CalendarError.cancelled }
+                throw GoogleOAuthFailure.authorization(error: error)
+            }
+        }
         if value("error") == "access_denied" { throw CalendarError.cancelled }
-        guard value("state") == state, let code = value("code") else { throw CalendarError.signInFailed }
-        let response = try await token(service.tokenRequest(clientID: clientID, [
+        guard value("state") == state, let code = value("code"), kind != .google || !code.isEmpty else {
+            if kind == .google { throw GoogleOAuthFailure(.invalidCallback) }
+            throw CalendarError.signInFailed
+        }
+        let response = try await token(service.tokenRequest(clientID: clientID, clientSecret: clientSecret, [
             ("grant_type", "authorization_code"), ("code", code), ("code_verifier", verifier), ("redirect_uri", redirectURI),
         ]))
-        guard let refresh = response.refreshToken else { throw CalendarError.signInFailed }
-        try? credentials.save(Secret(refresh), for: service.credential)
+        guard let refresh = response.refreshToken else {
+            if kind == .google { throw GoogleOAuthFailure(.missingRefreshToken, httpStatus: 200) }
+            throw CalendarError.signInFailed
+        }
+        if kind == .google {
+            guard !refresh.isEmpty else { throw GoogleOAuthFailure(.missingRefreshToken, httpStatus: 200) }
+            do { try credentials.save(Secret(refresh), for: service.credential) }
+            catch { throw GoogleOAuthFailure(.credentialStorage) }
+        } else {
+            try? credentials.save(Secret(refresh), for: service.credential)
+        }
     }
 
     public func disconnect() {
@@ -425,9 +518,15 @@ public actor OnlineCalendar: CalendarSource {
     private func accessToken() async throws -> String {
         if !AccessToken.needsRefresh(access, now: Date()), let access { return access.value }
         guard let clientID, let refresh = refreshToken else { throw CalendarError.signedOut }
-        let response = try await token(service.tokenRequest(clientID: clientID, [
-            ("grant_type", "refresh_token"), ("refresh_token", refresh.revealed),
-        ]))
+        let response: TokenResponse
+        do {
+            response = try await token(service.tokenRequest(clientID: clientID, clientSecret: clientSecret, [
+                ("grant_type", "refresh_token"), ("refresh_token", refresh.revealed),
+            ]))
+        } catch let failure as GoogleOAuthFailure where failure.reason == .invalidGrant {
+            disconnect()
+            throw CalendarError.signedOut
+        }
         // Microsoft may hand out a new refresh token; the old one is then to be discarded.
         if let rotated = response.refreshToken { try? credentials.save(Secret(rotated), for: service.credential) }
         access = AccessToken(value: response.accessToken, expires: Date().addingTimeInterval(response.expiresIn ?? 3600))
@@ -436,6 +535,13 @@ public actor OnlineCalendar: CalendarSource {
 
     private func token(_ request: URLRequest) async throws -> TokenResponse {
         let (data, status) = try await send(request)
+        if kind == .google {
+            guard status == 200 else { throw GoogleOAuthFailure.response(status: status, data: data) }
+            guard let response = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
+                throw GoogleOAuthFailure(.invalidResponse, httpStatus: status)
+            }
+            return response
+        }
         if status == 400 || status == 401 {
             // invalid_grant: the refresh token was revoked or expired; keep no dead sign-in around.
             if (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "invalid_grant" {
