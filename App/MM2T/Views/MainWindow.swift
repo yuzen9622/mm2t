@@ -79,7 +79,7 @@ struct MainWindow: View {
     static let sidebarWidth: CGFloat = 220
 
     var body: some View {
-        @Bindable var navigation = MainNavigation.shared
+        let navigation = MainNavigation.shared
         Group {
             if app.needsOnboarding, !DebugSnapshot.isRequested, !WindowSharing.allowsCapture {
                 SetupGate()
@@ -101,6 +101,7 @@ struct MainWindow: View {
                 .clipped()
             }
             .tipLayer()
+            .overlay { settings(isOpen: navigation.settingsOpen) }
             }
         }
         .foregroundStyle(Palette.text)
@@ -108,9 +109,6 @@ struct MainWindow: View {
         .background(WindowChrome())
         .ignoresSafeArea()
         .frame(minWidth: 820, minHeight: 540)
-        .sheet(isPresented: $navigation.settingsOpen) {
-            SettingsDialog(app: app)
-        }
         .onAppear {
             app.meetings.meLabel = Copy.presentationLabels.me
             app.dashboard.meLabel = Copy.presentationLabels.me
@@ -167,6 +165,28 @@ struct MainWindow: View {
         .background(Palette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Palette.shadow.opacity(0.6), radius: 10, y: 2)
         .padding(8)
+    }
+
+    /// Settings float over the window on a dimmed backdrop, inside the window rather than in a sheet
+    /// of their own, so a click on the backdrop closes them and a language change redraws them.
+    private func settings(isOpen: Bool) -> some View {
+        GeometryReader { proxy in
+            ZStack {
+                if isOpen {
+                    Color.black.opacity(0.28)
+                        .contentShape(Rectangle())
+                        .onTapGesture { MainNavigation.shared.settingsOpen = false }
+                        .transition(.opacity)
+                    SettingsDialog(app: app)
+                        .frame(width: min(780, proxy.size.width - 48), height: min(580, proxy.size.height - 48))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 30, y: 12)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .motion(Motion.reveal, value: isOpen)
     }
 
     private func row(_ item: SidebarItem) -> some View {

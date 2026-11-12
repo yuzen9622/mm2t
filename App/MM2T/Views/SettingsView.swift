@@ -125,7 +125,6 @@ struct SettingsDialog: View {
     let app: AppController
     @State private var query = ""
     @State private var showLicenses = false
-    @Environment(\.dismiss) private var dismiss
 
     private var navigation: MainNavigation { MainNavigation.shared }
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -133,18 +132,33 @@ struct SettingsDialog: View {
     var body: some View {
         HStack(spacing: 0) {
             sectionList
-            ScrollView {
-                SettingsPage(app: app, section: navigation.settingsSection, query: query, showLicenses: $showLicenses)
-                    .padding(.horizontal, 28)
-                    .padding(.top, 22)
-                    .padding(.bottom, 28)
+            Group {
+                if showLicenses {
+                    // The notices open in place of the page, not in a window of their own.
+                    VStack(alignment: .leading, spacing: 0) {
+                        IconButton("Back", icon: "chevron-left") { showLicenses = false }
+                            .padding(.leading, 16)
+                            .padding(.top, 14)
+                        AboutView()
+                    }
+                    .transition(.opacity)
+                } else {
+                    FadingScrollView {
+                        SettingsPage(app: app, section: navigation.settingsSection, query: query, showLicenses: $showLicenses)
+                            .padding(.horizontal, 28)
+                            .padding(.top, 22)
+                            .padding(.bottom, 28)
+                    }
+                    // Each section, and each search, starts at its top.
+                    .id("\(navigation.settingsSection)-\(searching)")
+                    .defaultScrollAnchor(.top)
+                    .transition(.opacity)
+                }
             }
-            // Each section, and each search, starts at its top.
-            .id("\(navigation.settingsSection)-\(searching)")
-            .defaultScrollAnchor(.top)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .motion(Motion.reveal, value: showLicenses)
             .overlay(alignment: .topTrailing) {
-                IconButton("Close", icon: "x") { dismiss() }
+                IconButton("Close", icon: "x") { navigation.settingsOpen = false }
                     .keyboardShortcut(.cancelAction)
                     .padding(14)
             }
@@ -152,24 +166,10 @@ struct SettingsDialog: View {
         .foregroundStyle(Palette.text)
         .font(Typo.body)
         .background(Palette.window)
-        .frame(width: 780, height: 580)
         .tipLayer()
-        .windowSharingNone()
-        .sheet(isPresented: $showLicenses) {
-            VStack(spacing: 0) {
-                AboutView()
-                HStack {
-                    Spacer()
-                    PillButton("Done", kind: .primary) { showLicenses = false }
-                }
-                .padding(16)
-            }
-            .frame(width: 560, height: 480)
-            .background(Palette.window)
-            .foregroundStyle(Palette.text)
-        }
         .onAppear { app.setup.recheck() }
         .onChange(of: app.settings.settings) { app.setup.recheck() }
+        .onChange(of: searching) { if searching { showLicenses = false } }
         .onChange(of: SnapshotStage.shared.settingsQuery, initial: true) { _, staged in
             if let staged { query = staged }
         }
@@ -180,8 +180,9 @@ struct SettingsDialog: View {
             Text("Settings").font(Typo.heading).padding(.horizontal, 6).padding(.top, 8)
             SearchField(text: $query).padding(.top, 14).padding(.bottom, 16)
             ForEach(SettingsSection.allCases) { section in
-                SettingsSectionRow(section: section, isSelected: !searching && navigation.settingsSection == section) {
+                SettingsSectionRow(section: section, isSelected: !searching && !showLicenses && navigation.settingsSection == section) {
                     query = ""
+                    showLicenses = false
                     navigation.settingsSection = section
                 }
             }
