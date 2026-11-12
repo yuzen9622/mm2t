@@ -52,8 +52,8 @@ private struct CloudWord: View {
         .scaleEffect(hovering ? 1.08 : 1)
         .motion(Motion.touch, value: hovering)
         .onHover { hovering = $0 }
-        .tip("Said \(term.count) times", show: hovering)
-        .accessibilityLabel(Text("\(term.term), said \(term.count) times"))
+        .tip("Said ^[\(term.count) time](inflect: true)", show: hovering)
+        .accessibilityLabel(Text("\(term.term), said ^[\(term.count) time](inflect: true)"))
     }
 }
 

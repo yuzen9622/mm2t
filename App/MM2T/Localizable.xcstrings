@@ -151,7 +151,7 @@
         }
       }
     },
-    "%@ · %lld meetings": {
+    "%@ · ^[%lld meeting](inflect: true)": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
@@ -161,32 +161,12 @@
         }
       }
     },
-    "%@, said %lld times": {
+    "%@, said ^[%lld time](inflect: true)": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "%1$@，出現 %2$lld 次"
-          }
-        }
-      }
-    },
-    "%lld events": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 個行程"
-          }
-        }
-      }
-    },
-    "%lld interrupted recordings were recovered.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已救回 %lld 段中斷的錄音。"
           }
         }
       }
@@ -207,16 +187,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 項未完成"
-          }
-        }
-      }
-    },
-    "%lld voiceprints": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 個聲紋"
           }
         }
       }
@@ -1861,6 +1831,16 @@
         }
       }
     },
+    "Recovered ^[%lld interrupted recording](inflect: true).": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已救回 %lld 段中斷的錄音。"
+          }
+        }
+      }
+    },
     "Recovered recording": {
       "localizations": {
         "zh-Hant": {
@@ -1931,7 +1911,7 @@
         }
       }
     },
-    "Said %lld times": {
+    "Said ^[%lld time](inflect: true)": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
@@ -2667,6 +2647,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "你的常用詞"
+          }
+        }
+      }
+    },
+    "^[%lld event](inflect: true)": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 個行程"
+          }
+        }
+      }
+    },
+    "^[%lld voiceprint](inflect: true)": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 個聲紋"
           }
         }
       }

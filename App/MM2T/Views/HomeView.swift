@@ -267,7 +267,7 @@ private struct DayCell: View {
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
         .accessibilityLabel(Text(day, format: .dateTime.month().day().weekday(.wide)))
-        .accessibilityValue(count > 0 ? Text("\(count) events") : Text(verbatim: ""))
+        .accessibilityValue(count > 0 ? Text("^[\(count) event](inflect: true)") : Text(verbatim: ""))
     }
 }
 
@@ -286,7 +286,7 @@ private struct DayAgenda: View {
                 }
                 Spacer(minLength: 0)
                 if !events.isEmpty {
-                    Text("\(events.count) events").font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
+                    Text("^[\(events.count) event](inflect: true)").font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
                 }
             }
             if events.isEmpty {
@@ -771,7 +771,7 @@ private struct VoicesCard: View {
                                 HStack {
                                     Text(verbatim: voice.name).font(Typo.bodyStrong).lineLimit(1)
                                     Spacer()
-                                    Text("\(Duration.seconds(voice.seconds), format: .units(allowed: [.hours, .minutes], width: .abbreviated)) · \(voice.meetings) meetings")
+                                    Text("\(Duration.seconds(voice.seconds), format: .units(allowed: [.hours, .minutes], width: .abbreviated)) · ^[\(voice.meetings) meeting](inflect: true)")
                                         .font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
                                 }
                                 ProgressLine(fraction: revealed ? voice.fraction : 0)
