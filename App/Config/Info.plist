@@ -36,9 +36,8 @@
 	<string>mm2t 會讀取瀏覽器目前分頁的網址，判斷你是否正在開 Google Meet、Teams、Zoom 或 Webex 網頁版會議。</string>
 	<key>SUFeedURL</key>
 	<string>https://github.com/yuzen9622/mm2t/releases/latest/download/appcast.xml</string>
-	<!-- PLACEHOLDER: replace with the public key printed by Sparkle's generate_keys (see docs/releasing.md). Builds keep updates off until it is a real key. -->
 	<key>SUPublicEDKey</key>
-	<string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
+	<string>tNTCK7RVmn65aCg6F2B+PXGmIN+31W7/5YC2Yu6sQaE=</string>
 
 	<key>MM2TGoogleClientID</key>
 	<string>580698568106-sggv7puhusc6hgeba4mhosp123emnllv.apps.googleusercontent.com</string>
