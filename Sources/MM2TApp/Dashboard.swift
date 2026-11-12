@@ -64,7 +64,12 @@ public struct CalendarSourceState: Hashable, Sendable, Identifiable {
 /// The home screen: what the user owes, what is on their calendar, and what their meetings add up to.
 @MainActor @Observable
 public final class DashboardModel {
-    public private(set) var todos: [TodoRow] = []
+    /// Every to-do with its done state as it is now.
+    public var todos: [TodoRow] {
+        loadedTodos.map { TodoRow(id: $0.id, text: $0.text, owner: $0.owner, meeting: $0.meeting, meetingTitle: $0.meetingTitle,
+                                  date: $0.date, isDone: status.isDone($0.id)) }
+    }
+    private var loadedTodos: [TodoRow] = []
     public private(set) var stats = DashboardStats()
     /// One entry per day, oldest first, ending today.
     public private(set) var activity: [ActivityDay] = []
@@ -89,31 +94,30 @@ public final class DashboardModel {
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let calendars: [any CalendarSource]
     @ObservationIgnored private var calendarLoad = 0
-    @ObservationIgnored private let todosFile: URL
+    @ObservationIgnored private let status: TodoStatus
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private var done: Set<String>
 
     public init(library: MeetingLibrary, voiceprints: VoiceprintStore, settings: SettingsStore,
-                calendars: [any CalendarSource], todosFile: URL, now: @escaping () -> Date) {
+                calendars: [any CalendarSource], todosFile: URL, status: TodoStatus? = nil,
+                now: @escaping () -> Date) {
         self.library = library
         self.voiceprints = voiceprints
         self.settings = settings
         self.calendars = calendars
-        self.todosFile = todosFile
+        self.status = status ?? TodoStatus(file: todosFile)
         self.now = now
         calendarSources = calendars.map { CalendarSourceState(kind: $0.kind, connection: .disconnected) }
         let today = Calendar.current.startOfDay(for: now())
         month = Calendar.current.dateInterval(of: .month, for: today)?.start ?? today
         selectedDay = today
-        done = Set((try? JSONDecoder().decode([String].self, from: Data(contentsOf: todosFile))) ?? [])
     }
 
     public func reload() async {
         let names = await voiceprints.names()
         let meetings = ((try? await library.list()) ?? []).filter { $0.status == .completed }
         let vocabulary = settings.settings.vocabulary
-        let snapshot = Self.snapshot(meetings, names: names, vocabulary: vocabulary, done: done, me: meLabel, today: now())
-        todos = snapshot.todos
+        let snapshot = Self.snapshot(meetings, names: names, vocabulary: vocabulary, done: status.done, me: meLabel, today: now())
+        loadedTodos = snapshot.todos
         stats = snapshot.stats
         activity = snapshot.activity
         voices = snapshot.voices
@@ -241,13 +245,7 @@ public final class DashboardModel {
     }
 
     public func toggle(_ todo: TodoRow) {
-        if !done.insert(todo.id).inserted { done.remove(todo.id) }
-        try? FileManager.default.createDirectory(at: todosFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(done.sorted()).write(to: todosFile, options: .atomic)
-        todos = todos.map {
-            $0.id == todo.id ? TodoRow(id: $0.id, text: $0.text, owner: $0.owner, meeting: $0.meeting,
-                                       meetingTitle: $0.meetingTitle, date: $0.date, isDone: !$0.isDone) : $0
-        }
+        status.toggle(todo.id)
     }
 
     struct Snapshot {
