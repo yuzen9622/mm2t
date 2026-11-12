@@ -108,6 +108,40 @@ jobs:
           echo "TEAM_ID=$team" >> "$GITHUB_ENV"
           echo "SIGNING_HASH=$(awk '{print $2}' <<< "$identity")" >> "$GITHUB_ENV"
 
+      # Optional. A Developer ID provisioning profile for dev.mm2t.app lets the app keep keys in
+      # the data protection keychain, which every build from the team reads without a password
+      # prompt. Without it the app falls back to the login keychain, as before.
+      - name: Install the Developer ID provisioning profile
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          MACOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [[ -z "$MACOS_PROVISIONING_PROFILE_BASE64" ]]; then
+            echo "::warning::MACOS_PROVISIONING_PROFILE_BASE64 is not set: keys stay in the login keychain."
+            exit 0
+          fi
+          profile="$RUNNER_TEMP/mm2t.provisionprofile"
+          printf '%s' "$MACOS_PROVISIONING_PROFILE_BASE64" | base64 -d > "$profile"
+          security cms -D -i "$profile" > "$RUNNER_TEMP/profile.plist"
+          app_id=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.application-identifier" "$RUNNER_TEMP/profile.plist")
+          if [[ "$app_id" != "$TEAM_ID.dev.mm2t.app" ]]; then
+            echo "::error::The provisioning profile is for $app_id, expected $TEAM_ID.dev.mm2t.app"
+            exit 1
+          fi
+          uuid=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/profile.plist")
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$profile" "$dir/$uuid.provisionprofile"
+          done
+          entitlements=App/Config/MM2T.entitlements
+          /usr/libexec/PlistBuddy \
+            -c "Add :com.apple.application-identifier string $TEAM_ID.dev.mm2t.app" \
+            -c "Add :com.apple.developer.team-identifier string $TEAM_ID" \
+            -c "Add :keychain-access-groups array" \
+            -c "Add :keychain-access-groups:0 string $TEAM_ID.dev.mm2t.app" \
+            "$entitlements"
+          echo "PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+
       - name: Write the App Store Connect API key
         if: steps.mode.outputs.signed == 'true'
         env:
@@ -142,6 +176,12 @@ jobs:
           </dict>
           </plist>
           EOF
+          if [[ -n "${PROFILE_UUID:-}" ]]; then
+            /usr/libexec/PlistBuddy \
+              -c "Add :provisioningProfiles dict" \
+              -c "Add :provisioningProfiles:dev.mm2t.app string $PROFILE_UUID" \
+              "$WORK/ExportOptions.plist"
+          fi
           xcodebuild -exportArchive \
             -archivePath "$WORK/mm2t.xcarchive" \
             -exportPath "$WORK/export" \
@@ -158,6 +198,13 @@ jobs:
               exit 1
             fi
           done
+          if [[ -n "${PROFILE_UUID:-}" ]]; then
+            if [[ ! -f "$app/Contents/embedded.provisionprofile" ]] \
+              || ! codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q "<string>$TEAM_ID.dev.mm2t.app</string>"; then
+              echo "::error::The app lacks the embedded profile or its keychain access group"
+              exit 1
+            fi
+          fi
           shipped=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist")
           if [[ "$shipped" != "$VERSION" ]]; then
             echo "::error::The app says $shipped but the tag says $VERSION"
