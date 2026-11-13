@@ -1,5 +1,16 @@
 import Link from "next/link";
-
+import { Button } from "@/components/ui/button";
 export default function NotFound() {
-  return <main className="section"><div className="wrap"><p className="section-label">404</p><h1>這一頁沒有會議紀錄。</h1><p style={{ marginBlock: 24 }}>回到首頁，繼續認識 mm2t。</p><Link className="button button-primary" href="/">回到首頁</Link></div></main>;
+  return (
+    <main className="mx-auto flex min-h-svh max-w-5xl flex-col items-start justify-center gap-6 px-6">
+      <p className="text-sm text-primary">404</p>
+      <h1 className="text-4xl font-medium tracking-tight">
+        這一頁沒有會議紀錄。
+      </h1>
+      <p className="text-muted-foreground">回到首頁，繼續認識 mm2t。</p>
+      <Button asChild>
+        <Link href="/">回到首頁</Link>
+      </Button>
+    </main>
+  );
 }
