@@ -2,11 +2,18 @@ export type Locale = "zh" | "en";
 
 /** Shared keys keep the App's Traditional Chinese terminology consistent. */
 export const english: Record<string, string> = {
+  "取消麥克風請求": "Cancel microphone request",
+  "暫停麥克風": "Pause microphone",
+  "開啟麥克風試試": "Try your microphone",
+  "結束麥克風體驗": "Finish microphone demo",
+  "請允許麥克風權限，再點一下重試。": "Allow microphone access, then click to try again.",
+  "無法使用麥克風，請確認裝置與瀏覽器設定後重試。": "Microphone unavailable. Check your device and browser settings, then try again.",
+  "等待麥克風權限": "Waiting for microphone permission",
+  "麥克風已開啟，聲音僅在此裝置分析，不會儲存或上傳。": "Microphone on. Audio is analyzed only on this device, never saved or uploaded.",
+  "點擊麥克風，讓波形跟著你的聲音。": "Click the microphone to see your voice move the waveform.",
   錄音膠囊互動示範: "Interactive recording capsule demo",
   播放波形動畫: "Play waveform",
   暫停波形動畫: "Pause waveform",
-  "錄音膠囊 · 互動示範": "Recording capsule · interactive demo",
-  "實際 App 畫面": "Captured in mm2t",
   "按說話者整理觀點，保留對應時間點。":
     "Each person's perspective, with timestamps back to the conversation.",
   "決議、討論重點與待辦事項，沿用 App 的原始排版。":
@@ -101,7 +108,6 @@ export const english: Record<string, string> = {
   "討論重點、決議與待辦整理成摘要，附上時間點，方便回到當時的對話。":
     "Turn discussions into key points, decisions, and tasks, with timestamps that take you back to the conversation.",
   "mm2t 自動整理的會議摘要": "A meeting summary created by mm2t",
-  "從第一句，到下一步": "FROM FIRST WORD TO NEXT STEP",
   "會議在進行。": "The conversation flows.",
   "紀錄，也跟得上。": "Your notes keep up.",
   "你的會議，有四種讀法": "ONE MEETING. FOUR WAYS TO READ IT.",
@@ -197,8 +203,6 @@ export const english: Record<string, string> = {
   自架轉錄伺服器: "Self-hosted transcription",
   音訊在自己的: "Audio travels between",
   設備之間傳輸: "your own devices",
-  "選用雲端服務時，音訊或文字會傳送至所選服務商處理；費用由你的 API 帳號支付。":
-    "When you choose a cloud service, audio or text is sent to that provider for processing. Usage is billed to your API account.",
   "mm2t 是免費的嗎？": "Is mm2t free?",
   "mm2t 免費、開放原始碼，採用 AGPL-3.0 授權。選用 ElevenLabs、Google Gemini 等雲端服務時，需填入自己的 API 金鑰，使用費由服務商直接計算。也可以使用自己的轉錄伺服器。":
     "mm2t is free and open source under AGPL-3.0. Cloud services such as ElevenLabs and Google Gemini require your own API keys and bill you directly for usage. You can also connect your own transcription server.",
@@ -224,7 +228,6 @@ export const english: Record<string, string> = {
   "都整理在 GitHub 文件裡。": "in the documentation on GitHub.",
   閱讀使用文件: "Read the docs",
   "mm2t 應用程式圖示": "mm2t app icon",
-  "準備好，留給下一場會議。": "READY FOR YOUR NEXT MEETING.",
   "把注意力留給對話。": "Be there for the conversation.",
   "打開 mm2t，開始你的第一份會議記錄。":
     "Open mm2t. Let your first meeting become your first notes.",
@@ -233,7 +236,6 @@ export const english: Record<string, string> = {
   隱私權政策: "Privacy policy",
   使用條款: "Terms of use",
   版本紀錄: "Releases",
-  "每一句話，都有了位置。": "Every word finds its place.",
   "聲音，成為清楚的下一步。": "From sound to a clear next step.",
   "散落的對話，逐一歸位。": "The conversation comes together.",
   繼續探索: "Keep exploring",
