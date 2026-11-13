@@ -67,11 +67,11 @@ Recordings, voiceprints, and meeting notes are stored locally. mm2t has no serve
 
 ## mm2t in a minute
 
-<p align="center">
-  <a href="docs/assets/video/mm2t-en.mp4"><img src="docs/assets/en/poster.png" alt="Play the mm2t introduction video" width="880"/></a>
-</p>
 
-[Watch the English demo](docs/assets/video/mm2t-en.mp4)
+
+https://github.com/user-attachments/assets/e316ca11-9b34-443b-9ba9-06be83063d87
+
+
 
 
 ## Installation
