@@ -4,6 +4,8 @@
 
   <h1>mm2t</h1>
 
+  <p><a href="README.md">English</a> · <a href="README.zh-TW.md">繁體中文</a></p>
+
   <p><strong>開會時專心說話，紀錄交給 mm2t。</strong></p>
 
   <p>常駐 Mac 選單列的會議記錄工具。偵測到會議就開始錄音，會後產出分好說話者的逐字稿與摘要。</p>
