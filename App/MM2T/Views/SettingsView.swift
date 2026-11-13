@@ -431,7 +431,7 @@ private struct LinkRow: View {
     }
 }
 
-/// The self-hosted server's address, saved when the user presses Return or leaves the row.
+/// The self-hosted server's address, saved as the user types so the token check beside it always sees it.
 private struct ServerURLField: View {
     let store: SettingsStore
     @State private var text = ""
@@ -442,7 +442,7 @@ private struct ServerURLField: View {
                 .onSubmit(save)
         }
         .onAppear { text = store.settings.selfHostedURL?.absoluteString ?? "" }
-        .onDisappear(perform: save)
+        .onChange(of: text) { save() }
         if !text.isEmpty, AppSettings.selfHostedURL(from: text) == nil {
             Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
         }
@@ -464,7 +464,7 @@ private struct LLMServerFields: View {
                 .onSubmit(save)
         }
         .onAppear { url = store.settings.openAIBaseURL?.absoluteString ?? "" }
-        .onDisappear(perform: save)
+        .onChange(of: url) { save() }
         if !url.isEmpty, AppSettings.openAIBaseURL(from: url) == nil {
             Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
         }
