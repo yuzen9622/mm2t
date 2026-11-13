@@ -5,7 +5,7 @@ import { motion, useScroll, useMotionValueEvent } from "motion/react";
 import { useMotionScene } from "@/hooks/use-motion-scene";
 import { useCopy } from "@/components/i18n";
 import { cn } from "@/lib/utils";
-import { container, heading, label, sectionPadding } from "./shared";
+import { container, heading, sectionPadding } from "./shared";
 const chapters = [
   {
     title: "會議開始，輕按一下。",
@@ -56,7 +56,6 @@ export function Experience() {
         )}
       >
         <div>
-          <span className={label}>{t("從第一句，到下一步")}</span>
           <h2 id="experience-title" className={heading}>
             {t("會議在進行。")}
             <br />

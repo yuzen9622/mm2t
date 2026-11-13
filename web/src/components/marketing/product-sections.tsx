@@ -76,23 +76,16 @@ export function ProductTour() {
                   </TabsTrigger>
                 ))}
               </TabsList>
-              <span className="text-xs text-muted-foreground">
-                {t("實際 App 畫面")}
-                {locale === "en" && (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <a
-                      href="/media/en/ATTRIBUTION.md"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline underline-offset-4"
-                    >
-                      Demo credits
-                    </a>
-                  </>
-                )}
-              </span>
+              {locale === "en" && (
+                <a
+                  href="/media/en/ATTRIBUTION.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-muted-foreground underline underline-offset-4"
+                >
+                  Demo credits
+                </a>
+              )}
             </div>
             {demos.map((item) => (
               <TabsContent key={item.label} value={item.label}>

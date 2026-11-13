@@ -114,11 +114,6 @@ export function Privacy() {
               </span>
             </div>
           </div>
-          <p className="mt-5 text-xs leading-6 text-background/45">
-            {t(
-              "選用雲端服務時，音訊或文字會傳送至所選服務商處理；費用由你的 API 帳號支付。",
-            )}
-          </p>
         </Reveal>
       </div>
     </section>

@@ -9,7 +9,6 @@ import {
   REPO,
   container,
   heading,
-  label,
   textLink,
 } from "./shared";
 export function Footer() {
@@ -25,7 +24,6 @@ export function Footer() {
             alt={t("mm2t 應用程式圖示")}
             className="mb-9 rounded-3xl"
           />
-          <p className={label}>{t("準備好，留給下一場會議。")}</p>
           <h2 className={`${heading} max-w-4xl`}>{t("把注意力留給對話。")}</h2>
           <p className="mt-5 mb-8 text-sm leading-7 text-muted-foreground">
             {t("打開 mm2t，開始你的第一份會議記錄。")}

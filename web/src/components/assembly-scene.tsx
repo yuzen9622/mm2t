@@ -8,7 +8,7 @@ import { NativeWaveform } from "./native-waveform";
 import { Icon } from "./icon";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
-import { frame, heading, label } from "./marketing/shared";
+import { frame, heading } from "./marketing/shared";
 export function AssemblyScene() {
   const { t, media } = useCopy();
   const section = useRef<HTMLElement>(null);
@@ -41,9 +41,6 @@ export function AssemblyScene() {
         )}
       >
         <div className="text-center">
-          <span className={`${label} text-[#e7a06b]`}>
-            {t("從第一句，到下一步")}
-          </span>
           <h2 id="signal-title" className={heading}>
             {t("聲音，成為清楚的下一步。")}
           </h2>
@@ -69,9 +66,6 @@ export function AssemblyScene() {
               paused={paused}
               className={enabled ? "my-16 scale-600" : "my-6 scale-200"}
             />
-            <p className="text-sm text-background/60">
-              {t("每一句話，都有了位置。")}
-            </p>
           </motion.div>
           <motion.div
             className={cn(
@@ -109,8 +103,8 @@ export function AssemblyScene() {
             className="px-0 text-xs"
             onClick={() => setPaused((v) => !v)}
             aria-pressed={paused}
+            aria-label={t(paused ? "播放波形動畫" : "暫停波形動畫")}
           >
-            {t(paused ? "播放波形動畫" : "暫停波形動畫")}
             <Icon name={paused ? "play" : "pause"} size={16} />
           </Button>
           <Button asChild variant="link" size="sm" className="px-0 text-xs">

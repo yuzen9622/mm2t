@@ -103,9 +103,6 @@ export function Hero() {
               className="h-auto w-full"
             />
           </div>
-          <p className="mt-4 text-right text-xs text-muted-foreground">
-            {t("實際 App 畫面")}
-          </p>
         </motion.div>
       </div>
       <div
