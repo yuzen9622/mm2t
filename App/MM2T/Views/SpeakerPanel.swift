@@ -10,7 +10,7 @@ struct SpeakerPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(model.speakers) { speaker in
-                SpeakerRowView(speaker: speaker, others: model.speakers.filter { $0.id != speaker.id },
+                SpeakerRowView(speaker: speaker, others: model.speakers.filter { $0.id != speaker.id && !$0.isMe },
                                canClaim: model.canClaimAsMe(speaker.id),
                                rename: { renaming = speaker },
                                claim: { Task { await model.claimAsMe(speaker.id) } },
@@ -47,25 +47,10 @@ struct SpeakerRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 9) {
-                Avatar(name: speaker.displayName, isNamed: speaker.person != nil)
+                Avatar(name: speaker.displayName, isNamed: speaker.isMe || speaker.person != nil)
                 Text(speaker.displayName).font(Typo.bodyStrong).lineLimit(1)
                 Spacer(minLength: 4)
-                Menu {
-                    Button("Rename…", action: rename)
-                    if canClaim {
-                        Button("This Is Me", action: claim)
-                    }
-                    Menu("Merge Into") {
-                        ForEach(others) { other in Button(other.displayName) { merge(other.id) } }
-                    }
-                } label: {
-                    Icon("dots", size: 16).foregroundStyle(Palette.secondary).frame(width: 26, height: 26).contentShape(Circle())
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .opacity(hovering ? 1 : 0)
+                if !speaker.isMe { menu }
             }
             if let suggestion = speaker.suggestion {
                 Button(action: accept) {
@@ -88,6 +73,25 @@ struct SpeakerRowView: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
+    }
+
+    private var menu: some View {
+        Menu {
+            Button("Rename…", action: rename)
+            if canClaim {
+                Button("This Is Me", action: claim)
+            }
+            Menu("Merge Into") {
+                ForEach(others) { other in Button(other.displayName) { merge(other.id) } }
+            }
+        } label: {
+            Icon("dots", size: 16).foregroundStyle(Palette.secondary).frame(width: 26, height: 26).contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .opacity(hovering ? 1 : 0)
     }
 
     private func reason(_ suggestion: SpeakerRow.Suggestion) -> String {

@@ -40,11 +40,14 @@ public struct JumpTarget: Hashable, Sendable {
 public struct UtteranceRow: Hashable, Sendable, Identifiable {
     public let id: UtteranceID
     public let start: TimeInterval
+    public let end: TimeInterval
     public let speaker: SpeakerID
     public let speakerName: String
     public let text: String
     public let isOverlapping: Bool
     public let isHighlighted: Bool
+    /// What the speech service heard, with times, for lighting up the line as it is played.
+    public var words: [TimedWord] = []
 }
 
 public struct SourcedRow: Hashable, Sendable, Identifiable {
@@ -53,6 +56,11 @@ public struct SourcedRow: Hashable, Sendable, Identifiable {
     public let speakerName: String?
     public let text: String
     public let jump: JumpTarget?
+    /// When the last source utterance ends, so playback can tell which paragraph it is in.
+    public var end: TimeInterval?
+    /// When each source utterance was spoken, in order: the rewritten text has no word times of
+    /// its own, so playback spreads it across these.
+    public var spans: [TimeRange] = []
 }
 
 public struct DigestSection: Hashable, Sendable, Identifiable {
@@ -88,9 +96,9 @@ public struct MeetingPresentation: Sendable {
 
     public var raw: [UtteranceRow] {
         meeting.utterances.map {
-            UtteranceRow(id: $0.id, start: $0.range.start, speaker: meeting.resolve($0.speaker),
+            UtteranceRow(id: $0.id, start: $0.range.start, end: $0.range.end, speaker: meeting.resolve($0.speaker),
                          speakerName: speakerName($0.speaker), text: $0.text,
-                         isOverlapping: $0.isOverlapping, isHighlighted: meeting.isHighlighted($0))
+                         isOverlapping: $0.isOverlapping, isHighlighted: meeting.isHighlighted($0), words: $0.words)
         }
     }
 
@@ -98,7 +106,9 @@ public struct MeetingPresentation: Sendable {
         meeting.outputs.cleaned.map { cleaned in
             cleaned.paragraphs.enumerated().map { index, paragraph in
                 SourcedRow(id: "cleaned-\(index)", speakerName: speakerName(paragraph.speaker),
-                           text: substitute(paragraph.text), jump: jump(paragraph.sources))
+                           text: substitute(paragraph.text), jump: jump(paragraph.sources),
+                           end: paragraph.sources.compactMap { meeting.utterance($0)?.range.end }.max(),
+                           spans: paragraph.sources.compactMap { meeting.utterance($0)?.range }.sorted { $0.start < $1.start })
             }
         }
     }

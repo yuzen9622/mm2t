@@ -138,6 +138,8 @@ struct SearchField: View {
         .padding(.horizontal, 12)
         .frame(height: 32)
         .background(focused ? Palette.selected : Palette.field, in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture { focused = true }
         .motion(Motion.touch, value: focused)
         .motion(Motion.reveal, value: text.isEmpty)
     }

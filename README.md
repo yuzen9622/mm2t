@@ -4,118 +4,120 @@
 
   <h1>mm2t</h1>
 
-  <p><strong>開會時專心說話，紀錄交給 mm2t。</strong></p>
+  <p><a href="README.md">English</a> · <a href="README.zh-TW.md">繁體中文</a></p>
 
-  <p>常駐 Mac 選單列的會議記錄工具。偵測到會議就開始錄音，會後產出分好說話者的逐字稿與摘要。</p>
+  <p><strong>Focus on the conversation. Let mm2t take the notes.</strong></p>
+
+  <p>A meeting recorder that lives in your Mac's menu bar. It detects meetings, records them, and turns them into speaker-labeled transcripts and summaries.</p>
 
   <p>
-    <a href="https://github.com/yuzen9622/mm2t/releases/latest"><strong>下載 mm2t</strong></a>
-    &nbsp;·&nbsp; macOS 14.2 以上 &nbsp;·&nbsp; 免費、開放原始碼
+    <a href="https://github.com/yuzen9622/mm2t/releases/latest"><strong>Download mm2t</strong></a>
+    &nbsp;·&nbsp; macOS 14.2 or later &nbsp;·&nbsp; Free and open source
   </p>
 </div>
 
 <p align="center">
-  <img src="docs/assets/hero.gif" alt="在 mm2t 中確認說話者名字並查看會議摘要" width="880"/>
+  <img src="docs/assets/en/hero.gif" alt="Confirming speaker names and viewing a meeting summary in mm2t" width="880"/>
 </p>
 
-## 不需要邀請任何人進會議
+## No extra guests in your meeting
 
-mm2t 直接在你的 Mac 上錄音，不會有 Bot 加入會議，也不錄畫面。支援 Google Meet、Microsoft Teams、Zoom 與 Webex，會議一開始，螢幕頂端就會詢問要不要記錄；會議結束後倒數幾秒自動停止。
+mm2t records directly on your Mac. No bot joins the meeting, and no screen video is recorded. It supports Google Meet, Microsoft Teams, Zoom, and Webex. When a meeting starts, a prompt at the top of your screen asks whether to record; when it ends, recording stops automatically after a short countdown.
 
-mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不用擔心被看到。
+All mm2t windows stay out of your screen share, so you can present without worrying about them showing up.
 
 <p align="center">
-  <img src="docs/assets/feature-recording-capsule.png" alt="偵測到 Zoom 會議時的提示，以及會議結束時的倒數" width="720"/>
+  <img src="docs/assets/en/feature-recording-capsule.png" alt="A prompt when a Zoom meeting is detected, and a countdown when the meeting ends" width="720"/>
 </p>
 
-## 知道每一句話是誰說的
+## Know who said every word
 
-你的麥克風和會議另一端的聲音分成兩條音軌錄製，再由 Mac 本機辨識不同的說話者。替說話者命名一次，mm2t 會記住他的聲紋，下次開會自動標上名字。
+Your microphone and the other side of the call are recorded on separate tracks. Speaker identification then runs locally on your Mac. Name a speaker once, and mm2t remembers their voiceprint and labels them automatically in future meetings.
 
 <p align="center">
-  <img src="docs/assets/feature-speakers.png" alt="標好說話者名字的逐字稿" width="880"/>
+  <img src="docs/assets/en/feature-speakers.png" alt="A transcript with named speakers" width="880"/>
 </p>
 
-每個人的聲紋都存在「人物」頁，會分別記住他在會議室現場和線上通話時的聲音。
+Everyone's voiceprints live on the People page, with separate profiles for how they sound in a meeting room and on a call.
 
 <p align="center">
-  <img src="docs/assets/feature-voiceprints.png" alt="人物頁：每個人的聲紋與錄音情境" width="880"/>
+  <img src="docs/assets/en/feature-voiceprints.png" alt="The People page, showing each person's voiceprints and recording contexts" width="880"/>
 </p>
 
-## 會議結束，紀錄就整理好了
+## Meeting over. Notes ready.
 
-每場會議會產出四種內容：
+Every meeting produces four views:
 
 | | |
 | --- | --- |
-| 逐字稿 | 依時間排列，標示說話者 |
-| 整理版逐字稿 | 去掉贅字與口頭禪，方便閱讀 |
-| 依人彙整 | 每個人說了哪些重點 |
-| 摘要 | 決議、討論重點與待辦事項，每一條都附上時間點 |
+| Transcript | In chronological order, with speaker labels |
+| Cleaned transcript | Filler words and verbal tics removed for easier reading |
+| By person | The key points each person made |
+| Summary | Decisions, discussion points, and action items, each with a timestamp |
 
 <p align="center">
-  <img src="docs/assets/feature-summary.png" alt="會議摘要：決議、討論重點與待辦事項" width="880"/>
+  <img src="docs/assets/en/feature-summary.png" alt="A meeting summary with decisions, discussion points, and action items" width="880"/>
 </p>
 
-所有會議依時間排列在同一個清單，可以用標題、內容或與會者搜尋。
+All your meetings appear in one chronological list, searchable by title, content, or participant.
 
-## 資料留在你的 Mac
+## Your data stays on your Mac
 
-錄音、聲紋與會議紀錄都只存在本機，mm2t 沒有自己的伺服器。語音轉文字與摘要使用你自己的 API 金鑰（ElevenLabs、Google Gemini），費用直接由你的帳號支付；也可以改用自架的轉錄伺服器，讓音訊完全不離開你的設備。詳見 [隱私權政策](PRIVACY.md)。
+Recordings, voiceprints, and meeting notes are stored locally. mm2t has no servers of its own. Transcription and summaries use your own API keys (ElevenLabs and Google Gemini), with usage billed directly to your accounts. You can also use a self-hosted transcription server to keep audio entirely on your own devices. See the [Privacy Policy](PRIVACY.md) for details.
 
-## 一分鐘看懂 mm2t
-
-<p align="center">
-  <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4"><img src="docs/assets/poster.png" alt="播放 mm2t 介紹影片" width="880"/></a>
-</p>
-
-https://github.com/user-attachments/assets/9b72ccfb-d3c0-4535-afa1-5475223d5fee
+## mm2t in a minute
 
 
-## 安裝
 
-需求：macOS 14.2 以上（Core Audio Process Tap 的最低版本）。
+https://github.com/user-attachments/assets/e316ca11-9b34-443b-9ba9-06be83063d87
 
-1. 到 [GitHub Releases](https://github.com/yuzen9622/mm2t/releases/latest) 下載 `mm2t-X.Y.Z.dmg`。
-2. 打開 DMG，把 `mm2t.app` 拖到「應用程式」資料夾。
-3. 從「應用程式」打開 mm2t。
 
-目前的版本還沒有 Developer ID 簽章與 Apple 公證，第一次打開時 macOS 會擋下來：在「應用程式」中按住 Control 點一下 `mm2t.app` 選 **打開**；若沒有「打開」選項，到 **系統設定 > 隱私權與安全性** 按 **仍要打開**。每個 Release 頁面都有完整步驟。
 
-目前的版本不會自動更新，有新版時請回 [GitHub Releases](https://github.com/yuzen9622/mm2t/releases) 下載。
 
-## 第一次使用：授予權限
+## Installation
 
-第一次打開時會出現設定精靈，逐一說明每個權限的用途。之後可以從選單列選單的 **設定精靈⋯** 回到這個視窗。所有權限都在 **系統設定 > 隱私權與安全性** 裡管理。
+Requires macOS 14.2 or later (the minimum version for Core Audio Process Tap).
 
-| 權限 | 用途 | 沒有的話 |
+1. Download `mm2t-X.Y.Z.dmg` from [GitHub Releases](https://github.com/yuzen9622/mm2t/releases/latest).
+2. Open the DMG and drag `mm2t.app` into Applications.
+3. Open mm2t from Applications.
+
+The current release is not yet Developer ID signed or notarized by Apple, so macOS will block it the first time you open it. Control-click `mm2t.app` in Applications and choose **Open**. If there is no Open option, go to **System Settings > Privacy & Security** and click **Open Anyway**. Each release page includes the full steps.
+
+The current release does not update automatically. Visit [GitHub Releases](https://github.com/yuzen9622/mm2t/releases) to download new versions.
+
+## First launch: grant permissions
+
+On first launch, a setup wizard explains what each permission is used for. You can return to it later through **Setup Wizard…** in the menu bar menu. All permissions are managed in **System Settings > Privacy & Security**.
+
+| Permission | Purpose | Without it |
 | --- | --- | --- |
-| 麥克風 | 錄下「我」的音軌 | 無法錄音 |
-| 系統音訊錄製 | 只錄會議 App 播放的聲音，作為「遠端」音軌 | 遠端音軌是靜音 |
-| 輔助使用 | 讀取前景視窗標題，判斷是否在開會 | 只能手動開始錄音 |
-| 自動化（各瀏覽器） | 讀取瀏覽器目前分頁的網址，偵測網頁版會議 | 無法偵測 Google Meet 等網頁版會議 |
+| Microphone | Records your own audio track | Recording is unavailable |
+| System Audio Recording | Records only the meeting app's audio as the remote track | The remote track is silent |
+| Accessibility | Reads the foreground window's title to detect meetings | Recording must be started manually |
+| Automation (per browser) | Reads the current browser tab's URL to detect web meetings | Web meetings such as Google Meet cannot be detected |
 
-權限被拒絕時，設定精靈會說明原因，並提供打開系統設定的按鈕。
+If a permission is denied, the setup wizard explains why it is needed and provides a button to open System Settings.
 
-錄 Google Meet 時，mm2t 擷取的是整個瀏覽器的聲音。開會時不要在同一個瀏覽器播放其他聲音，否則會一起被錄進去。
+For Google Meet, mm2t captures audio from the entire browser. Avoid playing other audio in the same browser during a meeting, or it will be recorded too.
 
-## 設定 API 金鑰
+## Set up API keys
 
-mm2t 不經過任何 mm2t 自己的伺服器。你填入自己的金鑰，費用由你的帳號直接支付。金鑰存在 macOS 鑰匙圈，不會以明文寫進磁碟。在主視窗的 **設定** 填入金鑰並按 **儲存**，mm2t 會先試用一次，確認金鑰可用。
+Nothing is routed through mm2t-operated servers. You supply your own keys, and usage is billed directly to your accounts. Keys are stored in macOS Keychain, never written to disk in plain text. Enter your keys under **Settings** in the main window and click **Save**. mm2t makes a test request to check that each key works.
 
-- **ElevenLabs**（語音轉文字）：到 [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) 建立 API 金鑰，需要有 Speech to Text 權限和足夠額度。驗證金鑰時會送出 0.5 秒的靜音，花費極少。
-- **Google Gemini**（名字推測、整理版逐字稿、依人彙整、摘要）：到 [Google AI Studio](https://aistudio.google.com/apikey) 建立 API 金鑰。**請使用已啟用付費方案的金鑰。** 依 [Gemini API 條款](https://ai.google.dev/gemini-api/terms)，免費方案送出的內容可能被 Google 用來改進產品，付費方案則不會。
+- **ElevenLabs** (speech to text): Create an API key at [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) with Speech to Text permission and sufficient credits. Key validation sends 0.5 seconds of silence at a minimal cost.
+- **Google Gemini** (name suggestions, cleaned transcripts, per-person notes, and summaries): Create an API key at [Google AI Studio](https://aistudio.google.com/apikey). **Use a key with paid billing enabled.** Under the [Gemini API Terms](https://ai.google.dev/gemini-api/terms), content sent through the free tier may be used by Google to improve its products; content sent through the paid tier is not.
 
-每種資料送到哪裡，請見 [隱私權政策](PRIVACY.md)。
+See the [Privacy Policy](PRIVACY.md) for details on where each type of data is sent.
 
-## 自架轉錄伺服器
+## Self-hosted transcription server
 
-如果你有 NVIDIA GPU 主機，可以自架轉錄伺服器，讓音訊只在你自己的機器之間傳輸，也不用付語音轉文字的 API 費用。伺服器用 faster-whisper 執行 Breeze-ASR-25（針對台灣華語與中英夾雜），提供 Docker image。
+If you have a machine with an NVIDIA GPU, you can host your own transcription server. Audio travels only between your own machines, and there are no speech-to-text API fees. The server runs Breeze-ASR-25 through faster-whisper, tuned for Taiwanese Mandarin and mixed Chinese-English speech, and is available as a Docker image.
 
-部署方式見 [server/README.md](server/README.md)。部署好之後，在 mm2t 的設定裡填入伺服器網址（例如 Tailscale 網址 `http://gpu.tailnet:8000`），有設定 `MM2T_SERVER_TOKEN` 的話一併填入權杖。轉錄來源可以排順序：自架伺服器連不上時，mm2t 會改用下一個來源，並在結果中標示實際使用的來源。
+See [server/README.md](server/README.md) for deployment instructions. Once it is running, enter the server URL in mm2t's settings (for example, a Tailscale address such as `http://gpu.tailnet:8000`). If you configured `MM2T_SERVER_TOKEN`, enter that token as well. You can set the priority order of transcription sources: if your server is unreachable, mm2t tries the next source and shows which one was used in the results.
 
-## 授權
+## License
 
-mm2t 以 [GNU Affero General Public License v3.0](LICENSE) 授權。使用的第三方軟體與模型列在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+mm2t is licensed under the [GNU Affero General Public License v3.0](LICENSE). Third-party software and models are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-使用前請閱讀 [隱私權政策](PRIVACY.md) 與 [使用條款](TERMS.md)。
+Please read the [Privacy Policy](PRIVACY.md) and [Terms of Use](TERMS.md) before using mm2t.

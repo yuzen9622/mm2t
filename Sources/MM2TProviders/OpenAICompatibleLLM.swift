@@ -46,6 +46,7 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     public func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript { try await tasks.cleanTranscript(transcript) }
     public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
     public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
+    public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
 
     /// `GET /models` costs no tokens and checks the token. Servers without that route answer 404 or
     /// 405, so those get a one-token completion instead, which also proves the model name works.

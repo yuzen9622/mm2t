@@ -1,0 +1,106 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@font-face {
+  font-family: Geist;
+  src: url("/fonts/geist-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* App/MM2T/Design/Tokens.swift, exposed through shadcn's semantic color contract. */
+:root {
+  --background: #f6f5f1;
+  --foreground: #1c1c1e;
+  --card: #fdfcf9;
+  --card-foreground: #1c1c1e;
+  --primary: #f0700f;
+  --primary-foreground: #111111;
+  --secondary: #eeede8;
+  --secondary-foreground: #1c1c1e;
+  --muted: #eeede8;
+  --muted-foreground: #6c6c70;
+  --accent: #eee5dc;
+  --accent-foreground: #1c1c1e;
+  --border: #1c1c1e16;
+  --ring: #b34c00;
+  --radius: 1rem;
+}
+@theme inline {
+  --font-sans: "Geist", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-accordion-down: accordion-down 0.3s ease-out;
+  --animate-accordion-up: accordion-up 0.3s ease-out;
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+@layer base {
+  html {
+    @apply scroll-smooth scroll-pt-28;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  ::selection {
+    background: #f6c6a4;
+  }
+  button,
+  a {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    cursor: pointer;
+  }
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

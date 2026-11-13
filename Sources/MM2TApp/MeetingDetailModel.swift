@@ -20,6 +20,9 @@ public struct SpeakerRow: Hashable, Sendable, Identifiable {
     public let displayName: String
     public let person: PersonID?
     public let suggestion: Suggestion?
+
+    /// The recording's owner, who has no voice of their own to rename or merge.
+    public var isMe: Bool { id == .me }
 }
 
 @MainActor @Observable
@@ -119,9 +122,13 @@ public final class MeetingDetailModel {
         return !meeting.mergedSpeakers.isEmpty || meeting.speakers.contains { $0.person != nil }
     }
 
+    /// Everyone who spoke, the user first when the mic heard them.
     public var speakers: [SpeakerRow] {
         guard let meeting, let presentation else { return [] }
-        return meeting.speakers.map { speaker in
+        let me = meeting.utterances.contains { meeting.resolve($0.speaker) == .me }
+            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil)]
+            : []
+        return me + meeting.speakers.map { speaker in
             let suggestion = meeting.suggestions.items.first { $0.speaker == speaker.id }.flatMap { item -> SpeakerRow.Suggestion? in
                 switch item.source {
                 case .voiceprint(let person, let similarity):
@@ -197,6 +204,12 @@ public final class MeetingDetailModel {
         playback?.play(from: target.time)
     }
 
+    /// Plays from `time` in the view on screen, the way a synced lyric line does.
+    public func play(at time: TimeInterval) {
+        focusedUtterance = nil
+        playback?.play(from: time)
+    }
+
     public func play(_ row: UtteranceRow) {
         focusedUtterance = row.id
         playback?.play(from: row.start)
@@ -239,6 +252,11 @@ public final class MeetingDetailModel {
     public func editCleaned(_ row: SourcedRow, to text: String) async {
         guard let index = presentation?.cleaned?.firstIndex(where: { $0.id == row.id }) else { return }
         await editTranscript(from: row.text, to: text) { try await $0.editCleaned(paragraph: index, in: self.id, to: text) }
+    }
+
+    /// A cleaned paragraph rewritten the way `instruction` asks, for the user to review and save.
+    public func rewrite(_ text: String, instruction: String) async throws -> String {
+        try await queue.rewrite(text, instruction: instruction)
     }
 
     public func rename(to title: String) async {
