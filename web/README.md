@@ -64,6 +64,6 @@ App 的 `App/MM2T/Design/Icon.swift` 使用內附的 **Tabler（MIT）SVG**。�
 
 `out/` 可部署至靜態主機。正式網域確認後，設定 `NEXT_PUBLIC_SITE_URL` 再建置，產生各語言 canonical、hreflang 和分享圖網址。資源目前使用網站根路徑，子路徑部署需要另行設定。
 
-ESLint、TypeScript、建置、雙語資源與原始圖示一致性檢查通過。此次環境無法解析 npm registry，使用已存在的套件完成建置，並通過 frozen offline lockfile 檢查；尚未在乾淨環境進行線上安裝。
+提交依賴變更前，必須執行 `pnpm install --frozen-lockfile` 和 `pnpm check`；僅使用既有 `node_modules` 建置不能驗證 lockfile 完整性。GitHub Actions 的 Website install and build 工作會在 Linux 執行上述檢查。
 
 實際瀏覽器版面、開場中間狀態、互動與效能驗證仍未完成；目前執行環境無法連線 localhost:3000，先前瀏覽器工具也未能啟動。程式檢查不等於視覺驗證。
