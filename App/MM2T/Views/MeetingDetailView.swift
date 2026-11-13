@@ -13,6 +13,8 @@ struct MeetingDetailView: View {
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var copied = false
+    @State private var playhead = Playhead()
+    @State private var confirmRegenerate = false
 
     init(app: AppController, id: MeetingID, back: @escaping () -> Void) {
         self.app = app
@@ -24,17 +26,13 @@ struct MeetingDetailView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             ScreenHeader(title: Text(verbatim: model.meeting?.metadata.title ?? ""), back: back) {
-                if let playback = model.playback {
-                    IconButton(playback.isPlaying ? "Pause" : "Play",
-                               icon: playback.isPlaying ? "player-pause" : "player-play") {
-                        playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
-                    }
-                }
                 IconButton("Rename…", icon: "pencil") {
                     newTitle = model.meeting?.metadata.title ?? ""
                     renaming = true
                 }
                 .disabled(!model.canEditSpeakers)
+                IconButton("Regenerate Views…", icon: "sparkles") { confirmRegenerate = true }
+                    .disabled(!model.canEditSpeakers)
                 IconButton(copied ? "Copied" : "Copy", icon: copied ? "check" : "copy", isOn: copied, action: copy)
                 ExportMenu(model: model)
                 IconButton("Speakers", icon: "users", isOn: showSpeakers) { showSpeakers.toggle() }
@@ -44,7 +42,20 @@ struct MeetingDetailView: View {
                     banners
                     Segmented(options: TranscriptView.allCases, selection: $model.selectedView) { Copy.view(for: $0) }
                     if let presentation = model.presentation {
-                        TranscriptContent(model: model, presentation: presentation)
+                        TranscriptContent(model: model, presentation: presentation, playhead: playhead)
+                            .overlay(alignment: .bottom) {
+                                if let playback = model.playback, playhead.duration > 0 {
+                                    TransportBar(playhead: playhead, toggle: {
+                                        playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
+                                        sample()
+                                    }, seek: { time in
+                                        playback.seek(to: time)
+                                        sample()
+                                    })
+                                    .frame(maxWidth: 560)
+                                    .padding(.bottom, 16)
+                                }
+                            }
                     } else {
                         Spacer()
                     }
@@ -60,7 +71,19 @@ struct MeetingDetailView: View {
             }
             .motion(Motion.page, value: showSpeakers)
         }
-        .task(id: app.queue.revision) { await model.load() }
+        .task(id: app.queue.revision) {
+            await model.load()
+            sample()
+        }
+        // Samples the playhead while audio plays; AVAudioPlayer has no time callback of its own.
+        // Twenty times a second keeps the character being spoken brightening smoothly.
+        .task(id: model.playback?.isPlaying ?? false) {
+            while !Task.isCancelled {
+                sample()
+                guard playhead.isPlaying else { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
         .onAppear { DebugSnapshot.detailAppeared(model) }
         .alert("Couldn't change speakers", isPresented: .init(get: { model.errorMessage != nil }, set: { if !$0 { model.dismissError() } })) {
         } message: {
@@ -71,6 +94,11 @@ struct MeetingDetailView: View {
             Button("Save") { Task { await model.rename(to: newTitle) } }
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog("Regenerate the cleaned transcript, summary and notes?", isPresented: $confirmRegenerate) {
+            Button("Regenerate") { Task { await model.regenerate() } }
+        } message: {
+            Text("Corrections you made to the cleaned transcript will be replaced.")
+        }
         .confirmationDialog("Separate speakers again?", isPresented: $confirmReseparate) {
             Button("Separate Again", role: .destructive) { Task { await model.reseparate() } }
         } message: {
@@ -80,6 +108,18 @@ struct MeetingDetailView: View {
                 Text("The generated views will need regenerating.")
             }
         }
+    }
+
+    private func sample() {
+        guard let playback = model.playback else { return }
+        var next = Playhead(time: playback.currentTime, duration: playback.duration, isPlaying: playback.isPlaying,
+                            started: playhead.started || playback.isPlaying || playback.currentTime > 0)
+        // AVAudioPlayer stops at the end without saying so.
+        if next.isPlaying, next.duration > 0, next.time >= next.duration - 0.05 {
+            playback.pause()
+            next.isPlaying = false
+        }
+        if next != playhead { playhead = next }
     }
 
     /// Puts the view on screen on the clipboard as plain text.

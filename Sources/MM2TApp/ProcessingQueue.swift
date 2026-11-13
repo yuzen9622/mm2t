@@ -49,6 +49,13 @@ public final class ProcessingQueue {
         self.makePipeline = makePipeline
     }
 
+    /// Rewrites a passage with the configured summary model, outside any job: it changes nothing
+    /// until the user saves the result.
+    public func rewrite(_ text: String, instruction: String) async throws -> String {
+        guard case .ready(let pipeline) = try makePipeline() else { throw RewriteUnsupported() }
+        return try await pipeline.llm.rewrite(text, instruction: instruction)
+    }
+
     /// Everything waiting on setup, deduplicated, in first-seen order.
     public var pendingSetup: [SetupIssue] {
         var seen: [SetupIssue] = []

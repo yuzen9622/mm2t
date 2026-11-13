@@ -57,6 +57,9 @@ enum Typo {
     static let bodyStrong = Font.system(size: 14, weight: .medium, design: .rounded)
     static let caption = Font.system(size: 12, weight: .regular, design: .rounded)
     static let captionStrong = Font.system(size: 12, weight: .medium, design: .rounded)
+    /// Transcript text, set for reading at length rather than scanning.
+    static let reading = Font.system(size: 16, weight: .regular)
+    static let readingLineSpacing: CGFloat = 6
 }
 
 /// The app's motion vocabulary. Each case is one kind of change, so the same change always moves

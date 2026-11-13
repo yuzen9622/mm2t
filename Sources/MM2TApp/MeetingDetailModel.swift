@@ -204,6 +204,12 @@ public final class MeetingDetailModel {
         playback?.play(from: target.time)
     }
 
+    /// Plays from `time` in the view on screen, the way a synced lyric line does.
+    public func play(at time: TimeInterval) {
+        focusedUtterance = nil
+        playback?.play(from: time)
+    }
+
     public func play(_ row: UtteranceRow) {
         focusedUtterance = row.id
         playback?.play(from: row.start)
@@ -246,6 +252,11 @@ public final class MeetingDetailModel {
     public func editCleaned(_ row: SourcedRow, to text: String) async {
         guard let index = presentation?.cleaned?.firstIndex(where: { $0.id == row.id }) else { return }
         await editTranscript(from: row.text, to: text) { try await $0.editCleaned(paragraph: index, in: self.id, to: text) }
+    }
+
+    /// A cleaned paragraph rewritten the way `instruction` asks, for the user to review and save.
+    public func rewrite(_ text: String, instruction: String) async throws -> String {
+        try await queue.rewrite(text, instruction: instruction)
     }
 
     public func rename(to title: String) async {

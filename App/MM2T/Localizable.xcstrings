@@ -421,6 +421,16 @@
         }
       }
     },
+    "Back to Playback": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到播放位置"
+          }
+        }
+      }
+    },
     "Both audio tracks and every generated view are removed from this Mac.": {
       "localizations": {
         "zh-Hant": {
@@ -611,6 +621,16 @@
         }
       }
     },
+    "Corrections you made to the cleaned transcript will be replaced.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你對整理版逐字稿做的修改會被取代。"
+          }
+        }
+      }
+    },
     "Couldn't access the keychain: %@": {
       "localizations": {
         "zh-Hant": {
@@ -667,6 +687,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法錄音"
+          }
+        }
+      }
+    },
+    "Couldn't rewrite. Check the summary model in Settings.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法改寫。請到設定檢查摘要模型。"
           }
         }
       }
@@ -2071,6 +2101,26 @@
         }
       }
     },
+    "Regenerate Views…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新產生整理內容…"
+          }
+        }
+      }
+    },
+    "Regenerate the cleaned transcript, summary and notes?": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要重新產生整理版逐字稿、摘要與重點嗎？"
+          }
+        }
+      }
+    },
     "Reminders": {
       "localizations": {
         "zh-Hant": {
@@ -2127,6 +2177,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "重試"
+          }
+        }
+      }
+    },
+    "Rewrite": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "改寫"
           }
         }
       }
@@ -2537,6 +2597,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "系統音訊錄製"
+          }
+        }
+      }
+    },
+    "Tell AI how to change it, e.g. more polite": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "告訴 AI 要怎麼改，例如：改得委婉有禮貌一點"
           }
         }
       }
