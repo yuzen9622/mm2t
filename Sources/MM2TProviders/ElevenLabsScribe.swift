@@ -24,7 +24,7 @@ public struct ElevenLabsScribe: TranscriptionProvider {
 
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         do {
-            let audioData = try AudioFile.read(audio, for: .elevenLabs)
+            let upload = try AudioFile.upload(audio, for: .elevenLabs)
             var form = MultipartForm()
             form.add("model_id", Self.model)
             // Diarization only for the remote track; the docs make it exclusive with multichannel,
@@ -34,7 +34,7 @@ public struct ElevenLabsScribe: TranscriptionProvider {
             form.add("timestamps_granularity", "word")
             if let languageCode { form.add("language_code", languageCode) }
             for term in Self.keyterms(from: hints) { form.add("keyterms", term) }
-            form.addFile("file", filename: audio.lastPathComponent, mimeType: AudioFile.mimeType(audio), data: audioData)
+            form.addFile("file", filename: upload.filename, mimeType: upload.mimeType, data: upload.data)
 
             let response = try await session.send(request(form, timeout: timeout), for: .elevenLabs)
             guard response.status == 200 else { throw ProviderError(.elevenLabs, Self.failure(response)) }

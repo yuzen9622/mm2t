@@ -29,7 +29,7 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         do {
             try await checkHealth()
-            let audioData = try AudioFile.read(audio, for: .selfHosted)
+            let upload = try AudioFile.upload(audio, for: .selfHosted)
             var form = MultipartForm()
             if let languageCode { form.add("language", languageCode) }
             let vocabulary = hints.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -37,7 +37,7 @@ public struct SelfHostedTranscription: TranscriptionProvider {
                 let json = try JSONEncoder().encode(vocabulary)
                 form.add("vocabulary", String(decoding: json, as: UTF8.self))
             }
-            form.addFile("file", filename: audio.lastPathComponent, mimeType: AudioFile.mimeType(audio), data: audioData)
+            form.addFile("file", filename: upload.filename, mimeType: upload.mimeType, data: upload.data)
 
             var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: timeout))
             request.httpMethod = "POST"

@@ -21,7 +21,7 @@ import Testing
         #expect(request.field("timestamps_granularity") == ["word"])
         #expect(request.field("tag_audio_events") == ["false"])
         #expect(request.field("language_code").isEmpty)
-        #expect(request.bodyText.contains(#"name="file"; filename="remote.wav""#))
+        #expect(request.bodyText.contains("name=\"file\"; filename=\"remote.m4a\"\r\nContent-Type: audio/mp4"))
     }
 
     @Test func aRecordingWithNoSamplesIsNeverUploaded() async throws {
