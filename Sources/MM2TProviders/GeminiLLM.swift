@@ -47,6 +47,7 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
     public func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript { try await tasks.cleanTranscript(transcript) }
     public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
     public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
+    public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
 
     /// `models.get` costs no tokens and fails the same way a real request would on a bad key.
     public func validateKey() async -> KeyCheck {

@@ -145,6 +145,17 @@ package struct LLMTasks: Sendable {
         return rest.isEmpty ? text : String(rest)
     }
 
+    package func rewrite(_ text: String, instruction: String) async throws -> String {
+        struct Output: Decodable { let text: String }
+        let json = try await generator.generate(
+            system: LLMPrompts.rewrite, input: LLMPrompts.rewriteRequest(text, instruction: instruction),
+            schema: LLMPrompts.rewriteSchema)
+        guard let output = try? JSONDecoder().decode(Output.self, from: Data(json.utf8)),
+              !output.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { throw ProviderError(service, .malformedResponse) }
+        return output.text
+    }
+
     package func summarize(_ request: SummaryRequest) async throws -> Summary {
         let utterances = request.transcript.utterances
         guard !utterances.isEmpty else { return Summary(decisions: [], discussionPoints: [], actionItems: []) }

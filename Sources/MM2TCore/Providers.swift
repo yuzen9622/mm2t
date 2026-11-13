@@ -245,4 +245,14 @@ public protocol LLMProvider: Sendable {
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript
     func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest]
     func summarize(_ request: SummaryRequest) async throws -> Summary
+    /// One passage of the cleaned transcript rewritten the way `instruction` asks ("make it more polite").
+    func rewrite(_ text: String, instruction: String) async throws -> String
+}
+
+public struct RewriteUnsupported: Error, Sendable {
+    public init() {}
+}
+
+extension LLMProvider {
+    public func rewrite(_ text: String, instruction: String) async throws -> String { throw RewriteUnsupported() }
 }

@@ -61,9 +61,24 @@ extension StubServer.Request {
         #expect(request.geminiSystem.contains("{{speaker:代號}}"))
         #expect(request.geminiSystem.contains("sources"))
         #expect(request.geminiSystem.contains("繁體中文"))
-        #expect(request.geminiSystem.contains("不要濃縮"))
+        #expect(request.geminiSystem.contains("精簡但不摘要"))
         #expect(request.geminiInput.contains("[u2] {{speaker:r1}} 00:00:05 對我覺得禮拜三"))
         #expect(request.geminiInput.contains("(重點) [u2]"))
+    }
+
+    @Test func rewriteSendsTheInstructionAndReturnsTheRewrittenText() async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"text":"想跟您確認一下這份報告的進度。"}"#))
+        let text = try await gemini(server).rewrite("這份報告寫得太慢了", instruction: "改得委婉一點")
+        let request = try #require(server.requests.first)
+
+        #expect(text == "想跟您確認一下這份報告的進度。")
+        #expect(request.geminiInput.contains("改得委婉一點") && request.geminiInput.contains("這份報告寫得太慢了"))
+        #expect(request.geminiSystem.contains("繁體中文"))
+    }
+
+    @Test func anEmptyRewriteIsAMalformedResponse() async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"text":"  "}"#))
+        await #expect(throws: ProviderError.self) { try await gemini(server).rewrite("原文", instruction: "精簡") }
     }
 
     @Test func cleanedTranscriptKeepsSpeakersAndDropsInventedSources() async throws {
