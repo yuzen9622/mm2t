@@ -67,9 +67,6 @@ mm2t 的所有視窗都不會出現在螢幕分享畫面裡，分享簡報時不
 
 ## 一分鐘看懂 mm2t
 
-<p align="center">
-  <a href="https://github.com/yuzen9622/mm2t/releases/download/v0.1.0/mm2t-promo-zh.mp4"><img src="docs/assets/poster.png" alt="播放 mm2t 介紹影片" width="880"/></a>
-</p>
 
 https://github.com/user-attachments/assets/9b72ccfb-d3c0-4535-afa1-5475223d5fee
 
