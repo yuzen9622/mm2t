@@ -45,7 +45,7 @@ curl -H "Authorization: Bearer $MM2T_SERVER_TOKEN" \
 | `MM2T_BATCH_SIZE` | `16` | 一次並行解碼的音訊片段數；`1` 改回逐段解碼。RTX 5080 上 16 比逐段快約 16 倍，32 沒有再變快 |
 | `MM2T_SERVER_TOKEN` | 未設定 | 有設定時，`/v1/*` 需帶 `Authorization: Bearer <token>` |
 | `MM2T_MAX_UPLOAD_MB` | `500` | 上傳檔案大小上限（MB） |
-| `MM2T_PORT` | `8000` | 監聽埠；修改時請一併調整 compose 的 `ports` |
+| `MM2T_PORT` | `8000` | 監聽埠；compose 也用它對主機開放同一個埠，Mac 端網址請用這個埠 |
 | `MM2T_HOST` | `0.0.0.0` | 監聽位址 |
 
 ### 自行轉換模型
