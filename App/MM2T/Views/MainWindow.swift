@@ -340,6 +340,9 @@ struct ScreenHeader<Trailing: View>: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 60)
+        // On macOS 26 a scroll view below stretches up under the header; drawn above it, the
+        // header gets its own view and keeps its clicks.
+        .zIndex(1)
     }
 }
 
