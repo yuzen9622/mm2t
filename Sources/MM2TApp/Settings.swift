@@ -8,6 +8,13 @@ public enum LLMLocation: String, Codable, Sendable, CaseIterable {
     case local
 }
 
+/// Which hosted service runs the LLM tasks when `llmLocation` is `.cloud`.
+public enum CloudLLM: String, Codable, Sendable, CaseIterable {
+    case gemini
+    /// The user's own OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp).
+    case openAICompatible
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
     /// Tried in order; each one listed must be configured. The chain falls through only when a
@@ -22,7 +29,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public private(set) var dismissedVocabulary: [String] = []
     public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
+    public var cloudLLM: CloudLLM = .gemini
+    /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
+    public var openAIBaseURL: URL?
+    public var openAIModel = ""
+    public var transcriptionLanguage: TranscriptionLanguage = .auto
     public var hasCompletedOnboarding = false
+    /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
+    /// user turns this off.
+    public var hidesFromScreenCapture = true
 
     public init() {}
 
@@ -37,12 +52,18 @@ public struct AppSettings: Codable, Equatable, Sendable {
         dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
         diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
+        cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
+        openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
+        openAIModel = try c.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
+        transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
     }
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
-        case diarizationOrder, llmLocation, hasCompletedOnboarding
+        case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
+        case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
@@ -52,6 +73,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
               ["http", "https"].contains(scheme), url.host() != nil else { return nil }
         return url
     }
+
+    /// Same parsing for the OpenAI-compatible server's API root.
+    public static func openAIBaseURL(from text: String) -> URL? { selfHostedURL(from: text) }
 
     public enum TermSource: Sendable { case manual, learned }
 
@@ -105,6 +129,27 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private static func same(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
+    }
+}
+
+/// The language of the app's own UI. Stored the standard way, as `AppleLanguages` in the app's
+/// own defaults domain, which macOS reads at launch; a change applies after a restart.
+public enum AppLanguage: String, CaseIterable, Sendable {
+    case system
+    case english = "en"
+    case traditionalChinese = "zh-Hant"
+
+    public static let key = "AppleLanguages"
+
+    /// What the app's own domain says; `.system` when it sets nothing and the Mac's order applies.
+    /// `domain` is the defaults' persistent domain name: the bundle identifier for `.standard`.
+    public static func current(in defaults: UserDefaults, domain: String) -> AppLanguage {
+        guard let first = (defaults.persistentDomain(forName: domain)?[key] as? [String])?.first else { return .system }
+        return allCases.first { $0 != .system && first.hasPrefix($0.rawValue) } ?? .system
+    }
+
+    public func save(in defaults: UserDefaults) {
+        if self == .system { defaults.removeObject(forKey: Self.key) } else { defaults.set([rawValue], forKey: Self.key) }
     }
 }
 

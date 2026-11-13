@@ -14,13 +14,8 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenHeader {
-                PillButton("Start Recording", icon: "microphone", kind: .primary) {
-                    Task { await app.capture.startNow(title: String(localized: "Recording")) }
-                }
-                .disabled(app.capture.state != .idle)
-            }
-            ScrollView {
+            ScreenHeader { EmptyView() }
+            FadingScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
                     HStack(alignment: .top, spacing: 14) {
@@ -121,7 +116,7 @@ struct CalendarCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: 28) {
                 ZStack {
                     MonthGridView(model: model)
                         .id(model.month)
@@ -130,7 +125,6 @@ struct CalendarCard: View {
                 .frame(width: gridWidth, height: Self.gridHeight, alignment: .top)
                 .clipped()
                 .motion(Motion.page, value: model.month)
-                Rectangle().fill(Palette.border).frame(width: 1, height: Self.gridHeight)
                 Group {
                     if model.hasConnectedCalendar {
                         DayAgenda(model: model)
@@ -138,8 +132,11 @@ struct CalendarCard: View {
                         ConnectCalendars(model: model)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                // minWidth 0: today's rows (Join, "Now") must never widen the card. A child wider
+                // than its column is centred on it, which shifted the whole home screen sideways.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: Self.gridHeight, alignment: .top)
+                .clipped()
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -189,9 +186,12 @@ struct CalendarCard: View {
 private struct MonthGridView: View {
     let model: DashboardModel
     @Namespace private var space
+    @Environment(\.locale) private var locale
 
     private var weekdays: [String] {
-        let calendar = Calendar.current
+        // The symbols follow the UI language, which can change while the app runs.
+        var calendar = Calendar.current
+        calendar.locale = locale
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
         let first = calendar.firstWeekday - 1
         return Array(symbols[first...] + symbols[..<first])
@@ -267,7 +267,7 @@ private struct DayCell: View {
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
         .accessibilityLabel(Text(day, format: .dateTime.month().day().weekday(.wide)))
-        .accessibilityValue(count > 0 ? Text("\(count) events") : Text(verbatim: ""))
+        .accessibilityValue(count > 0 ? Text("^[\(count) event](inflect: true)") : Text(verbatim: ""))
     }
 }
 
@@ -286,7 +286,7 @@ private struct DayAgenda: View {
                 }
                 Spacer(minLength: 0)
                 if !events.isEmpty {
-                    Text("\(events.count) events").font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
+                    Text("^[\(events.count) event](inflect: true)").font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
                 }
             }
             if events.isEmpty {
@@ -298,7 +298,7 @@ private struct DayAgenda: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
             } else {
-                ScrollView {
+                FadingScrollView {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(events) { EventRow(event: $0, now: context.date) }
@@ -356,16 +356,19 @@ private struct EventRow: View {
                     Icon(SourceGlyph.icon(event.source), size: 12)
                     Text(verbatim: [Copy.calendarSource(event.source), event.calendar].filter { !$0.isEmpty }.joined(separator: " · "))
                         .lineLimit(1)
-                    if isLive { Text("· Now").foregroundStyle(Palette.orange).fixedSize() }
+                    if isLive { Text("· Now").foregroundStyle(Palette.orange).lineLimit(1).layoutPriority(1) }
                 }
                 .font(Typo.caption)
                 .foregroundStyle(Palette.secondary)
             }
             Spacer(minLength: 6)
             if let link = event.link, !isPast {
-                PillButton("Join", icon: "video", kind: isLive || isSoon ? .primary : .ghost) { NSWorkspace.shared.open(link) }
-                    .fixedSize()
-                    .help(link.absoluteString)
+                ViewThatFits(in: .horizontal) {
+                    PillButton("Join", icon: "video", kind: isLive || isSoon ? .primary : .ghost) { NSWorkspace.shared.open(link) }
+                        .fixedSize()
+                    IconButton("Join", icon: "video", isOn: isLive || isSoon) { NSWorkspace.shared.open(link) }
+                }
+                .help(link.absoluteString)
             }
         }
         .padding(.horizontal, 8)
@@ -413,8 +416,7 @@ private struct SourcesButton: View {
             .padding(.leading, 6)
             .padding(.trailing, 12)
             .frame(height: 30)
-            .background(hovering ? Palette.hover : .clear, in: Capsule())
-            .overlay(Capsule().strokeBorder(Palette.border))
+            .background(hovering ? Palette.selected : Palette.tonal, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(Pressable())
@@ -606,7 +608,7 @@ private struct MeetingsCard: View {
                     ShareFigure(share: stats.myShare.map { revealed ? $0 : 0 })
                 }
             }
-            Rectangle().fill(Palette.border).frame(height: 1).padding(.vertical, 2)
+            Color.clear.frame(height: 6)
             let active = days.filter { $0.minutes > 0 }.count
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("Last 12 weeks").font(Typo.captionStrong).foregroundStyle(Palette.secondary)
@@ -771,7 +773,7 @@ private struct VoicesCard: View {
                                 HStack {
                                     Text(verbatim: voice.name).font(Typo.bodyStrong).lineLimit(1)
                                     Spacer()
-                                    Text("\(Duration.seconds(voice.seconds), format: .units(allowed: [.hours, .minutes], width: .abbreviated)) · \(voice.meetings) meetings")
+                                    Text("\(Duration.seconds(voice.seconds), format: .units(allowed: [.hours, .minutes], width: .abbreviated)) · ^[\(voice.meetings) meeting](inflect: true)")
                                         .font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
                                 }
                                 ProgressLine(fraction: revealed ? voice.fraction : 0)

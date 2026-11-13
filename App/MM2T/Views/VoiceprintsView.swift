@@ -14,7 +14,7 @@ struct VoiceprintsView: View {
             if model.rows.isEmpty {
                 EmptyState(icon: "users", title: "Naming a speaker in a meeting saves their voiceprint on this Mac.")
             } else {
-                ScrollView {
+                FadingScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(model.rows) { person in
                             HStack(spacing: 12) {
@@ -67,7 +67,7 @@ struct VoiceprintSummary: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text("\(count) voiceprints").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    Text("^[\(count) voiceprint](inflect: true)").font(Typo.caption).foregroundStyle(Palette.secondary)
                     if channels.contains(.room) { ChannelTag(title: "In the room") }
                     if channels.contains(.call) { ChannelTag(title: "On calls") }
                 }

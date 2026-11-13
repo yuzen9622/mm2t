@@ -40,12 +40,17 @@ public final class MeetingDetailModel {
     @ObservationIgnored public let playback: (any MeetingPlayback)?
     @ObservationIgnored private var loadedAudio = false
     @ObservationIgnored private let learn: @MainActor (String) -> Void
+    @ObservationIgnored public let todos: TodoStatus?
+    @ObservationIgnored public let reminders: RemindersSync?
 
     /// `learn` receives each term a correction replaced what speech recognition heard with.
     public init(id: MeetingID, library: MeetingLibrary, voiceprints: VoiceprintStore, queue: ProcessingQueue,
                 labels: PresentationLabels, playback: (any MeetingPlayback)?,
+                todos: TodoStatus? = nil, reminders: RemindersSync? = nil,
                 learn: @escaping @MainActor (String) -> Void = { _ in }) {
         self.learn = learn
+        self.todos = todos
+        self.reminders = reminders
         self.id = id
         self.library = library
         self.voiceprints = voiceprints
@@ -129,6 +134,43 @@ public final class MeetingDetailModel {
                               person: speaker.person, suggestion: suggestion)
         }
     }
+
+    // MARK: To-dos
+
+    /// The to-do id of a row of `presentation.summary.actionItems`; nil for any other row.
+    public func todoID(_ row: SourcedRow) -> String? {
+        guard row.id.hasPrefix("action-"), let index = Int(row.id.dropFirst("action-".count)) else { return nil }
+        return TodoStatus.id(meeting: id, index: index)
+    }
+
+    public func isDone(_ row: SourcedRow) -> Bool {
+        todoID(row).map { todos?.isDone($0) ?? false } ?? false
+    }
+
+    public func toggleDone(_ row: SourcedRow) {
+        if let id = todoID(row) { todos?.toggle(id) }
+    }
+
+    public func isInReminders(_ row: SourcedRow) -> Bool {
+        todoID(row).map { reminders?.isLinked($0) ?? false } ?? false
+    }
+
+    /// Nil when this model has no Reminders sync to offer.
+    public var remindersAccess: RemindersAccess? { reminders?.access }
+
+    /// Creates reminders for `rows` (every action item when nil) that do not have one yet.
+    public func addToReminders(_ rows: [SourcedRow]? = nil) async {
+        guard let reminders, let meeting, let all = presentation?.summary?.actionItems else { return }
+        let date = meeting.metadata.startedAt.formatted(date: .abbreviated, time: .shortened)
+        let drafts = (rows ?? all).compactMap { row -> ReminderDraft? in
+            guard let id = todoID(row) else { return nil }
+            let owner = row.speakerName.map { "\($0)\n" } ?? ""
+            return ReminderDraft(todoID: id, title: row.text, notes: "\(owner)\(meeting.metadata.title), \(date)")
+        }
+        await reminders.add(drafts)
+    }
+
+    public func requestRemindersAccess() async { await reminders?.requestAccess() }
 
     // MARK: Actions
 

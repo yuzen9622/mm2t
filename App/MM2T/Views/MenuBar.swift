@@ -105,7 +105,6 @@ struct MenuBarContent: View {
 
     private var footer: some View {
         VStack(spacing: 8) {
-            Rectangle().fill(Palette.border).frame(height: 1)
             HStack(spacing: 2) {
                 IconButton("Meetings", icon: "messages") { go(.meetings) }
                 IconButton("Settings", icon: "settings") { go(.settings) }
@@ -359,7 +358,7 @@ private struct RecoveredNotice: View {
     var body: some View {
         HStack(spacing: 10) {
             Icon("alert-triangle", size: 16).foregroundStyle(Palette.orange)
-            Text("\(count) interrupted recordings were recovered.").font(Typo.caption).fixedSize(horizontal: false, vertical: true)
+            Text("Recovered ^[\(count) interrupted recording](inflect: true).").font(Typo.caption).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             PillButton("Show Meetings", action: show).fixedSize()
         }

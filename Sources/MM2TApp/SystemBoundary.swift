@@ -95,14 +95,19 @@ public final class LiveProviderCatalog: ProviderCatalog {
         speakerModels = LocalSpeakerModels(diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder)
     }
 
-    public func cloudTranscription(apiKey: Secret) -> any TranscriptionProvider { ElevenLabsScribe(apiKey: apiKey) }
-    public func selfHostedTranscription(url: URL, token: Secret?) -> any TranscriptionProvider {
-        SelfHostedTranscription(baseURL: url, token: token)
+    public func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        ElevenLabsScribe(apiKey: apiKey, languageCode: language.code)
+    }
+    public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
     }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
+    public func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
+        OpenAICompatibleLLM(baseURL: baseURL, apiKey: apiKey, model: model)
+    }
     public func localSpeakerModels() -> LocalSpeakerModels? { models.isDownloaded ? speakerModels : nil }
-    public func localTranscription() -> (any TranscriptionProvider)? {
-        transcriptionModel.snapshot.isDownloaded ? transcription : nil
+    public func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
+        transcriptionModel.snapshot.isDownloaded ? transcription.speaking(language) : nil
     }
     /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
     /// while a meeting is being processed rather than while the app idles in the menu bar.
@@ -115,6 +120,8 @@ public enum KeyValidation: Hashable, Sendable {
     case elevenLabs(Secret)
     case gemini(Secret)
     case selfHosted(url: URL, token: Secret)
+    /// `model` is only used when the server has no `/models` route and a one-token completion stands in.
+    case openAICompatible(baseURL: URL, apiKey: Secret, model: String)
 }
 
 public protocol KeyValidating: Sendable {
@@ -128,6 +135,7 @@ public struct LiveKeyValidator: KeyValidating {
         case .elevenLabs(let key): await ElevenLabsScribe(apiKey: key).validateKey()
         case .gemini(let key): await GeminiLLM(apiKey: key).validateKey()
         case .selfHosted(let url, let token): await SelfHostedTranscription(baseURL: url, token: token).validateKey()
+        case .openAICompatible(let url, let key, let model): await OpenAICompatibleLLM(baseURL: url, apiKey: key, model: model).validateKey()
         }
     }
 }

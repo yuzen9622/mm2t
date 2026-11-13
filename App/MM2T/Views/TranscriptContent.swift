@@ -8,7 +8,7 @@ struct TranscriptContent: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            FadingScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     switch model.selectedView {
                     case .raw: raw
@@ -69,7 +69,9 @@ struct TranscriptContent: View {
         if let summary = presentation.summary {
             section(Copy.presentationLabels.decisions, summary.decisions, speakers: false)
             section(Copy.presentationLabels.discussionPoints, summary.discussionPoints, speakers: false)
-            section(Copy.presentationLabels.actionItems, summary.actionItems, speakers: true)
+            if !summary.actionItems.isEmpty {
+                TodoSection(title: Copy.presentationLabels.actionItems, rows: summary.actionItems, model: model)
+            }
         } else {
             NotGenerated()
         }
@@ -178,7 +180,7 @@ struct SourcedRowView: View {
             if editing, let save {
                 TextCorrection(text: row.text, save: { save($0); editing = false }, cancel: { editing = false })
             } else {
-                Text(row.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                MarkdownText(row.text)
                 Spacer(minLength: 8)
                 if save != nil {
                     IconButton("Edit", icon: "pencil") { editing = true }
@@ -201,5 +203,49 @@ struct SourcedRowView: View {
 struct NotGenerated: View {
     var body: some View {
         Text(Copy.presentationLabels.notGenerated).foregroundStyle(Palette.secondary).card()
+    }
+}
+
+/// Text from the model, shown as Markdown: numbered and bulleted lines become an aligned list
+/// (SwiftUI's own Markdown handles inline styling but flattens lists), other lines stay paragraphs.
+struct MarkdownText: View {
+    private struct Block: Identifiable {
+        let id: Int
+        let marker: String?
+        let text: String
+    }
+
+    private let blocks: [Block]
+
+    init(_ text: String) {
+        blocks = text.split(separator: "\n", omittingEmptySubsequences: true).enumerated().map { index, line in
+            let line = String(line)
+            guard let match = line.wholeMatch(of: /\s*(\d+\.|[-*•])\s+(.+)/) else {
+                return Block(id: index, marker: nil, text: line)
+            }
+            let marker = String(match.1)
+            return Block(id: index, marker: marker.first!.isNumber ? marker : "•", text: String(match.2))
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(blocks) { block in
+                if let marker = block.marker {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(marker).monospacedDigit().foregroundStyle(Palette.secondary)
+                        inline(block.text)
+                    }
+                } else {
+                    inline(block.text)
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func inline(_ text: String) -> some View {
+        let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        return Text(attributed ?? AttributedString(text)).fixedSize(horizontal: false, vertical: true)
     }
 }
