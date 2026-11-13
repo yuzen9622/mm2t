@@ -123,7 +123,7 @@ import Testing
         #expect(!detail.isStale)
 
         await detail.merge(SpeakerID("r2"), into: a.id)
-        #expect(detail.speakers.map(\.label) == ["A"])
+        #expect(detail.speakers.filter { !$0.isMe }.map(\.label) == ["A"])
         #expect(detail.isStale, "story 42: the banner shows after a merge")
         #expect(detail.presentation?.raw.filter { $0.speakerName == "小明" }.count == 3)
 
@@ -176,15 +176,17 @@ import Testing
         await detail.load()
         #expect(detail.separationFailure == "LocalModelError()")
         #expect(detail.canReseparate)
-        #expect(detail.speakers.count == 1, "all remote speech under one unnamed speaker")
+        #expect(detail.speakers.first?.isMe == true, "the user's own speech lists them as a speaker")
+        let remote = detail.speakers.filter { !$0.isMe }
+        #expect(remote.count == 1, "all remote speech under one unnamed speaker")
         #expect(!detail.reseparationDiscardsEdits)
 
-        await detail.rename(detail.speakers[0].id, to: .newPerson(name: "遠端"))
+        await detail.rename(remote[0].id, to: .newPerson(name: "遠端"))
         #expect(detail.reseparationDiscardsEdits, "the UI must warn before discarding the name")
 
         world.catalog.diarizer.fails.set(false)
         await detail.reseparate()
-        #expect(detail.speakers.map(\.label) == ["A", "B"])
+        #expect(detail.speakers.filter { !$0.isMe }.map(\.label) == ["A", "B"])
         #expect(detail.separationFailure == nil && !detail.canReseparate)
         #expect(detail.isStale)
     }
@@ -253,7 +255,7 @@ import Testing
         let stored = try String(contentsOf: world.app.paths.voiceprints, encoding: .utf8)
         #expect(!stored.contains("Amy"), "story 45: removed from disk")
         await detail.load()
-        #expect(detail.speakers.first?.displayName == "A", "the meeting falls back to the letter")
+        #expect(detail.speakers.first { !$0.isMe }?.displayName == "A", "the meeting falls back to the letter")
     }
 }
 

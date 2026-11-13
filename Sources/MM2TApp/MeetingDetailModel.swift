@@ -20,6 +20,9 @@ public struct SpeakerRow: Hashable, Sendable, Identifiable {
     public let displayName: String
     public let person: PersonID?
     public let suggestion: Suggestion?
+
+    /// The recording's owner, who has no voice of their own to rename or merge.
+    public var isMe: Bool { id == .me }
 }
 
 @MainActor @Observable
@@ -119,9 +122,13 @@ public final class MeetingDetailModel {
         return !meeting.mergedSpeakers.isEmpty || meeting.speakers.contains { $0.person != nil }
     }
 
+    /// Everyone who spoke, the user first when the mic heard them.
     public var speakers: [SpeakerRow] {
         guard let meeting, let presentation else { return [] }
-        return meeting.speakers.map { speaker in
+        let me = meeting.utterances.contains { meeting.resolve($0.speaker) == .me }
+            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil)]
+            : []
+        return me + meeting.speakers.map { speaker in
             let suggestion = meeting.suggestions.items.first { $0.speaker == speaker.id }.flatMap { item -> SpeakerRow.Suggestion? in
                 switch item.source {
                 case .voiceprint(let person, let similarity):
