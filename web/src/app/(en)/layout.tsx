@@ -15,6 +15,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       data-radius="soft"
       data-buttons="pill"
       data-motion="true"
+      // Translation extensions can add attributes to this root before hydration.
+      suppressHydrationWarning
     >
       <body>
         {children}

@@ -70,7 +70,7 @@
 }
 @layer base {
   html {
-    @apply scroll-smooth scroll-pt-28;
+    @apply relative scroll-smooth scroll-pt-28;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
