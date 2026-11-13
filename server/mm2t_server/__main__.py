@@ -23,6 +23,7 @@ def main() -> None:
         device=os.environ.get("MM2T_DEVICE", "auto"),
         compute_type=os.environ.get("MM2T_COMPUTE_TYPE", "default"),
         revision=revision,
+        batch_size=int(os.environ.get("MM2T_BATCH_SIZE", "16")),
     )
     app = create_app(
         engine,

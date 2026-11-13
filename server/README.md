@@ -42,6 +42,7 @@ curl -H "Authorization: Bearer $MM2T_SERVER_TOKEN" \
 | `MM2T_MODEL_REVISION` | 使用預設模型時為上述 commit，否則不指定 | Hugging Face 的 commit／branch |
 | `MM2T_DEVICE` | `auto`（compose 中為 `cuda`） | `cuda`、`cpu` 或 `auto` |
 | `MM2T_COMPUTE_TYPE` | `default`（compose 中為 `float16`） | CTranslate2 運算型別 |
+| `MM2T_BATCH_SIZE` | `16` | 一次並行解碼的音訊片段數；`1` 改回逐段解碼。RTX 5080 上 16 比逐段快約 16 倍，32 沒有再變快 |
 | `MM2T_SERVER_TOKEN` | 未設定 | 有設定時，`/v1/*` 需帶 `Authorization: Bearer <token>` |
 | `MM2T_MAX_UPLOAD_MB` | `500` | 上傳檔案大小上限（MB） |
 | `MM2T_PORT` | `8000` | 監聽埠；修改時請一併調整 compose 的 `ports` |

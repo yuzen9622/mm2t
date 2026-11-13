@@ -44,17 +44,23 @@ class FasterWhisperEngine:
         device: str,
         compute_type: str,
         revision: Optional[str] = None,
+        batch_size: int = 16,
     ):
         import ctranslate2
-        from faster_whisper import WhisperModel
+        from faster_whisper import BatchedInferencePipeline, WhisperModel
 
         if device == "auto":
             device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
         self.model_id = model_id
         self.device = device
-        self._model = WhisperModel(
+        model = WhisperModel(
             model_id, device=device, compute_type=compute_type, revision=revision
         )
+        # Batching decodes VAD-split chunks together instead of one 30 s window at a time:
+        # on an RTX 5080 a 48-minute track went from 343 s to 21 s. batch_size 1 keeps the
+        # sequential decoder.
+        self._batch_size = batch_size
+        self._model = BatchedInferencePipeline(model) if batch_size > 1 else model
 
     def transcribe(
         self, audio: BinaryIO, language: Optional[str], vocabulary: list[str]
@@ -70,11 +76,13 @@ class FasterWhisperEngine:
             raise InvalidAudio("audio contains no samples")
 
         # hotwords is re-injected into every 30 s window; initial_prompt only primes the first.
+        batching = {"batch_size": self._batch_size} if self._batch_size > 1 else {}
         segments, info = self._model.transcribe(
             samples,
             language=language,
             word_timestamps=True,
             hotwords=", ".join(vocabulary) or None,
+            **batching,
         )
         return Transcript(
             model=self.model_id,

@@ -47,6 +47,7 @@ def test_real_engine_returns_words_with_timestamps(real_client, jfk):
     )
     assert r.status_code == 200, r.text
     assert real_client.engine.seen_kwargs[-1]["hotwords"] == "Americans, Kennedy"
+    assert real_client.engine.seen_kwargs[-1]["batch_size"] == 16
     body = r.json()
     assert body["model"] == "tiny"
     assert body["language"] == "en"
