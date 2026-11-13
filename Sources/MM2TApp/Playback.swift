@@ -75,6 +75,6 @@ private final class FinishObserver: NSObject, AVAudioPlayerDelegate {
     init(_ finished: @escaping @MainActor () -> Void) { self.finished = finished }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in finished() }
+        Task { @MainActor [finished] in finished() }
     }
 }
