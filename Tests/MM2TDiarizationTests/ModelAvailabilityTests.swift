@@ -50,7 +50,27 @@ import Testing
         }
     }
 
-    @Test func pipelineDefaultsAreTheEvaluationThresholds() {
-        #expect(MatchThresholds.weSpeaker == MatchThresholds(autoName: 0.70, suggest: 0.70, user: 0.60))
+    @Test func pipelineDefaultsKeepSuggestionsSeparateFromAutomaticNames() {
+        #expect(MatchThresholds.weSpeaker == MatchThresholds(autoName: 0.70, suggest: 0.60, user: 0.60))
+    }
+
+    @Test func defaultMatchingSuggestsWithoutLearningAndStillAutoNames() async throws {
+        let store = try VoiceprintStore(fileURL: temporaryDirectory().appending(path: "voiceprints.json"))
+        let enrolled = Embedding([1, 0])
+        let person = try await store.addPerson(name: "Known speaker", embeddings: [enrolled])
+        for score: Float in [0.59, 0.60, 0.65, 0.6953087, 0.699, 0.70, 0.701, 0.80] {
+            let candidate = Embedding([score, (1 - score * score).squareRoot()])
+            let similarity = candidate.cosineSimilarity(to: enrolled)
+            let result = await store.match([candidate], thresholds: .weSpeaker)
+            if similarity >= 0.70 {
+                #expect(result == .autoName(person, similarity: similarity))
+            } else if similarity >= 0.60 {
+                #expect(result == .suggest(person, similarity: similarity))
+            } else {
+                #expect(result == .none)
+            }
+        }
+        #expect(await store.match([], thresholds: .weSpeaker) == .none)
+        #expect(await store.person(person)?.embeddings == [enrolled])
     }
 }
