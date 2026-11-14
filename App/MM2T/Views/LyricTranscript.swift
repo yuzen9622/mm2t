@@ -34,6 +34,7 @@ struct Karaoke {
 
     let line: LyricLine
     let now: TimeInterval
+    var reduceMotion = false
 
     func starts(_ shown: String) -> [TimeInterval] {
         KaraokeTiming.starts(of: shown, words: line.words, spans: line.spans)
@@ -47,13 +48,73 @@ struct Karaoke {
         while index < text.endIndex {
             let next = text.characters.index(after: index)
             if !text.characters[index].isWhitespace {
-                let strength = counted < heard ? 1 : counted == heard ? Self.faint + (1 - Self.faint) * fraction : Self.faint
+                let progress = counted < heard ? 1 : counted == heard ? fraction : 0
+                let strength = Self.faint + (1 - Self.faint) * progress
                 text[index..<next].foregroundColor = Palette.text.opacity(strength)
+                let settled = progress * progress * (3 - 2 * progress)
+                text[index..<next][KaraokeBlur.self] = 0.7 * (1 - settled)
+                if !reduceMotion {
+                    text[index..<next][KaraokeLift.self] = -2 * (1 - settled)
+                }
                 counted += 1
             }
             index = next
         }
         return counted
+    }
+}
+
+private enum KaraokeLift: AttributedStringKey {
+    typealias Value = Double
+    static let name = "mm2t.karaokeLift"
+}
+
+private enum KaraokeBlur: AttributedStringKey {
+    typealias Value = Double
+    static let name = "mm2t.karaokeBlur"
+}
+
+struct KaraokeText: View {
+    let text: AttributedString
+
+    var body: some View {
+        if #available(macOS 15, *), text.runs.contains(where: { $0[KaraokeBlur.self] != nil }) {
+            rendered.textRenderer(KaraokeRenderer())
+        } else {
+            Text(text)
+        }
+    }
+
+    @available(macOS 15, *)
+    private var rendered: Text {
+        text.runs.reduce(Text(verbatim: "")) { result, run in
+            let part = Text(AttributedString(text[run.range]))
+                .customAttribute(KaraokeAttribute(lift: run[KaraokeLift.self] ?? 0, blur: run[KaraokeBlur.self] ?? 0))
+            return result + part
+        }
+    }
+}
+
+@available(macOS 15, *)
+private struct KaraokeAttribute: TextAttribute {
+    let lift: Double
+    let blur: Double
+}
+
+@available(macOS 15, *)
+private struct KaraokeRenderer: TextRenderer {
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        for line in layout {
+            for run in line {
+                var drawing = context
+                let style = run[KaraokeAttribute.self]
+                drawing.translateBy(x: 0, y: -(style?.lift ?? 0))
+                if let blur = style?.blur, blur > 0 {
+                    drawing.addFilter(.blur(radius: blur))
+                }
+                drawing.draw(run)
+            }
+        }
     }
 }
 
@@ -67,6 +128,7 @@ struct LyricRow: View {
     let play: () -> Void
     let save: (String) -> Void
     var rewrite: ((String, String) async throws -> String)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var editing = false
 
@@ -91,7 +153,6 @@ struct LyricRow: View {
                 } else {
                     content
                         .foregroundStyle(Palette.text)
-                        .opacity(state == .upcoming ? Karaoke.faint : 1)
                     Spacer(minLength: 8)
                     trailing
                 }
@@ -114,17 +175,19 @@ struct LyricRow: View {
         }
         // About 45 characters of Chinese a line: long enough to read in phrases, short enough to track.
         .frame(maxWidth: 760, alignment: .leading)
-        .animation(.easeInOut(duration: 0.45), value: state)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: state)
         .motion(Motion.touch, value: hovering)
         .motion(Motion.reveal, value: editing)
     }
 
     @ViewBuilder private var content: some View {
-        let karaoke = state == .current ? Karaoke(line: line, now: playhead.time) : nil
+        let karaoke = state == .current || state == .upcoming
+            ? Karaoke(line: line, now: state == .upcoming ? -.infinity : playhead.time, reduceMotion: reduceMotion)
+            : nil
         if line.isMarkdown {
             MarkdownText(line.text, font: Typo.reading, karaoke: karaoke)
         } else {
-            Text(karaoke.map { karaoke in
+            KaraokeText(text: karaoke.map { karaoke in
                 var text = AttributedString(line.text)
                 _ = karaoke.paint(&text, starts: karaoke.starts(line.text), from: 0)
                 return text
@@ -154,15 +217,22 @@ struct LyricRow: View {
 /// Play or pause, where the playhead is, and a bar to drag it along.
 struct TransportBar: View {
     let playhead: Playhead
+    var status: PlaybackStatus = .ready
     let toggle: () -> Void
     let seek: (TimeInterval) -> Void
     @State private var dragging: Double?
-    @State private var hovering = false
+    @State private var isScrubbing = false
 
     var body: some View {
         HStack(spacing: 12) {
             Button(action: toggle) {
-                Icon(playhead.isPlaying ? "player-pause-filled" : "player-play-filled", size: 15)
+                Group {
+                    if status == .loading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Icon(playhead.isPlaying ? "player-pause-filled" : "player-play-filled", size: 15)
+                    }
+                }
                     .foregroundStyle(.white)
                     .frame(width: 32, height: 32)
                     .background(Palette.orange, in: Circle())
@@ -170,16 +240,30 @@ struct TransportBar: View {
             }
             .buttonStyle(Pressable())
             .keyboardShortcut(.space, modifiers: [])
+            .disabled(status != .ready)
+            .accessibilityLabel(playhead.isPlaying ? "Pause" : "Play")
             .help(playhead.isPlaying ? "Pause" : "Play")
             Text(MeetingPresentation.timestamp(shown)).font(Typo.caption).monospacedDigit().foregroundStyle(Palette.secondary)
                 .frame(minWidth: 44, alignment: .trailing)
-            track
+            if status == .unavailable {
+                Text("Audio unavailable").font(Typo.caption).frame(maxWidth: .infinity)
+            } else if status == .failed {
+                Text("Couldn't load audio").font(Typo.caption).frame(maxWidth: .infinity)
+            } else {
+                track
+                    .opacity(status == .ready ? 1 : 0.5)
+                    .help(status == .loading ? "Preparing audio…" : "Playback position")
+            }
             Text(MeetingPresentation.timestamp(playhead.duration)).font(Typo.caption).monospacedDigit().foregroundStyle(Palette.muted)
                 .frame(minWidth: 44, alignment: .leading)
         }
         .padding(.horizontal, 10)
         .frame(height: 50)
-        .background(Palette.card, in: Capsule())
+        .modifier(PlaybackGlass())
+        .onChange(of: status) {
+            dragging = nil
+            isScrubbing = false
+        }
         .shadow(color: Palette.shadow, radius: 12, y: 3)
     }
 
@@ -191,27 +275,44 @@ struct TransportBar: View {
     }
 
     private var track: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            ZStack(alignment: .leading) {
-                Capsule().fill(Palette.field).frame(height: hovering || dragging != nil ? 6 : 4)
-                Capsule().fill(Palette.orange).frame(width: max(0, width * fraction), height: hovering || dragging != nil ? 6 : 4)
-                Circle().fill(Palette.orange).frame(width: 12, height: 12)
-                    .offset(x: width * fraction - 6)
-                    .opacity(hovering || dragging != nil ? 1 : 0)
+        Slider(value: Binding(get: { fraction }, set: { value in
+            guard status == .ready else { return }
+            if isScrubbing {
+                dragging = value
+            } else {
+                seek(value * playhead.duration)
             }
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { dragging = min(1, max(0, $0.location.x / max(1, width))) }
-                .onEnded { _ in
-                    if let dragging { seek(dragging * playhead.duration) }
-                    dragging = nil
-                })
-            .onHover { hovering = $0 }
-            .motion(Motion.touch, value: hovering)
+        }), in: 0...1, onEditingChanged: { editing in
+            isScrubbing = editing
+            if !editing {
+                if let dragging, status == .ready { seek(dragging * playhead.duration) }
+                dragging = nil
+            }
+        }) {
+            Text("Playback position")
         }
+        .labelsHidden()
+        .tint(Palette.orange)
         .frame(height: 24)
-        .disabled(playhead.duration <= 0)
+        .disabled(status != .ready || playhead.duration <= 0)
+        .focusEffectDisabled()
+        .accessibilityValue(MeetingPresentation.timestamp(shown))
+    }
+}
+
+private struct PlaybackGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Palette.card, in: Capsule())
+        } else if #available(macOS 26, *) {
+            content
+                .background(Palette.card.opacity(0.45), in: Capsule())
+                .glassEffect(.regular, in: Capsule())
+        } else {
+            content.background(.ultraThinMaterial, in: Capsule())
+                .overlay { Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
+        }
     }
 }

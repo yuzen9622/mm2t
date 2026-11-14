@@ -1,6 +1,18 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Audio unavailable": {
+      "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "沒有可用的錄音" } } }
+    },
+    "Couldn't load audio": {
+      "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法載入錄音" } } }
+    },
+    "Preparing audio…": {
+      "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在準備錄音…" } } }
+    },
+    "Playback position": {
+      "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "播放位置" } } }
+    },
     "%@ couldn't read this recording. The file may be damaged or silent.": {
       "localizations": {
         "zh-Hant": {

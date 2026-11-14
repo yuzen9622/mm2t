@@ -44,8 +44,8 @@ struct MeetingDetailView: View {
                     if let presentation = model.presentation {
                         TranscriptContent(model: model, presentation: presentation, playhead: playhead)
                             .overlay(alignment: .bottom) {
-                                if let playback = model.playback, playhead.duration > 0 {
-                                    TransportBar(playhead: playhead, toggle: {
+                                if let playback = model.playback {
+                                    TransportBar(playhead: playhead, status: playback.status, toggle: {
                                         playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
                                         sample()
                                     }, seek: { time in
@@ -84,6 +84,8 @@ struct MeetingDetailView: View {
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+        .onChange(of: model.playback?.duration) { sample() }
+        .onChange(of: model.playback?.status) { sample() }
         .onAppear { DebugSnapshot.detailAppeared(model) }
         .onDisappear { model.playback?.pause() }
         .alert("Couldn't change speakers", isPresented: .init(get: { model.errorMessage != nil }, set: { if !$0 { model.dismissError() } })) {

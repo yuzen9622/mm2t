@@ -327,7 +327,7 @@ struct MarkdownText: View {
     }
 
     private func inline(_ text: AttributedString) -> some View {
-        Text(text).font(font)
+        KaraokeText(text: text).font(font)
             .lineSpacing(font == Typo.reading ? Typo.readingLineSpacing : 0)
             .fixedSize(horizontal: false, vertical: true)
     }
