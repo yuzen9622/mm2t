@@ -1,0 +1,212 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project App/MM2T.xcodeproj -scheme mm2t -configuration Debug -derivedDataPath .build/xcode "CODE_SIGN_IDENTITY=Apple Development" DEVELOPMENT_TEAM=4RMY49Z36V build
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = Apple Development
+    DEVELOPMENT_TEAM = 4RMY49Z36V
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  swift-argument-parser: https://github.com/apple/swift-argument-parser.git @ 1.8.2
+  FluidAudio: https://github.com/FluidInference/FluidAudio.git @ 0.18.3
+  argmax-oss-swift: https://github.com/argmaxinc/WhisperKit.git @ 1.1.1
+  MM2TCore: /Volumes/KINGSTON/yuzen/code/mm2t @ local
+  Sparkle: https://github.com/sparkle-project/Sparkle @ 2.10.1
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00008132-0004486122D0401C, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00008132-0004486122D0401C, name:My Mac }
+{ platform:macOS, name:Any Mac }
+note: Using codesigning identity override: Apple Development
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (19 targets)
+    Target 'mm2t' in project 'MM2T'
+        ➜ Explicit dependency on target 'MM2TApp-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TSystem-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TProviders-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'Sparkle-product' in project 'Sparkle'
+    Target 'Sparkle-product' in project 'Sparkle' (no dependencies)
+    Target 'MM2TProviders-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TProviders' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+    Target 'MM2TSystem-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TSystem' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+    Target 'MM2TCore-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+    Target 'MM2TApp-product' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TApp' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TProviders' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TSystem' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TDiarization' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TLocal' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'FluidAudio-product' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'WhisperKit-product' in project 'argmax-oss-swift'
+    Target 'MM2TApp' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TProviders' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TSystem' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TDiarization' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TLocal' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'FluidAudio-product' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'WhisperKit-product' in project 'argmax-oss-swift'
+    Target 'MM2TLocal' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TProviders' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'WhisperKit-product' in project 'argmax-oss-swift'
+    Target 'WhisperKit-product' in project 'argmax-oss-swift'
+        ➜ Explicit dependency on target 'WhisperKit' in project 'argmax-oss-swift'
+        ➜ Explicit dependency on target 'ArgmaxCore' in project 'argmax-oss-swift'
+    Target 'WhisperKit' in project 'argmax-oss-swift'
+        ➜ Explicit dependency on target 'ArgmaxCore' in project 'argmax-oss-swift'
+    Target 'ArgmaxCore' in project 'argmax-oss-swift' (no dependencies)
+    Target 'MM2TDiarization' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'FluidAudio-product' in project 'FluidAudio'
+    Target 'FluidAudio-product' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FluidAudio' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FastClusterWrapper' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'MachTaskSelfWrapper' in project 'FluidAudio'
+    Target 'FluidAudio' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FastClusterWrapper' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'MachTaskSelfWrapper' in project 'FluidAudio'
+    Target 'MachTaskSelfWrapper' in project 'FluidAudio' (no dependencies)
+    Target 'FastClusterWrapper' in project 'FluidAudio' (no dependencies)
+    Target 'MM2TSystem' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+    Target 'MM2TProviders' in project 'MM2TCore'
+        ➜ Explicit dependency on target 'MM2TCore' in project 'MM2TCore'
+    Target 'MM2TCore' in project 'MM2TCore' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -o /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache
+
+SwiftDriver mm2t normal arm64 com.apple.xcode.tools.swift.compiler (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name mm2t -Onone @/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include/module.modulemap -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include/module.modulemap -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -target arm64-apple-macos14.2 -g -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/PackageFrameworks -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -emit-localized-strings -emit-localized-strings-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64 -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache -output-file-map /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -sdk-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_const_extract_protocols.json -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-generated-files.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-own-target-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/MM2T-5dcca4df51de121b3f2ca67708b7ce4b-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-project-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources-normal/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources -emit-objc-header -emit-objc-header-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-Swift.h -working-directory /Volumes/KINGSTON/yuzen/code/mm2t/App -experimental-emit-module-separately -disable-cmo
+
+SwiftCompile normal arm64 Compiling\ LyricTranscript.swift /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/LyricTranscript.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/LyricTranscript.swift (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftPerFileCompile LyricTranscript.swift
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ mm2t (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling LyricTranscript.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 Compiling\ DebugSnapshot.swift /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/DebugSnapshot.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/DebugSnapshot.swift (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftPerFileCompile DebugSnapshot.swift
+
+SwiftCompile normal arm64 Compiling\ TranscriptContent.swift /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/TranscriptContent.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/TranscriptContent.swift (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftPerFileCompile TranscriptContent.swift
+
+SwiftCompile normal arm64 Compiling\ MeetingDetailView.swift /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/MeetingDetailView.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/MeetingDetailView.swift (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftPerFileCompile MeetingDetailView.swift
+
+SwiftCompile normal arm64 Compiling\ MainWindow.swift /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/MainWindow.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftCompile normal arm64 /Volumes/KINGSTON/yuzen/code/mm2t/App/MM2T/Views/MainWindow.swift (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-SwiftPerFileCompile MainWindow.swift
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for mm2t (in target 'mm2t' from project 'MM2T')
+
+SwiftDriver\ Compilation\ Requirements mm2t normal arm64 com.apple.xcode.tools.swift.compiler (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name mm2t -Onone @/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include/module.modulemap -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include/module.modulemap -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -target arm64-apple-macos14.2 -g -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/PackageFrameworks -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -emit-localized-strings -emit-localized-strings-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64 -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache -output-file-map /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -sdk-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_const_extract_protocols.json -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-generated-files.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-own-target-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/MM2T-5dcca4df51de121b3f2ca67708b7ce4b-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-project-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources-normal/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources -emit-objc-header -emit-objc-header-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-Swift.h -working-directory /Volumes/KINGSTON/yuzen/code/mm2t/App -experimental-emit-module-separately -disable-cmo
+
+Copy /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftsourceinfo (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftsourceinfo /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo
+
+Copy /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/arm64-apple-macos.abi.json /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.abi.json (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.abi.json /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/arm64-apple-macos.abi.json
+
+Copy /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/arm64-apple-macos.swiftmodule /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.swiftmodule/arm64-apple-macos.swiftmodule
+
+SwiftDriverJobDiscovery normal arm64 Compiling TranscriptContent.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftDriverJobDiscovery normal arm64 Compiling MainWindow.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftDriverJobDiscovery normal arm64 Compiling MeetingDetailView.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftDriverJobDiscovery normal arm64 Compiling DebugSnapshot.swift (in target 'mm2t' from project 'MM2T')
+
+SwiftDriver\ Compilation mm2t normal arm64 com.apple.xcode.tools.swift.compiler (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name mm2t -Onone @/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.SwiftFileList -DDEBUG -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include/module.modulemap -Xcc -fmodule-map-file\=/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include/module.modulemap -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -target arm64-apple-macos14.2 -g -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/PackageFrameworks -F /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -emit-localized-strings -emit-localized-strings-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64 -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKStatCaches.noindex/macosx27.0-26A425-7231f6df4def33e022ae2eb8f782df1a.sdkstatcache -output-file-map /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-OutputFileMap.json -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex -sdk-module-cache-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKExplicitPrecompiledModules -emit-dependencies -emit-module -emit-module-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule -serialize-diagnostics -dependency-scan-serialize-diagnostics-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-dependency-scan.dia -validate-clang-modules-once -clang-build-session-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/ModuleCache.noindex/Session.modulevalidation -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -emit-const-values -const-gather-protocols-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_const_extract_protocols.json -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-generated-files.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-own-target-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/MM2T-5dcca4df51de121b3f2ca67708b7ce4b-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t-project-headers.hmap -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SourcePackages/checkouts/FluidAudio/Sources/FastClusterWrapper/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/include -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources-normal/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources/arm64 -Xcc -I/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/DerivedSources -emit-objc-header -emit-objc-header-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t-Swift.h -working-directory /Volumes/KINGSTON/yuzen/code/mm2t/App -experimental-emit-module-separately -disable-cmo
+
+Ld /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/MacOS/mm2t normal (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-macos14.2 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk -O0 -Xlinker -no_warn_duplicate_libraries -L/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/EagerLinkingTBDs/Debug -L/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -F/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/EagerLinkingTBDs/Debug -F/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/PackageFrameworks -F/Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug -filelist /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path -Xlinker -rpath -Xlinker /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/PackageFrameworks -Xlinker -rpath -Xlinker @executable_path/../Frameworks -Xlinker -object_path_lto -Xlinker /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -dependency_info -Xlinker /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.swiftmodule -lc++ -framework llama -framework Sparkle -Xlinker -no_adhoc_codesign -o /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/MacOS/mm2t
+
+CopySwiftLibs /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-swiftStdLibTool --copy --verbose --sign FFDB233125AB28C73E0FB04336BC68E481B6F5A3 --Xcodesign --options\=runtime --scan-executable /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/MacOS/mm2t --scan-folder /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/Frameworks --scan-folder /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/PlugIns --scan-folder /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/Library/SystemExtensions --scan-folder /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/Extensions --platform macosx --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+ExtractAppIntentsMetadata (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name mm2t --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk --xcode-version 27A266a --platform-family macOS --deployment-target 14.2 --bundle-identifier dev.mm2t.app --output /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/Resources --target-triple arm64-apple-macos14.2 --binary-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app/Contents/MacOS/mm2t --dependency-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t_dependency_info.dat --stringsdata-file /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.SwiftFileList --metadata-file-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t.DependencyMetadataFileList --static-metadata-file-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t.DependencyStaticMetadataFileList --swift-const-vals-list /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/Objects-normal/arm64/mm2t.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization
+2026-11-14 21:02:59.195 appintentsmetadataprocessor[56960:15795799] Starting appintentsmetadataprocessor export
+2026-11-14 21:02:59.196 appintentsmetadataprocessor[56960:15795799] warning: Metadata extraction skipped, no AppIntents.framework dependency found
+
+CodeSign /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    
+    Signing Identity:     "Apple Development: oscar48079@gmail.com (TK3N3ZV5T8)"
+    
+    /usr/bin/codesign --force --sign FFDB233125AB28C73E0FB04336BC68E481B6F5A3 --options\=runtime -o runtime --entitlements /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/MM2T.build/Debug/mm2t.build/mm2t.app.xcent --timestamp\=none --generate-entitlement-der /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app
+
+Validate /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-validationUtility /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app -no-validate-extension -infoplist-subpath Contents/Info.plist
+
+RegisterWithLaunchServices /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app (in target 'mm2t' from project 'MM2T')
+    cd /Volumes/KINGSTON/yuzen/code/mm2t/App
+    builtin-lsregisterurl --record-path /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/XCBuildData/registered-launchservices.txt -- /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Products/Debug/mm2t.app
+
+PruneExplicitPrecompiledModules /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Volumes/KINGSTON/yuzen/code/mm2t/.build/xcode/SDKExplicitPrecompiledModules
+
+** BUILD SUCCEEDED **
+

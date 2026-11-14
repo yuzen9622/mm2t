@@ -1,0 +1,48 @@
+{
+  "promptPanelFrame" : "{{2020, 840}, {760, 240}}",
+  "promptPanelScreen" : "MSI MD2412P",
+  "windows" : [
+    {
+      "class" : "NSStatusBarWindow",
+      "serverSharingState" : -1,
+      "sharingType" : 1,
+      "title" : "Item-0"
+    },
+    {
+      "class" : "TopEdgePanel",
+      "serverSharingState" : 1,
+      "sharingType" : 1,
+      "title" : ""
+    },
+    {
+      "class" : "AppKitWindow",
+      "serverSharingState" : 1,
+      "sharingType" : 1,
+      "title" : "mm2t"
+    },
+    {
+      "class" : "NSStatusBarWindow",
+      "serverSharingState" : -1,
+      "sharingType" : 1,
+      "title" : ""
+    },
+    {
+      "class" : "NSStatusBarWindow",
+      "serverSharingState" : -1,
+      "sharingType" : 1,
+      "title" : ""
+    },
+    {
+      "class" : "NSStatusBarWindow",
+      "serverSharingState" : -1,
+      "sharingType" : 1,
+      "title" : ""
+    },
+    {
+      "class" : "AppKitWindow",
+      "serverSharingState" : 1,
+      "sharingType" : 1,
+      "title" : "設定 mm2t"
+    }
+  ]
+}
