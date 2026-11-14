@@ -83,7 +83,6 @@ public actor AudioRecorder {
     private var micListeners: [PropertyListener] = []
     private var tap: ProcessTap?
     private var tapIO: DeviceIO?
-    private var tapListeners: [PropertyListener] = []
     private var systemListeners: [PropertyListener] = []
     private let listenerQueue = DispatchQueue(label: "mm2t.recorder.listeners")
     private var drainTask: Task<Void, Never>?
@@ -160,9 +159,6 @@ public actor AudioRecorder {
             systemListeners = [
                 try PropertyListener(systemObject, kAudioHardwarePropertyDefaultInputDevice, queue: queue) { [weak self] in
                     Task { await self?.restartMicrophone(reason: "default input changed") }
-                },
-                try PropertyListener(systemObject, kAudioHardwarePropertyDefaultOutputDevice, queue: queue) { [weak self] in
-                    Task { await self?.restartTap(reason: "default output changed") }
                 },
                 try PropertyListener(systemObject, kAudioHardwarePropertyProcessObjectList, queue: queue) { [weak self] in
                     Task { await self?.refreshTapProcesses() }
@@ -299,21 +295,11 @@ public actor AudioRecorder {
     // MARK: Captures
 
     private func startTap() throws {
-        let device = try AudioDevices.defaultOutput()
-        let tap = try ProcessTap(scope: tapScope(), outputDevice: device)
+        let tap = try ProcessTap(scope: tapScope())
         let io = try DeviceIO(device: tap.aggregateID, ring: remote.ring)
-        let listeners = [
-            try PropertyListener(device, kAudioDevicePropertyNominalSampleRate, queue: listenerQueue) { [weak self] in
-                Task { await self?.restartTap(reason: "output sample rate changed") }
-            },
-            try PropertyListener(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeOutput, queue: listenerQueue) { [weak self] in
-                Task { await self?.restartTap(reason: "output streams changed") }
-            },
-        ]
         try io.start()
         self.tap = tap
         tapIO = io
-        tapListeners = listeners
         tapStartedAt = HostTime.now
     }
 
@@ -340,8 +326,6 @@ public actor AudioRecorder {
     }
 
     private func stopTap() {
-        tapListeners.forEach { $0.remove() }
-        tapListeners = []
         tapIO?.stop()
         tapIO = nil
         tap?.destroy()

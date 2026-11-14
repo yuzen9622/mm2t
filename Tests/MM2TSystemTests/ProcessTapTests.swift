@@ -28,7 +28,23 @@ import Testing
         #expect(TapScope.recording(targetBundleID: nil, ownBundleID: "dev.mm2t.app", processes: updated) == .allExcept([9]))
     }
 
-    @Test func bothCaptureModesStayOnOneOutputStreamWhenProcessesChange() {
+    @Test func recordingFollowsProcessesAcrossOutputDevices() {
+        let uuid = UUID()
+        for scope in [TapScope.allExcept([11]), .only([21, 22]), .only([21, 23])] {
+            let description = ProcessTap.description(scope, uuid: uuid)
+            #expect(description.deviceUID == nil)
+            #expect(description.stream == nil)
+            #expect(description.isMixdown && description.isMono)
+            #expect(description.uuid == uuid)
+            #expect(description.processes == scope.processes)
+            #expect(description.isPrivate)
+            #expect(description.muteBehavior == .unmuted)
+            if case .allExcept = scope { #expect(description.isExclusive) }
+            else { #expect(!description.isExclusive) }
+        }
+    }
+
+    @Test func deviceDiagnosticsCanStillSelectOneOutputStream() {
         let uuid = UUID()
         for scope in [TapScope.allExcept([11]), .only([21, 22]), .only([21, 23])] {
             let description = ProcessTap.description(scope, outputUID: "headphones", uuid: uuid)

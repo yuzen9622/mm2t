@@ -38,21 +38,20 @@ final class ProcessTap {
     private(set) var tapID = AudioObjectID(kAudioObjectUnknown)
     private(set) var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private(set) var scope: TapScope
-    private let outputUID: String
+    private let outputUID: String?
     private let uuid = UUID()
     var processes: [AudioObjectID] { scope.processes }
 
-    init(scope: TapScope, outputDevice: AudioObjectID) throws {
+    init(scope: TapScope, outputDevice: AudioObjectID? = nil) throws {
         self.scope = scope
-        outputUID = try CoreAudioProperty.string(outputDevice, kAudioDevicePropertyDeviceUID)
+        outputUID = try outputDevice.map { try CoreAudioProperty.string($0, kAudioDevicePropertyDeviceUID) }
         let description = Self.description(scope, outputUID: outputUID, uuid: uuid)
         var tap = AudioObjectID(kAudioObjectUnknown)
         try check(AudioHardwareCreateProcessTap(description, &tap), "create process tap")
         tapID = tap
         do {
             let tapUID = try CoreAudioProperty.string(tap, kAudioTapPropertyUID)
-            // No output sub-device: this aggregate only captures. The recorder rebuilds the tap
-            // when the selected output changes, so we never mix copies from multiple routes.
+            // A tap-only aggregate follows the producer without owning its output device.
             let composition: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "mm2t remote tap",
                 kAudioAggregateDeviceUIDKey: "mm2t.tap.\(UUID().uuidString)",
@@ -81,13 +80,14 @@ final class ProcessTap {
         self.scope = scope
     }
 
-    static func description(_ scope: TapScope, outputUID: String, uuid: UUID) -> CATapDescription {
-        let description: CATapDescription = switch scope {
-        case .only(let processes): CATapDescription(processes: processes, deviceUID: outputUID, stream: 0)
-        case .allExcept(let processes): CATapDescription(excludingProcesses: processes, deviceUID: outputUID, stream: 0)
+    static func description(_ scope: TapScope, outputUID: String? = nil, uuid: UUID) -> CATapDescription {
+        let description: CATapDescription = switch (scope, outputUID) {
+        case (.only(let processes), nil): CATapDescription(monoMixdownOfProcesses: processes)
+        case (.allExcept(let processes), nil): CATapDescription(monoGlobalTapButExcludeProcesses: processes)
+        case (.only(let processes), .some(let uid)): CATapDescription(processes: processes, deviceUID: uid, stream: 0)
+        case (.allExcept(let processes), .some(let uid)): CATapDescription(excludingProcesses: processes, deviceUID: uid, stream: 0)
         }
-        // Capture one output stream. CaptureRing downmixes its channels to mono, after routing.
-        // A global mix can include delayed copies from other hardware or virtual output routes.
+        // Record all routes by default. Only device diagnostics opt into a single stream.
         description.uuid = uuid
         description.name = "mm2t remote"
         description.isPrivate = true
