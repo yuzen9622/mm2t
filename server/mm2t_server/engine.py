@@ -82,6 +82,7 @@ class FasterWhisperEngine:
             language=language,
             word_timestamps=True,
             hotwords=", ".join(vocabulary) or None,
+            initial_prompt="以下是繁體中文的逐字稿，包含正確的標點符號，例如：逗號、句號、問號？以及驚嘆號！",
             **batching,
         )
         return Transcript(
