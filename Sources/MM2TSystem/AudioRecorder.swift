@@ -83,6 +83,7 @@ public actor AudioRecorder {
     private var micListeners: [PropertyListener] = []
     private var tap: ProcessTap?
     private var tapIO: DeviceIO?
+    private var tapListeners: [PropertyListener] = []
     private var systemListeners: [PropertyListener] = []
     private let listenerQueue = DispatchQueue(label: "mm2t.recorder.listeners")
     private var drainTask: Task<Void, Never>?
@@ -159,6 +160,9 @@ public actor AudioRecorder {
             systemListeners = [
                 try PropertyListener(systemObject, kAudioHardwarePropertyDefaultInputDevice, queue: queue) { [weak self] in
                     Task { await self?.restartMicrophone(reason: "default input changed") }
+                },
+                try PropertyListener(systemObject, kAudioHardwarePropertyDefaultOutputDevice, queue: queue) { [weak self] in
+                    Task { await self?.restartTap(reason: "default output changed") }
                 },
                 try PropertyListener(systemObject, kAudioHardwarePropertyProcessObjectList, queue: queue) { [weak self] in
                     Task { await self?.refreshTapProcesses() }
@@ -259,14 +263,7 @@ public actor AudioRecorder {
             restartMicrophone(reason: "no microphone audio for \(Self.stallTimeout) s")
         }
         if isStalled(remote.ring, since: tapStartedAt, now: now) {
-            stopTap()
-            do {
-                try startTap()
-                continuation.yield(.captureRestarted(.remote, reason: "no tap audio for \(Self.stallTimeout) s"))
-            } catch {
-                tapStartedAt = now
-                continuation.yield(.captureRestarted(.remote, reason: "rebuild failed: \(error)"))
-            }
+            restartTap(reason: "no tap audio for \(Self.stallTimeout) s")
         }
     }
 
@@ -302,29 +299,49 @@ public actor AudioRecorder {
     // MARK: Captures
 
     private func startTap() throws {
-        let tap = try ProcessTap(scope: tapScope())
+        let device = try AudioDevices.defaultOutput()
+        let tap = try ProcessTap(scope: tapScope(), outputDevice: device)
         let io = try DeviceIO(device: tap.aggregateID, ring: remote.ring)
+        let listeners = [
+            try PropertyListener(device, kAudioDevicePropertyNominalSampleRate, queue: listenerQueue) { [weak self] in
+                Task { await self?.restartTap(reason: "output sample rate changed") }
+            },
+            try PropertyListener(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeOutput, queue: listenerQueue) { [weak self] in
+                Task { await self?.restartTap(reason: "output streams changed") }
+            },
+        ]
         try io.start()
         self.tap = tap
         tapIO = io
+        tapListeners = listeners
         tapStartedAt = HostTime.now
     }
 
-    private func tapScope() throws -> TapScope {
-        if let target = configuration.targetBundleID {
-            return .only(try AudioProcesses.objects(ownedBy: target))
+    private func restartTap(reason: String) {
+        guard timeline.state != .stopped else { return }
+        stopTap()
+        tapStartedAt = HostTime.now
+        do {
+            try startTap()
+            continuation.yield(.captureRestarted(.remote, reason: reason))
+        } catch {
+            continuation.yield(.captureRestarted(.remote, reason: "\(reason); rebuild failed: \(error)"))
         }
-        // Our own playback of a past meeting must not be recorded into the new one.
-        let own = Bundle.main.bundleIdentifier.flatMap { try? AudioProcesses.objects(ownedBy: $0) } ?? []
-        return .allExcept(own)
+    }
+
+    private func tapScope() throws -> TapScope {
+        TapScope.recording(targetBundleID: configuration.targetBundleID,
+                           ownBundleID: Bundle.main.bundleIdentifier, processes: try AudioProcesses.list())
     }
 
     private func isTapped(_ owner: String?) -> Bool {
         if let target = configuration.targetBundleID { return owner == target }
-        return owner != Bundle.main.bundleIdentifier
+        return owner != Bundle.main.bundleIdentifier && !TapScope.isAudioRelay(owner)
     }
 
     private func stopTap() {
+        tapListeners.forEach { $0.remove() }
+        tapListeners = []
         tapIO?.stop()
         tapIO = nil
         tap?.destroy()

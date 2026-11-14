@@ -6,6 +6,29 @@ import MM2TSystem
 
 @MainActor
 enum Probe {
+    #if DEBUG
+    /// Persist launch and failure status ourselves; LaunchServices stdout/stderr redirection can
+    /// fail before the diagnostic process starts, leaving no useful error file.
+    @MainActor
+    static func echoSelfTest(in directory: URL) async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func status(_ state: String, error: String? = nil) throws {
+            var report = ["status": state, "updatedAt": ISO8601DateFormatter().string(from: Date())]
+            if let error { report["error"] = error }
+            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                .write(to: directory.appending(path: "status.json"), options: .atomic)
+        }
+        try status("running")
+        do {
+            try await AudioCaptureProbe.run(in: directory)
+            try status("completed")
+        } catch {
+            try? status("failed", error: String(describing: error))
+            throw error
+        }
+    }
+    #endif
+
     static func permissions() {
         print("microphone           \(Permissions.microphone.rawValue)")
         print("system audio capture \(Permissions.systemAudio.rawValue)  (no public API; watch for remoteSilentWhileTargetPlaying while recording)")

@@ -10,15 +10,18 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
 
     public var title: String
     public var startedAt: Date
+    public var timeZoneIdentifier: String?
     public var platform: MeetingPlatform?
     public var targetBundleID: String?
     public var highlights: [TimeInterval] = []
     /// Set at a clean stop; nil means the session ended without one.
     public var duration: TimeInterval?
 
-    public init(title: String, startedAt: Date, platform: MeetingPlatform?, targetBundleID: String?) {
+    public init(title: String, startedAt: Date, platform: MeetingPlatform?, targetBundleID: String?,
+                timeZoneIdentifier: String = TimeZone.current.identifier) {
         self.title = title
         self.startedAt = startedAt
+        self.timeZoneIdentifier = timeZoneIdentifier
         self.platform = platform
         self.targetBundleID = targetBundleID
     }
@@ -41,7 +44,8 @@ public struct RecordingManifest: Codable, Equatable, Sendable {
             micTrack: directory.appending(path: Self.micFile),
             remoteTrack: directory.appending(path: Self.remoteFile),
             highlights: highlights.map(Highlight.init(time:)),
-            metadata: MeetingMetadata(title: title, startedAt: startedAt, duration: duration, platform: platform))
+            metadata: MeetingMetadata(title: title, startedAt: startedAt, duration: duration, platform: platform,
+                                      timeZoneIdentifier: timeZoneIdentifier ?? TimeZone.current.identifier))
     }
 }
 

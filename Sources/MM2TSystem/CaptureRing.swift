@@ -40,7 +40,7 @@ final class CaptureRing: @unchecked Sendable {
         chunks.deallocate()
     }
 
-    /// Called on the IO thread. Buffers must hold interleaved Float32; all channels are averaged.
+    /// Called on the IO thread. Buffers hold Float32, interleaved or planar; all channels are averaged.
     func write(_ buffers: UnsafePointer<AudioBufferList>, hostTime: UInt64, sampleRate: Double) {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffers))
         guard let first = list.first, first.mNumberChannels > 0 else { return }
