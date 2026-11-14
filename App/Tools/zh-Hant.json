@@ -36,7 +36,6 @@
   "Already switched on? The switch may belong to an older build of mm2t. Select mm2t in the list, remove it with the − button, then add it again.": "已經打開了？那個開關可能屬於舊版的 mm2t。請在清單中選取 mm2t，按「−」移除後再重新加入。",
   "App language": "App 語言",
   "Apple Calendar": "Apple 行事曆",
-  "Auto-added %lld": "自動新增 %lld",
   "Auto-detect": "自動偵測",
   "Automation": "自動化",
   "Automation: %@": "自動化：%@",
@@ -318,7 +317,6 @@
   "mm2t could not start": "mm2t 無法啟動",
   "mm2t is connected. You can close this tab and go back to the app.": "mm2t 已連結。你可以關閉這個分頁，回到 App。",
   "mm2t knows your voice": "mm2t 已經認得你的聲音",
-  "mm2t listens for these words and spells them your way. It also adds terms it hears in your meetings and the ones you correct in a transcript.": "mm2t 會特別留意這些詞，並照你的寫法寫出來。會議中聽到的專有名詞，以及你在逐字稿裡修正過的詞，也會自動加進來。",
   "mm2t needs your permissions and keys before it can take notes.": "mm2t 需要先取得權限與 API 金鑰，才能開始記錄會議。",
   "mm2t needs your permissions, your keys and a short reading in your own voice before it can take notes.": "開始記錄會議之前，mm2t 需要你授權、填入金鑰，並用自己的聲音唸一小段話。",
   "overlapping speech": "重疊發言",
@@ -332,5 +330,7 @@
   "the self-hosted transcription server": "自架轉錄伺服器",
   "the summary server API key": "摘要伺服器 API 金鑰",
   "· Now": "· 進行中",
-  "產品週會": "產品週會"
+  "產品週會": "產品週會",
+  "Learned from corrections %lld": "從修正學習 %lld",
+  "When you save a transcript correction, mm2t automatically adds the names and terms you corrected to your vocabulary.": "手動修改逐字稿並儲存後，mm2t 會自動把你修正的名稱與術語加入詞彙表。"
 }

@@ -11,8 +11,10 @@ struct TranscriptContent: View {
 
     var body: some View {
         let lines = lyricLines
-        let current = lines.flatMap { LyricLine.current(in: $0, at: playhead.time) }
-        let currentID = current.flatMap { index in lines?[index].id }
+        let current = playhead.currentLine
+        let currentID = current.flatMap { index in
+            lines.flatMap { $0.indices.contains(index) ? $0[index].id : nil }
+        }
         ScrollViewReader { proxy in
             FadingScrollView {
                 LazyVStack(alignment: .leading, spacing: lines == nil ? 10 : 2) {
@@ -29,6 +31,9 @@ struct TranscriptContent: View {
             }
             .modifier(ScrollInteraction { if playhead.isPlaying { followPaused = true } })
             .motion(Motion.reveal, value: model.selectedView)
+            .onChange(of: lines, initial: true) { _, lines in
+                playhead.follow(lines?.map(\.start) ?? [])
+            }
             .onChange(of: model.focusedUtterance) { _, id in
                 if let id { withAnimation(Motion.page) { proxy.scrollTo(id.rawValue, anchor: .center) } }
             }
@@ -77,11 +82,11 @@ struct TranscriptContent: View {
     @ViewBuilder private func lyrics(_ lines: [LyricLine], current: Int?) -> some View {
         let raw = model.selectedView == .raw
         ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-            let state = LyricLine.state(of: index, current: current, playhead: playhead)
+            let state = KaraokeTiming.state(of: index, current: current, isPlaying: playhead.isPlaying)
             LyricRow(line: line,
                      showsSpeaker: index == 0 || lines[index - 1].speakerName != line.speakerName,
                      state: state,
-                     now: state == .current ? playhead.time : nil,
+                     playhead: playhead,
                      isFocused: raw && model.focusedUtterance?.rawValue == line.id,
                      canEdit: model.canEditSpeakers,
                      play: {

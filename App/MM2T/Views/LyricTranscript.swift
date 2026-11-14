@@ -2,20 +2,11 @@ import MM2TApp
 import MM2TCore
 import SwiftUI
 
-/// Where playback is, sampled by the meeting view about ten times a second while it plays.
-struct Playhead: Equatable {
-    var time: TimeInterval = 0
-    var duration: TimeInterval = 0
-    var isPlaying = false
-    /// Set the first time anything plays, so a meeting nobody has listened to reads at full strength.
-    var started = false
-}
+typealias Playhead = TranscriptPlayhead
 
 /// How a line reads against the playhead, the way synced lyrics do: what is still to come is faint,
 /// what has been heard is back to full strength, and the line being heard is marked.
-enum LyricState: Equatable {
-    case idle, played, current, upcoming
-}
+typealias LyricState = KaraokeTiming.LineState
 
 /// A timed passage of the raw or cleaned transcript.
 struct LyricLine: Identifiable, Equatable {
@@ -34,22 +25,6 @@ struct LyricLine: Identifiable, Equatable {
 
     var end: TimeInterval { spans.last?.end ?? words.last?.range.end ?? start }
 
-    /// The line being heard at `time`: the last one that has started. Between two lines the
-    /// earlier one stays current, so the mark never blinks off during a pause.
-    static func current(in lines: [LyricLine], at time: TimeInterval) -> Int? {
-        var low = 0, high = lines.count
-        while low < high {
-            let mid = (low + high) / 2
-            if lines[mid].start <= time + 0.05 { low = mid + 1 } else { high = mid }
-        }
-        return low == 0 ? nil : low - 1
-    }
-
-    static func state(of index: Int, current: Int?, playhead: Playhead) -> LyricState {
-        guard playhead.started, let current else { return playhead.started ? .upcoming : .idle }
-        if index == current { return .current }
-        return index < current ? .played : .upcoming
-    }
 }
 
 /// Lights up a line character by character as it is heard: what has been said is at full strength,
@@ -86,8 +61,7 @@ struct LyricRow: View {
     let line: LyricLine
     let showsSpeaker: Bool
     let state: LyricState
-    /// The playhead, given only to the line being heard, so the others don't redraw as it moves.
-    var now: TimeInterval?
+    let playhead: Playhead
     let isFocused: Bool
     let canEdit: Bool
     let play: () -> Void
@@ -146,7 +120,7 @@ struct LyricRow: View {
     }
 
     @ViewBuilder private var content: some View {
-        let karaoke = state == .current ? now.map { Karaoke(line: line, now: $0) } : nil
+        let karaoke = state == .current ? Karaoke(line: line, now: playhead.time) : nil
         if line.isMarkdown {
             MarkdownText(line.text, font: Typo.reading, karaoke: karaoke)
         } else {

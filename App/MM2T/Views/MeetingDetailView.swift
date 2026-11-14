@@ -85,6 +85,7 @@ struct MeetingDetailView: View {
             }
         }
         .onAppear { DebugSnapshot.detailAppeared(model) }
+        .onDisappear { model.playback?.pause() }
         .alert("Couldn't change speakers", isPresented: .init(get: { model.errorMessage != nil }, set: { if !$0 { model.dismissError() } })) {
         } message: {
             Text(model.errorMessage ?? "")
@@ -112,14 +113,11 @@ struct MeetingDetailView: View {
 
     private func sample() {
         guard let playback = model.playback else { return }
-        var next = Playhead(time: playback.currentTime, duration: playback.duration, isPlaying: playback.isPlaying,
-                            started: playhead.started || playback.isPlaying || playback.currentTime > 0)
         // AVAudioPlayer stops at the end without saying so.
-        if next.isPlaying, next.duration > 0, next.time >= next.duration - 0.05 {
+        if playback.isPlaying, playback.duration > 0, playback.currentTime >= playback.duration - 0.05 {
             playback.pause()
-            next.isPlaying = false
         }
-        if next != playhead { playhead = next }
+        playhead.sample(time: playback.currentTime, duration: playback.duration, isPlaying: playback.isPlaying)
     }
 
     /// Puts the view on screen on the clipboard as plain text.

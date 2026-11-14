@@ -1,7 +1,7 @@
 import MM2TApp
 import SwiftUI
 
-/// The user's terms, by who added them: typed here, or learned by mm2t from a meeting or a correction.
+/// Terms entered by the user or learned from their saved transcript corrections.
 struct VocabularyView: View {
     enum Filter: Hashable, CaseIterable { case all, learned, manual }
 
@@ -33,7 +33,7 @@ struct VocabularyView: View {
                     PillButton("Add", icon: "plus", kind: .primary, action: add)
                         .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                Text("mm2t listens for these words and spells them your way. It also adds terms it hears in your meetings and the ones you correct in a transcript.")
+                Text("When you save a transcript correction, mm2t automatically adds the names and terms you corrected to your vocabulary.")
                     .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                 if terms.isEmpty {
                     EmptyState(icon: "book-2", title: filter == .learned ? "Nothing learned yet" : "No terms yet")
@@ -88,7 +88,7 @@ struct VocabularyView: View {
         let settings = store.settings
         switch filter {
         case .all: return String(localized: "All \(settings.vocabulary.count)")
-        case .learned: return String(localized: "Auto-added \(settings.learnedVocabulary.count)")
+        case .learned: return String(localized: "Learned from corrections \(settings.learnedVocabulary.count)")
         case .manual: return String(localized: "Manually added \(settings.vocabulary.count - settings.learnedVocabulary.count)")
         }
     }
