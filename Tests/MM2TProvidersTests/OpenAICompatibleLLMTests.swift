@@ -47,6 +47,78 @@ extension Fixture {
         #expect(speaker?["enum"] as? [String] == ["me", "r1"])
     }
 
+    @Test func boundsGenerationAndRequestsLowReasoningByDefault() async throws {
+        let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        _ = try await llm(server).cleanTranscript(transcript)
+        let request = try #require(server.requests.first)
+        #expect(request.json["max_tokens"] as? Int == 8192)
+        #expect(request.json["chat_template_kwargs"] == nil)
+        #expect(request.json["reasoning_effort"] as? String == "low")
+        #expect(request.json["reasoning_budget_tokens"] as? Int == 512)
+    }
+
+    @Test func requestsLowReasoningForArbitraryModelAliases() async throws {
+        let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        let provider = OpenAICompatibleLLM(baseURL: base, apiKey: nil, model: "llama", session: server.session)
+        _ = try await provider.cleanTranscript(transcript)
+        let request = try #require(server.requests.first)
+        #expect(request.json["max_tokens"] as? Int == 8192)
+        #expect(request.json["chat_template_kwargs"] == nil)
+        #expect(request.json["reasoning_effort"] as? String == "low")
+        #expect(request.json["reasoning_budget_tokens"] as? Int == 512)
+    }
+
+    @Test(arguments: [400, 422]) func dropsExplicitlyRejectedReasoningEffort(status: Int) async throws {
+        let server = StubServer { request in
+            if request.json["reasoning_effort"] != nil {
+                return .status(status, #"{"error":{"message":"Unsupported parameter: reasoning_effort"}}"#)
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        _ = try await llm(server).cleanTranscript(transcript)
+        #expect(server.requests.count == 2)
+        #expect(server.requests[1].json["reasoning_effort"] == nil)
+        #expect(server.requests.allSatisfy { $0.json["max_tokens"] as? Int == 8192 })
+        #expect(server.requests.allSatisfy { $0.json["chat_template_kwargs"] == nil })
+        #expect(server.requests.allSatisfy {
+            ($0.json["response_format"] as? [String: Any])?["type"] as? String == "json_schema"
+        })
+    }
+
+    @Test(arguments: [400, 422]) func dropsOnlyExplicitlyRejectedBudget(status: Int) async throws {
+        let server = StubServer { request in
+            if request.json["reasoning_budget_tokens"] != nil {
+                return .status(status, #"{"error":{"message":"Unknown parameter: reasoning_budget_tokens"}}"#)
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        _ = try await llm(server).cleanTranscript(transcript)
+        #expect(server.requests.count == 2)
+        #expect(server.requests[1].json["reasoning_budget_tokens"] == nil)
+        #expect(server.requests[1].json["reasoning_effort"] as? String == "low")
+        #expect(server.requests[1].json["max_tokens"] as? Int == 8192)
+    }
+
+    @Test func dropsBothOptionalFieldsWhenRejectedSequentially() async throws {
+        let server = StubServer { request in
+            for field in ["reasoning_budget_tokens", "reasoning_effort"] where request.json[field] != nil {
+                return .status(422, "{\"error\":{\"message\":\"Unsupported parameter: \(field)\"}}")
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        _ = try await llm(server).cleanTranscript(transcript)
+        #expect(server.requests.count == 3)
+        #expect(server.requests[2].json["max_tokens"] as? Int == 8192)
+    }
+
+    @Test func doesNotRetryServerFailureMentioningReasoning() async throws {
+        let server = StubServer(status: 503, body: #"{"error":{"message":"invalid reasoning_effort"}}"#)
+        await #expect(throws: ProviderError(.openAICompatible, .unavailable)) {
+            try await llm(server).cleanTranscript(transcript)
+        }
+        #expect(server.requests.count == 1)
+    }
+
     @Test func aTrailingSlashAndAMissingTokenAreFine() async throws {
         let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
         let provider = OpenAICompatibleLLM(

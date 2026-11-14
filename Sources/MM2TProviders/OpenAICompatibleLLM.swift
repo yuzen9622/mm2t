@@ -99,14 +99,41 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     }
 
     private func send(system: String, input: String, format: String) async throws -> HTTPResponse {
-        let body = Self.object([
+        var fields: [(String, String)] = [
             ("model", JSON.text(model).serialized()),
             ("messages", JSON.list([Self.message("system", system), Self.message("user", input)]).serialized()),
             ("response_format", format),
             ("temperature", "0.2"),
             ("stream", "false"),
-        ])
-        return try await session.send(completionRequest(body, timeout: timeout), for: .openAICompatible)
+            // Bound runaway generation, including hidden reasoning. Truncation is already
+            // handled by LLMTasks, which splits cleaned-transcript chunks when possible.
+            ("max_tokens", "8192"),
+        ]
+        // llama.cpp uses a separate thinking budget; effort alone may be ignored by
+        // the template. Keep the total cap larger so the final answer has room.
+        fields.append(("reasoning_effort", #""low""#))
+        fields.append(("reasoning_budget_tokens", "512"))
+        var response = try await session.send(
+            completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
+        // Optional extensions are not universal. Remove only explicitly rejected fields,
+        // at most once each; never retry authentication, rate limits or server failures.
+        for _ in 0..<2 {
+            let rejected = fields.filter { Self.rejectsReasoningParameter($0.0, response) }.map(\.0)
+            guard !rejected.isEmpty else { return response }
+            fields.removeAll { rejected.contains($0.0) }
+            response = try await session.send(
+                completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
+        }
+        return response
+    }
+
+    private static func rejectsReasoningParameter(_ name: String, _ response: HTTPResponse) -> Bool {
+        guard ["reasoning_effort", "reasoning_budget_tokens"].contains(name),
+              response.status == 400 || response.status == 422 else { return false }
+        let error = String(decoding: response.body, as: UTF8.self).lowercased()
+        return error.contains(name) &&
+            ["unsupported", "not support", "unknown", "unrecognized", "extra",
+             "invalid", "must be", "not permitted", "not allowed", "input should"].contains(where: error.contains)
     }
 
     /// `JSON` has no numbers or booleans, and the schema must keep its property order, so the
