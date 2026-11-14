@@ -104,6 +104,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
     }
 
+    public mutating func removeVocabulary(_ terms: [String]) {
+        for term in terms { removeVocabulary(term) }
+    }
+
     public mutating func removeVocabulary(_ term: String) {
         guard vocabulary.contains(term) else { return }
         vocabulary.removeAll { $0 == term }

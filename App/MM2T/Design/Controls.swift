@@ -132,6 +132,7 @@ struct SearchField: View {
             if !text.isEmpty {
                 Button { text = "" } label: { Icon("x", size: 13).foregroundStyle(Palette.secondary) }
                     .buttonStyle(Pressable())
+                    .accessibilityLabel("Clear search")
                     .transition(.scale.combined(with: .opacity))
             }
         }
