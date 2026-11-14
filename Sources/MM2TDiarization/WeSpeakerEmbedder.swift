@@ -40,31 +40,37 @@ public actor WeSpeakerEmbedder: SpeakerEmbedder {
     /// vectors also take pieces from `briefMinimumPiece`, enough to tell the user apart.
     func voiceprints(audio: TrackAudio, segments: [Diarization.Segment], includingBrief: Bool) async throws
         -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]]) {
-        let stored = SpeakerTurns.cleanPieces(segments, within: audio.duration).filter { !$0.value.isEmpty }
-        let enough = Set(stored.filter { $0.value.reduce(0) { $0 + $1.duration } >= minimumSpeech }.keys)
-        var pieces = stored.filter { enough.contains($0.key) }
-        if includingBrief {
-            let short = SpeakerTurns.cleanPieces(segments, within: audio.duration, minPiece: Self.briefMinimumPiece)
-            pieces.merge(short.filter { !enough.contains($0.key) && !$0.value.isEmpty }) { kept, _ in kept }
-        }
-        guard !pieces.isEmpty else { return ([:], [:]) }
+        let result = try await incrementalVoiceprints(audio: audio, segments: segments,
+                                                     includingBrief: includingBrief, cache: VoiceprintCache())
+        return (result.kept, result.brief)
+    }
 
-        let owners = pieces.flatMap { cluster, ranges in ranges.map { (cluster, $0) } }
-            .sorted { $0.1.start < $1.1.start }
+    func incrementalVoiceprints(audio: any AudioSampleSource, segments: [Diarization.Segment],
+                                includingBrief: Bool = true, cache: VoiceprintCache) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]], cache: VoiceprintCache) {
+        let plan = VoiceprintPlan(segments: segments, duration: Double(audio.sampleCount) / 16_000,
+                                  minimumSpeech: minimumSpeech, includingBrief: includingBrief)
+        var cache = cache
+        cache.retain(plan)
+        let missing = cache.missing(in: plan)
+        guard !missing.isEmpty else {
+            let result = cache.voiceprints(for: plan)
+            return (result.kept, result.brief, cache)
+        }
         // A manager per call: it is not Sendable, and its async `embedSpans` leaves this actor.
         let manager = OfflineDiarizerManager()
         manager.initialize(models: try await loadedModels())
         // One `embedSpans` call keeps every Core ML output alive until it returns: about 550 MB
         // extra for a two-hour meeting. Batches with a suspension in between measured about 10 MB.
-        var vectors: [[Float]] = []
-        for start in stride(from: 0, to: owners.count, by: 32) {
-            let batch = owners[start..<min(start + 32, owners.count)]
-            vectors += try await manager.embedSpans(audioSource: audio, spans: batch.map { $0.1.start..<$0.1.end })
+        for start in stride(from: 0, to: missing.count, by: 32) {
+            try Task.checkCancellation()
+            let batch = missing[start..<min(start + 32, missing.count)]
+            let vectors = try await manager.embedSpans(audioSource: audio, spans: batch.map(\.span))
+            for (piece, vector) in zip(batch, vectors) { cache.insert(vector, for: piece) }
             await Task.yield()
         }
-        let all = Dictionary(grouping: zip(owners.map(\.0), vectors), by: \.0)
-            .compactMapValues { pairs in SpeakerTurns.centroid(pairs.map(\.1)).map { [Embedding($0)] } }
-        return (all.filter { enough.contains($0.key) }, all.filter { !enough.contains($0.key) })
+        let result = cache.voiceprints(for: plan)
+        return (result.kept, result.brief, cache)
     }
 
     private func loadedModels() async throws -> OfflineDiarizerModels {
