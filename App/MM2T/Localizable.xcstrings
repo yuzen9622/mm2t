@@ -1168,7 +1168,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "會議室現場"
+            "value": "現場"
           }
         }
       }
@@ -1489,16 +1489,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "接下來"
-          }
-        }
-      }
-    },
-    "No call voiceprint yet. Name them once during a call and they will be recognized.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "還沒有線上通話的聲紋。在通話中為他命名一次，之後就能認出來。"
           }
         }
       }
@@ -1978,7 +1968,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請用平常說話的聲音唸出下面這段話。mm2t 會把你的聲紋存在這台 Mac 上，之後在會議室現場錄音時，就能標出哪一位是你。"
+            "value": "請用平常說話的聲音唸出下面這段話。mm2t 會把你的聲紋存在這台 Mac 上，之後在現場錄音時，就能標出哪一位是你。"
           }
         }
       }
