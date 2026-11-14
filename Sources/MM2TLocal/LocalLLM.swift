@@ -65,6 +65,9 @@ public struct LocalLLM: LLMProvider, StructuredGenerator {
     public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
     public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
     public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
+    public func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
+        try await tasks.vocabularyCorrections(from: old, to: new)
+    }
 
     package var service: Service { .localLLM }
 

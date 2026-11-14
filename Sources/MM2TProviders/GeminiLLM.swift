@@ -23,8 +23,13 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
     let apiKey: Secret
     let model: String
     let session: URLSession
-    let limits: Limits
+    var limits: Limits
     let timeout: TimeInterval
+    private let responseCache = StructuredResponseCache()
+    private var summaryUpdates: SummaryCheckpointStore?
+    private var digestUpdates: DigestCheckpointStore?
+    private var cleanedCheckpoints: CleanedCheckpointStore?
+    private var normalizationSnapshot: CleanedCheckpointStore.Snapshot?
 
     public init(
         apiKey: Secret, model: String = GeminiLLM.defaultModel, session: URLSession = .shared,
@@ -39,8 +44,28 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
 
     // MARK: Tasks
 
+    /// Recording checkpoints use shorter cleanup requests; the model and cache remain the same.
+    /// Keep this returned value for both live checkpoints and final processing.
+    public func forRecording() -> Self {
+        var recording = self
+        recording.limits.cleanChunkCharacters = min(limits.cleanChunkCharacters, 300)
+        recording.summaryUpdates = summaryUpdates ?? SummaryCheckpointStore()
+        recording.digestUpdates = digestUpdates ?? DigestCheckpointStore()
+        recording.cleanedCheckpoints = cleanedCheckpoints ?? CleanedCheckpointStore()
+        return recording
+    }
+
+    public func forGeneration() async -> any LLMProvider {
+        guard let cleanedCheckpoints else { return self }
+        var generation = self
+        generation.normalizationSnapshot = await cleanedCheckpoints.snapshot()
+        return generation
+    }
+
     private var tasks: LLMTasks {
-        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters, cleanConcurrency: 16)
+        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters,
+                 cleanConcurrency: 16, responseCache: responseCache, summaryUpdates: summaryUpdates, digestUpdates: digestUpdates,
+                 cleanedCheckpoints: cleanedCheckpoints, normalizationSnapshot: normalizationSnapshot)
     }
 
     public func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess] { try await tasks.inferNames(request) }
@@ -48,6 +73,9 @@ public struct GeminiLLM: LLMProvider, StructuredGenerator {
     public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
     public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
     public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
+    public func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
+        try await tasks.vocabularyCorrections(from: old, to: new)
+    }
 
     /// `models.get` costs no tokens and fails the same way a real request would on a bad key.
     public func validateKey() async -> KeyCheck {
