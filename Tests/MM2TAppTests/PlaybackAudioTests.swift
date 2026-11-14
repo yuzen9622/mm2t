@@ -4,6 +4,47 @@ import Testing
 @testable import MM2TApp
 
 @Suite struct PlaybackAudioTests {
+    @Test @MainActor func missingAudioFinishesUnavailable() async {
+        let player = TwoTrackPlayer()
+        let missing = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        #expect(player.status == .loading)
+        player.play(from: 0)
+        #expect(!player.isPlaying)
+        await player.load(mic: missing, remote: missing)
+        #expect(player.status == .unavailable)
+        #expect(player.duration == 0)
+    }
+
+    @Test @MainActor func singleTrackLoadsAndReloadClearsDuration() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "mm2t-player-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mic = folder.appending(path: "mic.wav")
+        let missing = folder.appending(path: "missing.wav")
+        try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: .init(repeating: 0, count: 32_000)), to: mic)
+        let player = TwoTrackPlayer()
+        await player.load(mic: mic, remote: missing)
+        #expect(player.status == .ready)
+        #expect(abs(player.duration - 2) < 0.01)
+        player.seek(to: 1)
+        #expect(abs(player.currentTime - 1) < 0.01)
+        #expect(!player.isPlaying)
+        await player.load(mic: missing, remote: missing)
+        #expect(player.status == .unavailable)
+        #expect(player.duration == 0)
+        #expect(player.currentTime == 0)
+    }
+
+    @Test @MainActor func malformedAudioFinishesFailed() async throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "mm2t-invalid-\(UUID()).wav")
+        try Data("not audio".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let player = TwoTrackPlayer()
+        await player.load(mic: file, remote: file)
+        #expect(player.status == .failed)
+        #expect(player.duration == 0)
+    }
+
     @Test func playbackRemovesDelayedSystemAudioFromMicWithoutChangingOriginals() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "mm2t-playback-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

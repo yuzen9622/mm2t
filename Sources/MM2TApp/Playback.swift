@@ -27,6 +27,13 @@ public final class TranscriptPlayhead {
     }
 }
 
+public enum PlaybackStatus: Equatable, Sendable {
+    case loading
+    case ready
+    case unavailable
+    case failed
+}
+
 /// Plays a meeting's two tracks together.
 @MainActor
 public protocol MeetingPlayback: AnyObject {
@@ -34,6 +41,7 @@ public protocol MeetingPlayback: AnyObject {
     var currentTime: TimeInterval { get }
     /// The longer track's length; 0 before anything loaded.
     var duration: TimeInterval { get }
+    var status: PlaybackStatus { get }
     func load(mic: URL, remote: URL) async
     func play(from time: TimeInterval)
     func pause()
@@ -43,6 +51,7 @@ public protocol MeetingPlayback: AnyObject {
 
 extension MeetingPlayback {
     public var duration: TimeInterval { 0 }
+    public var status: PlaybackStatus { .ready }
     public func seek(to time: TimeInterval) {
         if isPlaying { play(from: time) }
     }
@@ -53,6 +62,8 @@ extension MeetingPlayback {
 @MainActor @Observable
 public final class TwoTrackPlayer: MeetingPlayback {
     public private(set) var isPlaying = false
+    public private(set) var status: PlaybackStatus = .loading
+    public private(set) var duration: TimeInterval = 0
     @ObservationIgnored private var players: [AVAudioPlayer] = []
     @ObservationIgnored private var audio: PlaybackAudio?
     @ObservationIgnored private var loadID = UUID()
@@ -63,7 +74,6 @@ public final class TwoTrackPlayer: MeetingPlayback {
     deinit { audio?.removeTemporaryFiles() }
 
     public var currentTime: TimeInterval { players.first?.currentTime ?? 0 }
-    public var duration: TimeInterval { players.map(\.duration).max() ?? 0 }
 
     public func seek(to time: TimeInterval) {
         if isPlaying {
@@ -80,6 +90,22 @@ public final class TwoTrackPlayer: MeetingPlayback {
         players = []
         audio?.removeTemporaryFiles()
         audio = nil
+        status = .loading
+        duration = 0
+        let metadata = await Task.detached(priority: .userInitiated) {
+            let urls = [mic, remote].filter { FileManager.default.fileExists(atPath: $0.path) }
+            let duration = urls.compactMap { url -> TimeInterval? in
+                guard let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 else { return nil }
+                return Double(file.length) / file.processingFormat.sampleRate
+            }.max() ?? 0
+            return (exists: !urls.isEmpty, duration: duration)
+        }.value
+        guard loadID == request else { return }
+        duration = metadata.duration
+        guard metadata.exists else {
+            status = .unavailable
+            return
+        }
         // Keep the original tracks intact. Filtering a long recording must not block the UI.
         let prepared = await Task.detached(priority: .userInitiated) {
             PlaybackAudio.prepare(mic: mic, remote: remote)
@@ -93,6 +119,8 @@ public final class TwoTrackPlayer: MeetingPlayback {
         players.forEach { $0.prepareToPlay() }
         // The longer track ends last; when it does, playback is over.
         players.max { $0.duration < $1.duration }?.delegate = finish
+        duration = players.map(\.duration).max() ?? 0
+        status = players.isEmpty ? .failed : .ready
     }
 
     public func play(from time: TimeInterval) {
