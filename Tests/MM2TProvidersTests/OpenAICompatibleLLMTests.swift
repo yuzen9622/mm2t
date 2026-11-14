@@ -27,6 +27,38 @@ extension Fixture {
         OpenAICompatibleLLM(baseURL: base, apiKey: key, model: "qwen3", session: server.session)
     }
 
+    @Test func listsModelsWithOptionalAuthenticationAndNormalizesBareOrigins() async throws {
+        for address in ["http://gpu.local:8000", "http://gpu.local:8000/", "http://gpu.local:8000/v1", "http://gpu.local:8000/v1/"] {
+            let server = StubServer(status: 200, body: #"{"data":[{"id":"z/model"},{"id":"a:model"},{"id":"z/model"},{"id":" "}]}"#)
+            let provider = OpenAICompatibleLLM(baseURL: URL(string: address)!, apiKey: "test-key", model: "", session: server.session)
+            #expect(try await provider.availableModels() == ["a:model", "z/model"])
+            let request = try #require(server.requests.first)
+            #expect(request.url.path == "/v1/models")
+            #expect(request.method == "GET")
+            #expect(request.headers["Authorization"] == "Bearer test-key")
+            #expect(request.body.isEmpty)
+        }
+        let server = StubServer(status: 200, body: #"{"data":[]}"#)
+        let provider = OpenAICompatibleLLM(baseURL: URL(string: "http://gpu.local/proxy/v1")!, apiKey: nil, model: "", session: server.session)
+        #expect(try await provider.availableModels().isEmpty)
+        #expect(server.requests.first?.url.path == "/proxy/v1/models")
+        #expect(server.requests.first?.headers["Authorization"] == nil)
+    }
+
+    @Test func modelListingReportsUnsupportedAuthenticationAndMalformedResponses() async throws {
+        for status in [404, 405] {
+            let server = StubServer(status: status, body: "{}")
+            await #expect(throws: OpenAICompatibleLLM.ModelListingError.self) { try await llm(server).availableModels() }
+            #expect(server.requests.count == 1)
+        }
+        let unauthorized = StubServer(status: 401, body: "secret should not be displayed")
+        await #expect(throws: ProviderError(.openAICompatible, .invalidCredential)) { try await llm(unauthorized).availableModels() }
+        let malformed = StubServer(status: 200, body: #"{"unexpected":[]}"#)
+        await #expect(throws: ProviderError(.openAICompatible, .malformedResponse)) { try await llm(malformed).availableModels() }
+        let cancelled = StubServer { _ in .failure(.cancelled) }
+        await #expect(throws: CancellationError.self) { try await llm(cancelled).availableModels() }
+    }
+
     @Test func postsAJSONSchemaChatCompletionWithTheBearerToken() async throws {
         let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
         _ = try await llm(server).cleanTranscript(transcript)

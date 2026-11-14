@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 /// Where the four LLM tasks run. `.local` needs the on-device model downloaded first.
@@ -75,7 +76,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     /// Same parsing for the OpenAI-compatible server's API root.
-    public static func openAIBaseURL(from text: String) -> URL? { selfHostedURL(from: text) }
+    public static func openAIBaseURL(from text: String) -> URL? {
+        selfHostedURL(from: text).map(OpenAICompatibleLLM.apiRoot)
+    }
 
     public enum TermSource: Sendable { case manual, learned }
 

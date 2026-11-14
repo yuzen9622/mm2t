@@ -28,12 +28,37 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         baseURL: URL, apiKey: Secret?, model: String, session: URLSession = .shared,
         limits: Limits = Limits(), timeout: TimeInterval = 900
     ) {
-        self.baseURL = baseURL
+        self.baseURL = Self.apiRoot(baseURL)
         self.apiKey = apiKey.flatMap { $0.isEmpty ? nil : $0 }
         self.model = model
         self.session = session
         self.limits = limits
         self.timeout = timeout
+    }
+
+    /// A bare server origin uses the standard /v1 API. Explicit paths are preserved for
+    /// reverse proxies and nonstandard API roots; an existing /v1 is never appended twice.
+    public static func apiRoot(_ url: URL) -> URL {
+        url.path.isEmpty || url.path == "/" ? url.appending(path: "v1") : url
+    }
+
+    public enum ModelListingError: Error { case unsupported }
+
+    /// Lists exact model IDs without running inference. The optional key stays in the header.
+    public func availableModels() async throws -> [String] {
+        var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 15))
+        request.httpMethod = "GET"
+        let response = try await session.send(request, for: .openAICompatible)
+        if response.status == 404 || response.status == 405 { throw ModelListingError.unsupported }
+        guard response.status == 200 else { throw ProviderError(.openAICompatible, Self.failure(response)) }
+        struct Listing: Decodable {
+            struct Model: Decodable { let id: String }
+            let data: [Model]
+        }
+        guard let listing = try? JSONDecoder().decode(Listing.self, from: response.body) else {
+            throw ProviderError(.openAICompatible, .malformedResponse)
+        }
+        return Set(listing.data.map(\.id).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }).sorted()
     }
 
     // MARK: Tasks

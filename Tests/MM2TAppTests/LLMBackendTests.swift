@@ -13,6 +13,13 @@ import Testing
         return try setup.build(settings)
     }
 
+    @Test func serverOriginsDefaultToV1WithoutChangingExplicitAPIRoots() {
+        #expect(AppSettings.openAIBaseURL(from: "http://gpu:8000")?.path == "/v1")
+        #expect(AppSettings.openAIBaseURL(from: "http://gpu:8000/v1")?.path == "/v1")
+        #expect(AppSettings.openAIBaseURL(from: "http://gpu:8000/proxy/v1")?.path == "/proxy/v1")
+        #expect(AppSettings.openAIBaseURL(from: "not a URL") == nil)
+    }
+
     @Test func theOpenAICompatibleBackendNeedsAnEndpointButNoKey() throws {
         let world = try World(keys: false)
         world.credentials.values.update { $0[.elevenLabsAPIKey] = "eleven" }

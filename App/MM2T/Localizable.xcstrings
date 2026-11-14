@@ -411,6 +411,16 @@
         }
       }
     },
+    "Available models": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用模型"
+          }
+        }
+      }
+    },
     "Back": {
       "localizations": {
         "zh-Hant": {
@@ -647,6 +657,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法修改說話者"
+          }
+        }
+      }
+    },
+    "Couldn't load models. Check the server URL and API key, then try again.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法載入模型。請檢查伺服器網址與 API 金鑰後重試。"
           }
         }
       }
@@ -2091,6 +2111,16 @@
         }
       }
     },
+    "Refresh models": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新整理模型"
+          }
+        }
+      }
+    },
     "Regenerate": {
       "localizations": {
         "zh-Hant": {
@@ -2701,6 +2731,16 @@
         }
       }
     },
+    "The server returned no models. You can enter a model ID manually.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器未回傳模型。你可以手動輸入模型 ID。"
+          }
+        }
+      }
+    },
     "The whole browser is recorded. Don't play other audio in it during the meeting.": {
       "localizations": {
         "zh-Hant": {
@@ -2757,6 +2797,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "這場會議太長，超過 %@ 單次能處理的上限。"
+          }
+        }
+      }
+    },
+    "This server does not support model listing. Enter a model ID manually.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此伺服器不支援模型清單，請手動輸入模型 ID。"
           }
         }
       }

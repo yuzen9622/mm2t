@@ -339,7 +339,7 @@ struct SettingsRowView: View {
                     }
                 }
                 if store.settings.cloudLLM == .openAICompatible {
-                    LLMServerFields(store: store)
+                    LLMServerFields(store: store, key: app.setup.field(.openAICompatibleAPIKey))
                     CredentialFieldView(field: app.setup.field(.openAICompatibleAPIKey), setup: app.setup)
                 }
             }
@@ -456,26 +456,153 @@ private struct ServerURLField: View {
 /// Where an OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp) answers, and which model to ask.
 private struct LLMServerFields: View {
     let store: SettingsStore
+    let key: CredentialField
     @State private var url = ""
+    @State private var models: [String] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var refresh = 0
+    @State private var showModels = false
+    @State private var modelFieldWidth: CGFloat = 320
+    @State private var hoveredModel: String?
+
+    private struct Query: Equatable {
+        let url: String
+        let key: String
+        let refresh: Int
+    }
 
     var body: some View {
         FieldBox {
             TextField("Server URL", text: $url, prompt: Text(verbatim: "http://localhost:11434/v1"))
-                .onSubmit(save)
+                .onSubmit { save(); refresh += 1 }
         }
         .onAppear { url = store.settings.openAIBaseURL?.absoluteString ?? "" }
         .onChange(of: url) { save() }
+        .task(id: Query(url: url, key: key.text, refresh: refresh)) { await loadModels() }
         if !url.isEmpty, AppSettings.openAIBaseURL(from: url) == nil {
             Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
         }
         FieldBox {
-            TextField("Model name", text: Binding(get: { store.settings.openAIModel }, set: { store.settings.openAIModel = $0 }),
-                      prompt: Text(verbatim: "qwen2.5:14b"))
+            HStack(spacing: 8) {
+                TextField("Model name", text: Binding(
+                    get: { store.settings.openAIModel }, set: { store.settings.openAIModel = $0 }),
+                    prompt: Text(verbatim: "model-id"))
+                if loading { ProgressView().controlSize(.mini) }
+                Button { showModels.toggle() } label: {
+                    Icon("chevron-right", size: 14)
+                        .rotationEffect(.degrees(90))
+                        .foregroundStyle(showModels ? Palette.orange : Palette.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(showModels ? Palette.orangeSoft : .clear,
+                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(Pressable())
+                .accessibilityLabel("Available models")
+                .help("Available models")
+            }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { modelFieldWidth = $0 }
+        .popover(isPresented: $showModels, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            modelMenu
+        }
+        if let error {
+            Text(verbatim: error).font(Typo.caption).foregroundStyle(Palette.danger)
+        }
+    }
+
+    private var modelMenu: some View {
+        VStack(spacing: 4) {
+            if !models.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(models, id: \.self) { model in
+                            Button {
+                                store.settings.openAIModel = model
+                                showModels = false
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(verbatim: model.hasPrefix("/") ? (model as NSString).lastPathComponent : model)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Icon("check", size: 15)
+                                        .foregroundStyle(Palette.orange)
+                                        .opacity(model == store.settings.openAIModel ? 1 : 0)
+                                }
+                                .padding(.horizontal, 12)
+                                .frame(height: 36)
+                                .background(hoveredModel == model ? Palette.hover : model == store.settings.openAIModel ? Palette.selected : .clear,
+                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(Pressable())
+                            .onHover { hoveredModel = $0 ? model : nil }
+                            .help(model)
+                            .accessibilityLabel(model)
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(models.count) * 38, 228))
+                Divider().padding(.horizontal, 8)
+            }
+            Button {
+                refresh += 1
+            } label: {
+                HStack(spacing: 10) {
+                    Icon("refresh", size: 15)
+                    Text("Refresh models")
+                    Spacer(minLength: 0)
+                    if loading { ProgressView().controlSize(.mini) }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(Pressable())
+            .disabled(AppSettings.openAIBaseURL(from: url) == nil || loading)
+        }
+        .font(Typo.body)
+        .foregroundStyle(Palette.text)
+        .padding(6)
+        .frame(width: modelFieldWidth)
+        .background(Palette.card)
+        .onExitCommand { showModels = false }
     }
 
     private func save() {
         store.settings.openAIBaseURL = AppSettings.openAIBaseURL(from: url)
+    }
+
+    @MainActor private func loadModels() async {
+        models = []
+        error = nil
+        loading = false
+        guard let endpoint = AppSettings.openAIBaseURL(from: url) else { return }
+        let secret = Secret(key.text)
+        do {
+            // Coalesce typing and key edits. SwiftUI cancels the previous request on edits
+            // or dismissal; a late response must not replace the new server's model list.
+            try await Task.sleep(for: .milliseconds(600))
+            loading = true
+            defer { if !Task.isCancelled { loading = false } }
+            let found = try await OpenAICompatibleLLM(baseURL: endpoint, apiKey: secret, model: "").availableModels()
+            try Task.checkCancellation()
+            models = found
+            if found.isEmpty { error = String(localized: "The server returned no models. You can enter a model ID manually.") }
+        } catch is CancellationError {
+            // A newer URL/key or a closed view owns the UI now.
+        } catch {
+            guard !Task.isCancelled else { return }
+            if error is OpenAICompatibleLLM.ModelListingError {
+                self.error = String(localized: "This server does not support model listing. Enter a model ID manually.")
+            } else if let provider = error as? ProviderError {
+                self.error = provider.description
+            } else {
+                self.error = String(localized: "Couldn't load models. Check the server URL and API key, then try again.")
+            }
+        }
     }
 }
 
