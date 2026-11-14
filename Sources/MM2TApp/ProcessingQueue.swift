@@ -39,14 +39,17 @@ public final class ProcessingQueue {
     /// Bumped whenever a meeting document may have changed, so open views reload.
     public private(set) var revision = 0
 
-    /// Called with each meeting a job finished processing, e.g. to learn its vocabulary.
+    /// Called with each meeting a job finished processing.
     @ObservationIgnored public var onCompleted: (@MainActor (Meeting) -> Void)?
     @ObservationIgnored private let makePipeline: @MainActor () throws -> PipelineBuild
+    @ObservationIgnored private let makeLLM: @MainActor () throws -> LLMBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
 
-    public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild) {
+    public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild,
+                makeLLM: @escaping @MainActor () throws -> LLMBuild) {
         self.makePipeline = makePipeline
+        self.makeLLM = makeLLM
     }
 
     /// Rewrites a passage with the configured summary model, outside any job: it changes nothing
@@ -54,6 +57,12 @@ public final class ProcessingQueue {
     public func rewrite(_ text: String, instruction: String) async throws -> String {
         guard case .ready(let pipeline) = try makePipeline() else { throw RewriteUnsupported() }
         return try await pipeline.llm.rewrite(text, instruction: instruction)
+    }
+
+    /// Only the passage explicitly corrected by the user is sent to the selected model.
+    public func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
+        guard case .ready(let llm) = try makeLLM() else { return [] }
+        return try await llm.vocabularyCorrections(from: old, to: new)
     }
 
     /// Everything waiting on setup, deduplicated, in first-seen order.
@@ -75,13 +84,15 @@ public final class ProcessingQueue {
     public func isBusy(_ id: MeetingID) -> Bool { jobs[id]?.isActive ?? false }
 
     /// Returns when this job (and every job queued before it) has finished.
-    public func run(_ operation: ProcessingOperation, on id: MeetingID) async {
+    public func run(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline? = nil,
+                    whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) async {
         guard !isBusy(id) else { return }
         jobs[id] = .queued
         let previous = tail
         let task = Task { @MainActor in
             await previous?.value
-            await self.execute(operation, on: id)
+            let current = await whileValid()
+            await self.execute(operation, on: id, using: current ? prepared : nil)
         }
         tail = task
         await task.value
@@ -95,10 +106,10 @@ public final class ProcessingQueue {
         }
     }
 
-    private func execute(_ operation: ProcessingOperation, on id: MeetingID) async {
+    private func execute(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline?) async {
         let pipeline: MeetingProcessingPipeline
         do {
-            switch try makePipeline() {
+            switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
             case .ready(let ready): pipeline = ready
             case .needsSetup(let issues):
                 jobs[id] = .needsSetup(issues)

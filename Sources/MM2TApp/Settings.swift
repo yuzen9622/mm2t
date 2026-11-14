@@ -24,7 +24,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var selfHostedURL: URL?
     /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
     public private(set) var vocabulary: [String] = []
-    /// The subset of `vocabulary` that mm2t added itself, from a meeting or from a correction.
+    /// The subset of `vocabulary` learned from the user's transcript corrections.
     public private(set) var learnedVocabulary: [String] = []
     /// Learned terms the user deleted, so they are not learned again.
     public private(set) var dismissedVocabulary: [String] = []

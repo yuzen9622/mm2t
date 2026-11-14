@@ -43,10 +43,11 @@ public final class MeetingDetailModel {
     @ObservationIgnored public let playback: (any MeetingPlayback)?
     @ObservationIgnored private var loadedAudio = false
     @ObservationIgnored private let learn: @MainActor (String) -> Void
+    @ObservationIgnored private var correctionRevisions: [CorrectionTarget: UUID] = [:]
     @ObservationIgnored public let todos: TodoStatus?
     @ObservationIgnored public let reminders: RemindersSync?
 
-    /// `learn` receives each term a correction replaced what speech recognition heard with.
+    /// `learn` receives the names and terms corrected in a saved transcript passage.
     public init(id: MeetingID, library: MeetingLibrary, voiceprints: VoiceprintStore, queue: ProcessingQueue,
                 labels: PresentationLabels, playback: (any MeetingPlayback)?,
                 todos: TodoStatus? = nil, reminders: RemindersSync? = nil,
@@ -69,10 +70,12 @@ public final class MeetingDetailModel {
             names = await voiceprints.names()
             people = await voiceprints.allPersons().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             if !loadedAudio, let playback {
-                playback.load(mic: await library.audioURL(meeting, track: .me),
-                              remote: await library.audioURL(meeting, track: .remote))
+                // Queue updates can reenter load while playback prepares its filtered audio.
                 loadedAudio = true
+                await playback.load(mic: await library.audioURL(meeting, track: .me),
+                              remote: await library.audioURL(meeting, track: .remote))
             }
+            await reminders?.fillMissingDeadlines(reminderDrafts())
         } catch {
             errorMessage = String(describing: error)
         }
@@ -167,14 +170,17 @@ public final class MeetingDetailModel {
 
     /// Creates reminders for `rows` (every action item when nil) that do not have one yet.
     public func addToReminders(_ rows: [SourcedRow]? = nil) async {
-        guard let reminders, let meeting, let all = presentation?.summary?.actionItems else { return }
+        await reminders?.add(reminderDrafts(rows))
+    }
+
+    private func reminderDrafts(_ rows: [SourcedRow]? = nil) -> [ReminderDraft] {
+        guard let meeting, let all = presentation?.summary?.actionItems else { return [] }
         let date = meeting.metadata.startedAt.formatted(date: .abbreviated, time: .shortened)
-        let drafts = (rows ?? all).compactMap { row -> ReminderDraft? in
+        return (rows ?? all).compactMap { row -> ReminderDraft? in
             guard let id = todoID(row) else { return nil }
             let owner = row.speakerName.map { "\($0)\n" } ?? ""
-            return ReminderDraft(todoID: id, title: row.text, notes: "\(owner)\(meeting.metadata.title), \(date)")
+            return ReminderDraft(todoID: id, title: row.text, notes: "\(owner)\(meeting.metadata.title), \(date)", due: row.due)
         }
-        await reminders.add(drafts)
     }
 
     public func requestRemindersAccess() async { await reminders?.requestAccess() }
@@ -245,13 +251,13 @@ public final class MeetingDetailModel {
     /// Corrects one line of the raw transcript and learns the term the correction introduced.
     public func edit(_ utterance: UtteranceID, to text: String) async {
         guard let old = meeting?.utterance(utterance)?.text else { return }
-        await editTranscript(from: old, to: text) { try await $0.edit(utterance, in: self.id, to: text) }
+        await editTranscript(from: old, to: text, target: .raw(utterance)) { try await $0.edit(utterance, in: self.id, to: text) }
     }
 
     /// `row` is a row of `presentation.cleaned`.
     public func editCleaned(_ row: SourcedRow, to text: String) async {
         guard let index = presentation?.cleaned?.firstIndex(where: { $0.id == row.id }) else { return }
-        await editTranscript(from: row.text, to: text) { try await $0.editCleaned(paragraph: index, in: self.id, to: text) }
+        await editTranscript(from: row.text, to: text, target: .cleaned(index)) { try await $0.editCleaned(paragraph: index, in: self.id, to: text) }
     }
 
     /// A cleaned paragraph rewritten the way `instruction` asks, for the user to review and save.
@@ -263,15 +269,38 @@ public final class MeetingDetailModel {
         await editTranscript(from: "", to: "") { try await $0.rename(self.id, to: title) }
     }
 
-    private func editTranscript(from old: String, to new: String, _ change: (TranscriptEditing) async throws -> Meeting) async {
+    private enum CorrectionTarget: Hashable {
+        case raw(UtteranceID)
+        case cleaned(Int)
+
+        func text(in meeting: Meeting) -> String? {
+            switch self {
+            case .raw(let id): return meeting.utterance(id)?.text
+            case .cleaned(let index):
+                guard let paragraphs = meeting.outputs.cleaned?.paragraphs, paragraphs.indices.contains(index) else { return nil }
+                return paragraphs[index].text
+            }
+        }
+    }
+
+    private func editTranscript(from old: String, to new: String, target: CorrectionTarget? = nil, _ change: (TranscriptEditing) async throws -> Meeting) async {
         guard canEditSpeakers else { return }
+        let revision = UUID()
+        if let target { correctionRevisions[target] = revision }
         do {
             meeting = try await change(TranscriptEditing(library: library))
-            for term in VocabularyLearning.terms(correcting: old, to: new) { learn(term) }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+            return
         }
+        guard let target, let saved = meeting, let savedText = target.text(in: saved), !old.isEmpty, old != new else { return }
+        // The edit is already durable. A model failure must not undo it or turn into a save error.
+        guard let corrections = try? await queue.vocabularyCorrections(from: old, to: new),
+              let current = try? await library.meeting(id),
+              target.text(in: current) == savedText,
+              correctionRevisions[target] == revision, !Task.isCancelled else { return }
+        for correction in VocabularyLearning.validated(corrections, from: old, to: new) { learn(correction.correct) }
     }
 
     public func dismissError() { errorMessage = nil }

@@ -2,6 +2,7 @@ import Foundation
 import MM2TCore
 import MM2TSystem
 import Observation
+import OSLog
 
 /// The app whose audio becomes the remote track.
 public struct RecordingTarget: Hashable, Sendable {
@@ -101,13 +102,14 @@ public final class RecordingMeters {
 
 @MainActor @Observable
 public final class CaptureController {
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
     /// A meeting the user dismissed stays dismissed until it has been over this long, so the
     /// detector ending and re-detecting one call (a rejoin, a device switch) does not prompt again.
     public static let dismissalCooldown: TimeInterval = 120
     /// How long the capsule counts down after a meeting ends before the recording stops; zero stops at once.
     public static let endCountdown = Duration.seconds(5)
     /// How often a recording in progress is checked for a new piece to transcribe.
-    static let liveInterval = Duration.seconds(15)
+    static let liveInterval = Duration.seconds(2)
 
     public private(set) var state: CaptureState = .idle
     public let meters = RecordingMeters()
@@ -249,7 +251,7 @@ public final class CaptureController {
             meters.reset()
             state = .recording(target)
             liveTask = Task { [weak self] in
-                guard let live = await self?.makeLive(configuration.directory) else { return }
+                guard let live = await self?.makeLive(configuration.directory), !Task.isCancelled else { return }
                 self?.live = live
                 while !Task.isCancelled {
                     try? await Task.sleep(for: Self.liveInterval)
@@ -323,6 +325,7 @@ public final class CaptureController {
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
         guard state.isCapturing, let target = state.target, let session else { return }
+        let started = ContinuousClock.now
         countdown?.task.cancel()
         countdown = nil
         state = .stopping(target)
@@ -336,6 +339,7 @@ public final class CaptureController {
         let id: MeetingID
         do {
             let recording = try await session.stop()
+            await live?.prepareForMove()
             id = try await library.create(recording).id
             try? FileManager.default.removeItem(at: recording.micTrack.deletingLastPathComponent())
         } catch {
@@ -344,6 +348,13 @@ public final class CaptureController {
         }
         state = .idle
         await onRecorded(id, live)
+        let elapsed = started.duration(to: .now).components
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        Self.logger.info("event=stop_to_processing_return elapsed_seconds=\(seconds, privacy: .public) live_enabled=\(live != nil, privacy: .public)")
+    }
+
+    public func liveProgress() async -> LiveProcessingProgress? {
+        await live?.progress()
     }
 
     public func acknowledgeFailure() {

@@ -4,6 +4,27 @@ import MM2TCore
 /// When each character of a transcript line is reached during playback, so the line can light up
 /// as it is spoken. Whitespace is not counted: it is never shown being "sung".
 public enum KaraokeTiming {
+    public enum LineState: Equatable, Sendable {
+        case idle, played, current, upcoming
+    }
+
+    /// Pausing restores the entire transcript, including the unfinished part of the current line.
+    public static func state(of index: Int, current: Int?, isPlaying: Bool) -> LineState {
+        guard isPlaying else { return .idle }
+        guard let current else { return .upcoming }
+        if index == current { return .current }
+        return index < current ? .played : .upcoming
+    }
+
+    public static func currentLine(starts: [TimeInterval], at time: TimeInterval) -> Int? {
+        var low = 0, high = starts.count
+        while low < high {
+            let mid = (low + high) / 2
+            if starts[mid] <= time + 0.05 { low = mid + 1 } else { high = mid }
+        }
+        return low == 0 ? nil : low - 1
+    }
+
     /// One start time per non-whitespace character of `text`. Uses the speech service's word
     /// times when they still spell the text; a line the user corrected, or rewritten text, is
     /// spread evenly over `spans` instead.

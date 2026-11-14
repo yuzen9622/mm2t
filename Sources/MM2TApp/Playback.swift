@@ -1,6 +1,31 @@
 import AVFoundation
 import Foundation
+import MM2TSystem
 import Observation
+
+/// The transcript list observes line changes; only the current lyric and transport observe time.
+@MainActor @Observable
+public final class TranscriptPlayhead {
+    public private(set) var time: TimeInterval = 0
+    public private(set) var duration: TimeInterval = 0
+    public private(set) var isPlaying = false
+    public private(set) var currentLine: Int?
+    @ObservationIgnored private var starts: [TimeInterval] = []
+
+    public init() {}
+
+    public func follow(_ starts: [TimeInterval]) {
+        self.starts = starts
+        currentLine = KaraokeTiming.currentLine(starts: starts, at: time)
+    }
+
+    public func sample(time: TimeInterval, duration: TimeInterval, isPlaying: Bool) {
+        self.time = time
+        self.duration = duration
+        self.isPlaying = isPlaying
+        currentLine = KaraokeTiming.currentLine(starts: starts, at: time)
+    }
+}
 
 /// Plays a meeting's two tracks together.
 @MainActor
@@ -9,7 +34,7 @@ public protocol MeetingPlayback: AnyObject {
     var currentTime: TimeInterval { get }
     /// The longer track's length; 0 before anything loaded.
     var duration: TimeInterval { get }
-    func load(mic: URL, remote: URL)
+    func load(mic: URL, remote: URL) async
     func play(from time: TimeInterval)
     func pause()
     /// Moves the playhead without starting or stopping playback.
@@ -29,9 +54,13 @@ extension MeetingPlayback {
 public final class TwoTrackPlayer: MeetingPlayback {
     public private(set) var isPlaying = false
     @ObservationIgnored private var players: [AVAudioPlayer] = []
+    @ObservationIgnored private var audio: PlaybackAudio?
+    @ObservationIgnored private var loadID = UUID()
     @ObservationIgnored private lazy var finish = FinishObserver { [weak self] in self?.isPlaying = false }
 
     public init() {}
+
+    deinit { audio?.removeTemporaryFiles() }
 
     public var currentTime: TimeInterval { players.first?.currentTime ?? 0 }
     public var duration: TimeInterval { players.map(\.duration).max() ?? 0 }
@@ -44,9 +73,23 @@ public final class TwoTrackPlayer: MeetingPlayback {
         }
     }
 
-    public func load(mic: URL, remote: URL) {
+    public func load(mic: URL, remote: URL) async {
+        let request = UUID()
+        loadID = request
         pause()
-        players = [mic, remote].compactMap { try? AVAudioPlayer(contentsOf: $0) }
+        players = []
+        audio?.removeTemporaryFiles()
+        audio = nil
+        // Keep the original tracks intact. Filtering a long recording must not block the UI.
+        let prepared = await Task.detached(priority: .userInitiated) {
+            PlaybackAudio.prepare(mic: mic, remote: remote)
+        }.value
+        guard loadID == request else {
+            prepared.removeTemporaryFiles()
+            return
+        }
+        audio = prepared
+        players = [prepared.mic, prepared.remote].compactMap { try? AVAudioPlayer(contentsOf: $0) }
         players.forEach { $0.prepareToPlay() }
         // The longer track ends last; when it does, playback is over.
         players.max { $0.duration < $1.duration }?.delegate = finish
@@ -65,6 +108,23 @@ public final class TwoTrackPlayer: MeetingPlayback {
     public func pause() {
         players.forEach { $0.pause() }
         isPlaying = false
+    }
+}
+
+/// Playback needs the same echo-free microphone signal as transcription. Raw files remain the
+/// source of truth, including for older meetings that predate this playback fix.
+struct PlaybackAudio: Sendable {
+    let mic: URL
+    let remote: URL
+    private let temporaryMic: URL?
+
+    static func prepare(mic: URL, remote: URL) -> PlaybackAudio {
+        let cleaned = try? EchoRemover().clean(mic: mic, remote: remote)
+        return PlaybackAudio(mic: cleaned?.audio ?? mic, remote: remote, temporaryMic: cleaned?.audio)
+    }
+
+    func removeTemporaryFiles() {
+        if let temporaryMic { try? FileManager.default.removeItem(at: temporaryMic) }
     }
 }
 
