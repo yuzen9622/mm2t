@@ -41,7 +41,7 @@ App 沒有後端，任何放進 App bundle 的 client secret 都能被取出，�
 
 ## UI 字串翻譯
 
-UI 字串以英文寫在程式碼裡，繁體中文翻譯放在 `App/Tools/zh-Hant.json`。建置之後執行下面的指令，它會重新產生 `App/MM2T/Localizable.xcstrings`，並在有字串缺翻譯或有翻譯沒用到時回傳非零：
+UI 字串以英文寫在程式碼裡，繁體中文翻譯直接維護在 `App/MM2T/Localizable.xcstrings`，這是唯一的 UI 翻譯來源。系統權限提示另由 `App/MM2T/InfoPlist.xcstrings` 管理。建置之後執行下面的唯讀檢查，它會比對編譯器擷取的字串，並在缺少繁體中文翻譯、翻譯為空或未標記為 `translated`，或 catalog 有未使用的 key 時回傳非零，不會覆寫翻譯檔：
 
 ```bash
 python3 App/Tools/strings.py .build/xcode

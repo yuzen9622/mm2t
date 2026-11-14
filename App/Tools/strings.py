@@ -1,8 +1,8 @@
-"""Builds MM2T/Localizable.xcstrings from the keys the compiler extracted and Tools/zh-Hant.json.
+"""Validates MM2T/Localizable.xcstrings against compiler-extracted keys without modifying it.
 
 Run after an Xcode build (SWIFT_EMIT_LOC_STRINGS=YES):
     python3 App/Tools/strings.py <derived-data-path>
-Exits non-zero, listing them, when an extracted key has no translation or a translation is unused.
+Exits non-zero when a key lacks a completed zh-Hant translation or a catalog key is unused.
 """
 import glob
 import json
@@ -26,19 +26,14 @@ for source in sorted(sources):
 if not keys:
     sys.exit(f"no .stringsdata under {derived}; build the app first")
 
-translations = json.loads((here / "zh-Hant.json").read_text())
-missing = sorted(keys - translations.keys())
-unused = sorted(translations.keys() - keys)
-catalog = {
-    "sourceLanguage": "en",
-    "version": "1.0",
-    "strings": {
-        key: {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": translations[key]}}}}
-        for key in sorted(keys) if key in translations
-    },
-}
-(here.parent / "MM2T/Localizable.xcstrings").write_text(json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-print(f"{len(catalog['strings'])} strings written")
+catalog = json.loads((here.parent / "MM2T/Localizable.xcstrings").read_text())["strings"]
+missing = []
+for key in sorted(keys):
+    unit = catalog.get(key, {}).get("localizations", {}).get("zh-Hant", {}).get("stringUnit", {})
+    if unit.get("state") != "translated" or not unit.get("value", "").strip():
+        missing.append(key)
+unused = sorted(catalog.keys() - keys)
+print(f"{len(keys)} extracted strings checked")
 for key in missing:
     print(f"missing translation: {key!r}")
 for key in unused:
