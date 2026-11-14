@@ -12,7 +12,6 @@ let package = Package(
         .library(name: "MM2TDiarization", targets: ["MM2TDiarization"]),
         .library(name: "MM2TLocal", targets: ["MM2TLocal"]),
         .library(name: "MM2TApp", targets: ["MM2TApp"]),
-        .executable(name: "mm2t-probe", targets: ["mm2t-probe"]),
     ],
     dependencies: [
         // Tools 6.2 is what lets the trait list drop FluidAudio's NemoTextProcessing binary and TTS code.
@@ -34,7 +33,6 @@ let package = Package(
             url: "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-xcframework.zip",
             checksum: "22644a57aad53f4a0a440860607c6d2f1da9e683f78cf03266569c0030d2dbd7"),
         .target(name: "MM2TApp", dependencies: ["MM2TCore", "MM2TProviders", "MM2TSystem", "MM2TDiarization", "MM2TLocal"]),
-        .executableTarget(name: "mm2t-probe", dependencies: ["MM2TSystem"]),
         .testTarget(name: "MM2TCoreTests", dependencies: ["MM2TCore"]),
         .testTarget(name: "MM2TProvidersTests", dependencies: ["MM2TProviders"]),
         .testTarget(name: "MM2TSystemTests", dependencies: ["MM2TSystem"]),

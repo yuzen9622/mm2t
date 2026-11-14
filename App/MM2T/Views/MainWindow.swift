@@ -81,7 +81,7 @@ struct MainWindow: View {
     var body: some View {
         let navigation = MainNavigation.shared
         Group {
-            if app.needsOnboarding, !DebugSnapshot.isRequested, !WindowSharing.allowsCapture {
+            if app.needsOnboarding {
                 SetupGate()
             } else {
             HStack(spacing: 0) {
@@ -112,7 +112,6 @@ struct MainWindow: View {
         .onAppear {
             app.meetings.meLabel = Copy.presentationLabels.me
             app.dashboard.meLabel = Copy.presentationLabels.me
-            DebugSnapshot.mainWindowAppeared(select: { show(.meetings, meeting: $0) }, show: { show($0) })
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }

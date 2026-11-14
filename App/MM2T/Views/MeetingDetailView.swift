@@ -86,7 +86,6 @@ struct MeetingDetailView: View {
         }
         .onChange(of: model.playback?.duration) { sample() }
         .onChange(of: model.playback?.status) { sample() }
-        .onAppear { DebugSnapshot.detailAppeared(model) }
         .onDisappear { model.playback?.pause() }
         .alert("Couldn't change speakers", isPresented: .init(get: { model.errorMessage != nil }, set: { if !$0 { model.dismissError() } })) {
         } message: {

@@ -170,9 +170,6 @@ struct SettingsDialog: View {
         .onAppear { app.setup.recheck() }
         .onChange(of: app.settings.settings) { app.setup.recheck() }
         .onChange(of: searching) { if searching { showLicenses = false } }
-        .onChange(of: SnapshotStage.shared.settingsQuery, initial: true) { _, staged in
-            if let staged { query = staged }
-        }
     }
 
     private var sectionList: some View {
@@ -688,7 +685,7 @@ struct CredentialFieldView: View {
 
     /// A key that passed its check and has not been changed since shows a check mark where Save was.
     private var verified: Bool {
-        (field.state == .checked(.valid) && !edited) || SnapshotStage.shared.keysVerified
+        field.state == .checked(.valid) && !edited
     }
 
     /// Saving and checking are one step: a key that was stored is a key that was tried.

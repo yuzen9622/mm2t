@@ -62,7 +62,6 @@ Sources/
   MM2TSystem/      macOS 系統邊界：Core Audio 錄音、會議偵測訊號、權限
   MM2TDiarization/ 本機說話者分群與聲紋向量（FluidAudio）
   MM2TLocal/       本機轉錄與本機 LLM（開發中）
-  mm2t-probe/      診斷用 CLI：權限、音訊程序、錄音自我測試
 server/            自架轉錄伺服器（Python、FastAPI、faster-whisper）
 Evaluation/        說話者分群的評測資料與腳本
 ```

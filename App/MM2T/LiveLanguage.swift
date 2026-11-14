@@ -17,9 +17,8 @@ final class LiveLanguage {
     private(set) var revision = 0
     private(set) var locale = Locale.current
 
-    /// `persist: false` switches this run only (debug snapshots must not touch the user's defaults).
-    func apply(_ language: AppLanguage, persist: Bool = true) {
-        if persist { language.save(in: .standard) }
+    func apply(_ language: AppLanguage) {
+        language.save(in: .standard)
         let code = language == .system ? Self.systemLocalization : language.rawValue
         LocalizedMainBundle.use(code)
         locale = Locale(identifier: code)

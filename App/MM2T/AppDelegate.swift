@@ -13,12 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
-            app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
-                ? AppController.live(defaults: DebugRecorder.defaults, credentials: NoCredentials(), signedInPage: signedIn,
-                                     calendars: DebugSnapshot.sampleCalendars,
-                                     recorder: Self.recorder, permissions: Self.permissions)
-                : AppController.live(defaults: DebugRecorder.defaults, credentials: Self.credentials, signedInPage: signedIn,
-                                     recorder: Self.recorder, permissions: Self.permissions)
+            app = try AppController.live(defaults: .standard, credentials: Self.credentials, signedInPage: signedIn,
+                                         recorder: LiveRecorder(), permissions: LivePermissions())
             startupError = nil
         } catch {
             app = nil
@@ -27,30 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
-    private static var recorder: any Recorder {
-        #if DEBUG
-        DebugBenchmark.recorderOverride ?? LiveRecorder()
-        #else
-        LiveRecorder()
-        #endif
-    }
-
-    private static var permissions: any PermissionsProviding {
-        #if DEBUG
-        DebugBenchmark.permissionsOverride ?? LivePermissions()
-        #else
-        LivePermissions()
-        #endif
-    }
-
-    /// Debug builds keep their own keychain items. They are signed differently from the release app,
-    /// so reading the release app's items made macOS ask for the login keychain password on every
-    /// launch. MM2T_KEYCHAIN_SERVICE points a debug run at a throwaway service for experiments.
+    /// Different debug signatures use a separate service to avoid repeated login keychain prompts.
     private static var credentials: KeychainCredentialStore {
         #if DEBUG
-        let service = ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_SERVICE"]
-            ?? KeychainCredentialStore.defaultService + ".debug"
-        return KeychainCredentialStore(service: service)
+        return KeychainCredentialStore(service: KeychainCredentialStore.defaultService + ".debug")
         #else
         return KeychainCredentialStore()
         #endif
@@ -60,27 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowSharing.install(settings: app?.settings)
         guard let app else { return }
         floating = FloatingPanelController(app: app)
-        DebugRecorder.start(app: app)
-        #if DEBUG
-        // Exercises the live language switch: snapshots taken after it show whether every string followed.
-        if let code = ProcessInfo.processInfo.environment["MM2T_SWITCH_LANGUAGE"], let language = AppLanguage(rawValue: code) {
-            LiveLanguage.shared.apply(language, persist: false)
-        }
-        if DebugSnapshot.isRequested {
-            Task { await app.launch(watchMeetings: false) }
-            DebugSnapshot.run(app: app)
-            return
-        }
-        #endif
-        #if DEBUG
-        if DebugBenchmark.isRequested {
-            Task {
-                await app.launch(watchMeetings: false)
-                DebugBenchmark.run(app: app)
-            }
-            return
-        }
-        #endif
         Updates.start()
         Task { await app.launch() }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
@@ -88,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup comes first: the main window shows nothing else until it is finished.
         Task {
             await app.enrollment.refresh()
-            if app.needsOnboarding, !WindowSharing.allowsCapture { WindowOpener.open(WindowID.onboarding) }
+            if app.needsOnboarding { WindowOpener.open(WindowID.onboarding) }
         }
     }
 
