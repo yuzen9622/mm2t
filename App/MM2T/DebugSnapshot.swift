@@ -36,11 +36,20 @@ enum DebugSnapshot {
         guard let directory else { return }
         Task {
             var report: [String: Any] = [:]
+            savePersonArtwork(to: directory)
+            if ProcessInfo.processInfo.environment["MM2T_SNAPSHOT_PEOPLE_ONLY"] == "1" {
+                return finish(report, in: directory)
+            }
             WindowOpener.open(WindowID.main)
             await waitFor { selectMeeting != nil && !app.meetings.rows.isEmpty }
             guard let meeting = app.meetings.rows.first(where: { $0.status == .completed }) else {
                 report["error"] = "no completed meeting in \(app.paths.meetings.path)"
                 return finish(report, in: directory)
+            }
+            if ProcessInfo.processInfo.environment["MM2T_PLAYER_VERIFY"] == "1" {
+                selectMeeting?(meeting.id)
+                await verifyPlayer(in: directory)
+                return
             }
             try? await Task.sleep(for: .milliseconds(1800))
             save(window(titled: true), to: directory.appending(path: "main-home.png"))
@@ -91,6 +100,79 @@ enum DebugSnapshot {
             app.capture.dismiss()
             finish(report, in: directory)
         }
+        #endif
+    }
+
+    private static func verifyPlayer(in directory: URL) async {
+        #if DEBUG
+        await waitFor { detail?.presentation != nil }
+        guard let detail, let playback = detail.playback else {
+            return finish(["error": "meeting detail did not open"], in: directory)
+        }
+        detail.selectedView = .raw
+        try? await Task.sleep(for: .milliseconds(100))
+        var report: [String: Any] = ["initialStatus": String(describing: playback.status)]
+        let sampleText = "播放中的文字會輕輕上浮，Apple Music style words retain their wrapping and selection。"
+        let sampleLine = LyricLine(id: "motion-check", speakerName: "", start: 0, text: sampleText,
+                                   isMarkdown: false, spans: [TimeRange(start: 0, end: 20)])
+        var heights: [Double] = []
+        for time in [0.0, 0.15, 0.3, 1.15, 3.15] {
+            var text = AttributedString(sampleText)
+            let karaoke = Karaoke(line: sampleLine, now: time)
+            _ = karaoke.paint(&text, starts: karaoke.starts(sampleText), from: 0)
+            let host = NSHostingView(rootView: KaraokeText(text: text).font(Typo.reading)
+                .lineSpacing(Typo.readingLineSpacing).fixedSize(horizontal: false, vertical: true).frame(width: 300))
+            heights.append(host.fittingSize.height)
+        }
+        report["lyricHeights"] = heights
+        let glyph = LyricLine(id: "rise-check", speakerName: "", start: 0, text: "字",
+                              isMarkdown: false, spans: [TimeRange(start: 0, end: 1)])
+        for (index, time) in [0.0, 0.25, 0.5, 0.75, 1.0, 1.5].enumerated() {
+            var text = AttributedString(glyph.text)
+            let karaoke = Karaoke(line: glyph, now: time)
+            _ = karaoke.paint(&text, starts: karaoke.starts(glyph.text), from: 0)
+            text.foregroundColor = .white
+            render(KaraokeText(text: text).font(.system(size: 32))
+                .frame(width: 100, height: 80).background(.black),
+                   to: directory.appending(path: "glyph-rise-\(index).png"))
+        }
+        save(window(titled: true), to: directory.appending(path: "player-entry.png"))
+        for _ in 0..<2400 {
+            if playback.status != .loading { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        report["status"] = String(describing: playback.status)
+        report["duration"] = playback.duration
+        guard playback.status == .ready else { return finish(report, in: directory) }
+        playback.seek(to: 1)
+        playback.play(from: 1)
+        for index in 0..<8 {
+            try? await Task.sleep(for: .milliseconds(150))
+            save(window(titled: true), to: directory.appending(path: "player-playing-\(index).png"))
+        }
+        playback.pause()
+        report["pausedTime"] = playback.currentTime
+        try? await Task.sleep(for: .milliseconds(150))
+        save(window(titled: true), to: directory.appending(path: "player-paused.png"))
+        if let main = window(titled: true) {
+            let previousAppearance = main.appearance
+            main.appearance = NSAppearance(named: .aqua)
+            try? await Task.sleep(for: .milliseconds(200))
+            save(main, to: directory.appending(path: "player-light.png"))
+            main.appearance = previousAppearance
+        }
+        detail.selectedView = .cleaned
+        playback.play(from: 1)
+        try? await Task.sleep(for: .milliseconds(600))
+        save(window(titled: true), to: directory.appending(path: "player-cleaned.png"))
+        playback.pause()
+        playback.seek(to: max(0, playback.duration - 0.2))
+        playback.play(from: playback.currentTime)
+        try? await Task.sleep(for: .milliseconds(700))
+        report["stoppedAtEnd"] = !playback.isPlaying
+        save(window(titled: true), to: directory.appending(path: "player-end.png"))
+        playback.pause()
+        finish(report, in: directory)
         #endif
     }
 
@@ -352,6 +434,31 @@ enum DebugSnapshot {
         }
         render(CalendarSourceList(model: app.dashboard).frame(width: 308).padding(16).background(Palette.card),
                to: directory.appending(path: "calendar-sources.png"))
+        #endif
+    }
+
+    private static func savePersonArtwork(to directory: URL) {
+        #if DEBUG
+        let ids = (1...4).map { PersonID(UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", $0))!) }
+        for scheme in [ColorScheme.light, .dark] {
+            let label = scheme == .dark ? "dark" : "light"
+            for width in [440.0, 760.0] {
+                let view = VStack(spacing: 10) {
+                    ForEach(Array(ids.enumerated()), id: \.element) { index, id in
+                        PersonCard(id: id, name: index == 2 ? "示意人物 C・跨部門專案協作與研究負責人" : "示意人物 \(index + 1)",
+                                   count: index == 3 ? 0 : 12, channels: index == 1 ? [.room] : [.room, .call],
+                                   rename: {}, delete: {})
+                    }
+                    PersonCard(id: ids[0], name: "改名與新增樣本後・同一人物", count: 24,
+                               channels: [.room, .call], rename: {}, delete: {})
+                }
+                .padding(24)
+                .frame(width: width)
+                .background(Palette.window)
+                .environment(\.colorScheme, scheme)
+                render(view, to: directory.appending(path: "people-artwork-\(label)-\(Int(width)).png"))
+            }
+        }
         #endif
     }
 
