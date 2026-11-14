@@ -1,6 +1,7 @@
 import AppKit
 import MM2TApp
 import MM2TProviders
+import MM2TSystem
 import Observation
 
 @MainActor
@@ -14,14 +15,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
             app = try DebugSnapshot.isRequested || WindowSharing.allowsCapture
                 ? AppController.live(defaults: DebugRecorder.defaults, credentials: NoCredentials(), signedInPage: signedIn,
-                                     calendars: DebugSnapshot.sampleCalendars)
-                : AppController.live(defaults: DebugRecorder.defaults, credentials: Self.credentials, signedInPage: signedIn)
+                                     calendars: DebugSnapshot.sampleCalendars,
+                                     recorder: Self.recorder, permissions: Self.permissions)
+                : AppController.live(defaults: DebugRecorder.defaults, credentials: Self.credentials, signedInPage: signedIn,
+                                     recorder: Self.recorder, permissions: Self.permissions)
             startupError = nil
         } catch {
             app = nil
             startupError = String(describing: error)
         }
         super.init()
+    }
+
+    private static var recorder: any Recorder {
+        #if DEBUG
+        DebugBenchmark.recorderOverride ?? LiveRecorder()
+        #else
+        LiveRecorder()
+        #endif
+    }
+
+    private static var permissions: any PermissionsProviding {
+        #if DEBUG
+        DebugBenchmark.permissionsOverride ?? LivePermissions()
+        #else
+        LivePermissions()
+        #endif
     }
 
     /// Debug builds keep their own keychain items. They are signed differently from the release app,
@@ -55,8 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         #if DEBUG
         if DebugBenchmark.isRequested {
-            Task { await app.launch(watchMeetings: false) }
-            DebugBenchmark.run(app: app)
+            Task {
+                await app.launch(watchMeetings: false)
+                DebugBenchmark.run(app: app)
+            }
             return
         }
         #endif
