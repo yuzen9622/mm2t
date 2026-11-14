@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 public enum SpeakerSeparationError: Error, Equatable {
     /// Re-running separation needs a finished meeting; a failed one resumes with `process` instead.
@@ -8,6 +9,7 @@ public enum SpeakerSeparationError: Error, Equatable {
 /// Turns a recorded meeting into a transcript with speakers and LLM outputs.
 /// Every step persists its result before the next starts, so a retry resumes at the failed step.
 public struct MeetingProcessingPipeline: Sendable {
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
     public let library: MeetingLibrary
     public let voiceprints: VoiceprintStore
     public let diarizer: (any Diarizer)?
@@ -18,9 +20,11 @@ public struct MeetingProcessingPipeline: Sendable {
     public let llm: any LLMProvider
     public let thresholds: MatchThresholds
     public let vocabulary: [String]
-    /// Whether the two tracks are transcribed at once, and name inference and the three generated
-    /// views written at once. Right for hosted services; an on-device model has one set of weights.
+    /// Whether name inference and the three generated views run at once. Hosted LLMs can do so
+    /// even when speech recognition has a local fallback; an on-device LLM stays serial.
     public let runsConcurrently: Bool
+    /// Independent of LLM execution: a speech chain that may reach a local model stays serial.
+    public let transcribesConcurrently: Bool
     /// Removes the speakers' echo of the remote track from the mic track before it is transcribed
     /// and separated. nil leaves the mic as recorded.
     public let micCleaner: (any MicCleaner)?
@@ -36,9 +40,11 @@ public struct MeetingProcessingPipeline: Sendable {
         thresholds: MatchThresholds,
         vocabulary: [String],
         runsConcurrently: Bool = false,
+        transcribesConcurrently: Bool? = nil,
         micCleaner: (any MicCleaner)? = nil
     ) {
         self.runsConcurrently = runsConcurrently
+        self.transcribesConcurrently = transcribesConcurrently ?? runsConcurrently
         self.micCleaner = micCleaner
         self.library = library
         self.voiceprints = voiceprints
@@ -49,6 +55,71 @@ public struct MeetingProcessingPipeline: Sendable {
         self.llm = llm
         self.thresholds = thresholds
         self.vocabulary = vocabulary
+    }
+
+    /// Recording snapshots are private drafts. They warm the same provider instance that will
+    /// finish this meeting, but never persist an incomplete meeting or overwrite a user's edits.
+    public func recordingDraft(transcription: Transcription, diarizations: [Track: Diarization],
+                               echo: EchoProfile?, metadata: MeetingMetadata, highlights: [Highlight]) async -> Meeting {
+        var meeting = Meeting(id: MeetingID(), metadata: metadata,
+                              audio: RecordingAudio(micFile: "mic.wav", remoteFile: "remote.wav"), highlights: highlights)
+        meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
+        await diarize(&meeting, recorded: diarizations, echo: echo)
+        await matchVoiceprints(&meeting)
+        align(&meeting)
+        // A continuing speaker may extend the last utterance. Only a closed prefix is offered
+        // to rolling summaries, so the next snapshot can refer to exactly the same source IDs.
+        var closedThrough = max(0, metadata.duration - Alignment.maxPause)
+        if let open = meeting.utterances.firstIndex(where: { $0.range.end > closedThrough }) {
+            closedThrough = min(closedThrough, meeting.utterances[open].range.start)
+            meeting.utterances = Array(meeting.utterances.prefix(open))
+        }
+        // This private draft covers confirmed silence too; last spoken word time alone cannot
+        // express how far background work has caught up during a quiet part of the meeting.
+        meeting.metadata.duration = closedThrough
+        meeting.status = .pending(next: .inferNames)
+        return meeting
+    }
+
+    /// Speculative generation only warms successful, exact-input responses. A final changed
+    /// transcript, speaker assignment, highlight or date necessarily requests a fresh result.
+    public func precomputeRecording(_ draft: Meeting) async -> Bool {
+        guard runsConcurrently else { return false }
+        guard !draft.utterances.isEmpty else { return true }
+        let generation = withLLM(await llm.forGeneration())
+        return await withTaskGroup(of: Bool.self) { group in
+            for step in ProcessingStep.allCases where step >= .inferNames {
+                group.addTask {
+                    var copy = draft
+                    do { try await generation.run(step, on: &copy); return true }
+                    catch { return false }
+                }
+            }
+            var succeeded = true
+            for await result in group { succeeded = succeeded && result }
+            return succeeded
+        }
+    }
+
+    /// Installs only finalized audio-derived results; generated outputs still run through the
+    /// normal completion/error path with the actual saved recording's metadata and highlights.
+    public func attachRecording(_ transcription: Transcription, diarizations: [Track: Diarization],
+                                echo: EchoProfile?, to id: MeetingID) async throws {
+        var meeting = try await library.meeting(id)
+        guard meeting.status == .pending(next: .transcribe) else { return }
+        meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
+        await diarize(&meeting, recorded: diarizations, echo: echo)
+        await matchVoiceprints(&meeting)
+        align(&meeting)
+        meeting.status = .pending(next: .inferNames)
+        try await library.save(meeting)
+    }
+
+    public func withLLM(_ provider: any LLMProvider) -> MeetingProcessingPipeline {
+        MeetingProcessingPipeline(library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
+            diarizationOrder: diarizationOrder, transcription: transcription, llm: provider, thresholds: thresholds,
+            vocabulary: vocabulary, runsConcurrently: runsConcurrently, transcribesConcurrently: transcribesConcurrently,
+            micCleaner: micCleaner)
     }
 
     /// Runs from the meeting's resume step to the end. A step failure is recorded in
@@ -90,13 +161,14 @@ public struct MeetingProcessingPipeline: Sendable {
     private func generate(from first: ProcessingStep, on meeting: inout Meeting) async throws {
         let steps = ProcessingStep.allCases.filter { $0 >= first }
         let start = meeting
+        let generation = withLLM(await llm.forGeneration())
         var failures: [ProcessingStep: String] = [:]
         await withTaskGroup(of: (ProcessingStep, Result<Meeting, any Error>).self) { group in
             for step in steps {
                 group.addTask {
                     var copy = start
                     do {
-                        try await run(step, on: &copy)
+                        try await generation.run(step, on: &copy)
                         return (step, .success(copy))
                     } catch {
                         return (step, .failure(error))
@@ -149,6 +221,18 @@ public struct MeetingProcessingPipeline: Sendable {
     }
 
     private func run(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
+        let started = ContinuousClock.now
+        var succeeded = false
+        defer {
+            let elapsed = started.duration(to: .now).components
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            Self.logger.info("event=processing_step step=\(step.rawValue, privacy: .public) elapsed_seconds=\(seconds, privacy: .public) succeeded=\(succeeded, privacy: .public)")
+        }
+        try await perform(step, on: &meeting)
+        succeeded = true
+    }
+
+    private func perform(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
         switch step {
         case .transcribe:
             let names = await voiceprints.spokenNames()
@@ -159,7 +243,7 @@ public struct MeetingProcessingPipeline: Sendable {
             let heardURL = cleaned?.audio ?? micURL
             let remote: TrackTranscript
             var me: TrackTranscript
-            if runsConcurrently {
+            if transcribesConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
                 async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
                 async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: true)
@@ -211,13 +295,20 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.outputs.cleaned = try await llm.cleanTranscript(transcript).inTraditionalChinese
 
         case .digestPerPerson:
-            meeting.outputs.digests = try await llm.digestPerPerson(llmTranscript(meeting)).map(\.inTraditionalChinese)
+            var transcript = llmTranscript(meeting)
+            let names = await voiceprints.spokenNames()
+            transcript.glossary = names + vocabulary.filter { !names.contains($0) }
+            meeting.outputs.digests = try await llm.digestPerPerson(transcript).map(\.inTraditionalChinese)
 
         case .summarize:
-            let transcript = llmTranscript(meeting)
+            var transcript = llmTranscript(meeting)
+            let names = await voiceprints.spokenNames()
+            transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             let summary = try await llm.summarize(SummaryRequest(
                 transcript: transcript,
-                prioritized: transcript.utterances.filter(\.isHighlighted))).inTraditionalChinese
+                prioritized: transcript.utterances.filter(\.isHighlighted),
+                meetingStartedAt: meeting.metadata.startedAt,
+                timeZoneIdentifier: meeting.metadata.timeZoneIdentifier ?? TimeZone.current.identifier)).inTraditionalChinese
             meeting.outputs.summary = summary
             meeting.outputs.isStale = false
             // The recorder can only name a meeting after its app ("Google Meet") or "Recording".
@@ -258,11 +349,16 @@ public struct MeetingProcessingPipeline: Sendable {
 
     /// Never fails: when every source is unavailable or throws, the meeting keeps its transcript
     /// under one unnamed speaker and records why, so the user can re-run separation later.
-    private func diarize(_ meeting: inout Meeting) async {
+    private func diarize(_ meeting: inout Meeting, recorded: [Track: Diarization]? = nil, echo: EchoProfile? = nil) async {
         guard let transcription = meeting.transcription else { preconditionFailure("diarize before transcribe") }
         let track: Track = transcription.remote.words.isEmpty && !transcription.me.words.isEmpty ? .me : .remote
         let remote = track == .me ? transcription.me : transcription.remote
-        let separated = await separation(of: remote, track: library.audioURL(meeting, track: track))
+        let separated: (segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]], attribution: SpeakerAttribution)
+        if let heard = recorded?[track] {
+            separated = (heard.segments, heard.embeddings, heard.briefEmbeddings, .local(overlaps: heard.overlaps))
+        } else {
+            separated = await separation(of: remote, track: library.audioURL(meeting, track: track))
+        }
         let channel: VoiceChannel = track == .me ? .room : .call
         let ids = apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
                         to: &meeting)
@@ -277,7 +373,14 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.remoteSegments = [SpeakerSegment(speaker: id, range: TimeRange(start: first.range.start, end: last.range.end))]
         }
         meeting.micSegments = nil
-        if track == .remote, !transcription.me.words.isEmpty { await separateMic(&meeting) }
+        if track == .remote, !transcription.me.words.isEmpty {
+            if let heard = recorded?[.me] {
+                let enrolled = await voiceprints.user() != nil
+                if echo != nil || enrolled { await applyMic(heard, echo: echo, to: &meeting) }
+            } else {
+                await separateMic(&meeting)
+            }
+        }
         if track == .me {
             let brief = Dictionary(separated.brief.compactMap { cluster, vectors in ids[cluster].map { ($0, vectors) } },
                                    uniquingKeysWith: +)
@@ -291,7 +394,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// enrollment and every other voice becomes a speaker of its own. Without a local model, or
     /// when it throws, every mic word stays the user's.
     private func separateMic(_ meeting: inout Meeting) async {
-        guard let diarizer, let transcription = meeting.transcription else { return }
+        guard let diarizer, meeting.transcription != nil else { return }
         let enrolled = await voiceprints.user() != nil
         let mic = await library.audioURL(meeting, track: .me), remote = await library.audioURL(meeting, track: .remote)
         let cleaned = try? micCleaner?.clean(mic: mic, remote: remote)
@@ -299,12 +402,17 @@ public struct MeetingProcessingPipeline: Sendable {
         guard enrolled || cleaned != nil,
               let heard = try? await diarizer.diarize(track: cleaned?.audio ?? mic) else { return }
 
+        await applyMic(heard, echo: cleaned?.echo, to: &meeting)
+    }
+
+    private func applyMic(_ heard: Diarization, echo: EchoProfile?, to meeting: inout Meeting) async {
+        guard let transcription = meeting.transcription else { return }
         var clusters: [ClusterID] = []
         for segment in heard.segments.sorted(by: { $0.range.start < $1.range.start })
         where !clusters.contains(segment.cluster) {
             clusters.append(segment.cluster)
         }
-        if let echo = cleaned?.echo {
+        if let echo {
             let played = Set(clusters.filter { cluster in
                 echo.isEcho(heard.segments.filter { $0.cluster == cluster }.map(\.range))
             })

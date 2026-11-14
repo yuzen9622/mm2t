@@ -238,15 +238,29 @@ public struct SummaryRequest: Hashable, Sendable {
     public let transcript: LLMTranscript
     /// Highlighted utterances, listed first so the summary covers them.
     public let prioritized: [LLMUtterance]
+    public let meetingStartedAt: Date?
+    public let timeZoneIdentifier: String
+
+    public init(transcript: LLMTranscript, prioritized: [LLMUtterance], meetingStartedAt: Date? = nil,
+                timeZoneIdentifier: String = TimeZone.current.identifier) {
+        self.transcript = transcript
+        self.prioritized = prioritized
+        self.meetingStartedAt = meetingStartedAt
+        self.timeZoneIdentifier = timeZoneIdentifier
+    }
 }
 
 public protocol LLMProvider: Sendable {
+    /// Pins completed background context once for a group of concurrently generated outputs.
+    func forGeneration() async -> any LLMProvider
     func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess]
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript
     func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest]
     func summarize(_ request: SummaryRequest) async throws -> Summary
     /// One passage of the cleaned transcript rewritten the way `instruction` asks ("make it more polite").
     func rewrite(_ text: String, instruction: String) async throws -> String
+    /// Learns only names and terminology the user actually corrected in this passage.
+    func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection]
 }
 
 public struct RewriteUnsupported: Error, Sendable {
@@ -255,4 +269,9 @@ public struct RewriteUnsupported: Error, Sendable {
 
 extension LLMProvider {
     public func rewrite(_ text: String, instruction: String) async throws -> String { throw RewriteUnsupported() }
+}
+
+public extension LLMProvider {
+    func forGeneration() async -> any LLMProvider { self }
+    func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] { [] }
 }

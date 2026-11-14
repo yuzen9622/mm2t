@@ -43,7 +43,7 @@ extension Summary {
             headline: headline.map(TraditionalChinese.convert), title: title.map(TraditionalChinese.convert),
             terms: terms?.map(TraditionalChinese.convert),
             decisions: decisions.map(\.inTraditionalChinese), discussionPoints: discussionPoints.map(\.inTraditionalChinese),
-            actionItems: actionItems.map { .init(text: TraditionalChinese.convert($0.text), owner: $0.owner, sources: $0.sources) })
+            actionItems: actionItems.map { .init(text: TraditionalChinese.convert($0.text), owner: $0.owner, sources: $0.sources, due: $0.due) })
     }
 }
 
