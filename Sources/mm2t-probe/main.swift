@@ -25,6 +25,8 @@ usage: mm2t-probe <command> [options]
   tap-selftest [--seconds N]        Plays a 440 Hz tone from a helper inside a throwaway app bundle and
                                     a 1000 Hz decoy from a separate process, taps only the app, and
                                     checks the remote track has the tone but not the decoy.
+      --output-uid UID              Play the target tone on this device without changing the default.
+      --out DIR                     Keep the helper and recordings in a new directory.
   echo-selftest --out DIR          Debug builds: plays two short noise bursts, with no microphone
                                     or cloud processing; saves the reference, per-process capture,
                                     global and relay-excluded captures, and device metadata (~20 s).
@@ -109,9 +111,13 @@ func runMain(_ body: @escaping @MainActor () async throws -> Void) -> Never {
         try Probe.recover(URL(filePath: path))
     case "play-tone":
         guard let path = arguments.first else { exit(2) }
-        runMain { try await ToneFixture.playFile(path) }
+        runMain { try await ToneFixture.playFile(path, outputUID: option("--output-uid")) }
     case "tap-selftest":
-        runMain { try await Probe.tapSelfTest(seconds: option("--seconds").flatMap(Double.init) ?? 6) }
+        runMain {
+            try await Probe.tapSelfTest(seconds: option("--seconds").flatMap(Double.init) ?? 6,
+                                       directory: option("--out").map { URL(filePath: $0) },
+                                       outputUID: option("--output-uid"))
+        }
     #if DEBUG
     case "echo-selftest":
         guard let path = option("--out") else { print("echo-selftest requires --out DIR"); exit(2) }

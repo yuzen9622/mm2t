@@ -242,14 +242,15 @@ enum Probe {
         printRecording(try RecordingRecovery.recover(directory))
     }
 
-    static func tapSelfTest(seconds: Double) async throws {
-        let work = FileManager.default.temporaryDirectory.appending(path: "mm2t-tap-selftest-\(UUID().uuidString.prefix(8))")
+    static func tapSelfTest(seconds: Double, directory: URL? = nil, outputUID: String? = nil) async throws {
+        guard seconds.isFinite, seconds >= 5 else { throw CocoaError(.validationMissingMandatoryProperty) }
+        let work = directory ?? FileManager.default.temporaryDirectory.appending(path: "mm2t-tap-selftest-\(UUID().uuidString.prefix(8))")
         let bundleID = "dev.mm2t.probe.tone"
         let player = try ToneFixture.makeHelperApp(in: work, bundleID: bundleID)
         let tone = try ToneFixture.writeTone(work.appending(path: "tone440.wav"), hz: 440, seconds: seconds)
         let decoy = try ToneFixture.writeTone(work.appending(path: "tone1000.wav"), hz: 1000, seconds: seconds)
         print("helper: \(player.path)")
-        let target = try ToneFixture.play(player, file: tone)
+        let target = try ToneFixture.play(player, file: tone, outputUID: outputUID)
         guard target.isRunning else { throw CocoaError(.executableLoad) }
         let other = try ToneFixture.play(URL(filePath: "/usr/bin/afplay"), file: decoy)
         defer { target.terminate(); other.terminate() }
@@ -273,6 +274,7 @@ enum Probe {
             print("FAIL: tone separation not as expected")
         }
         print("files kept in \(work.path)")
+        guard wanted > -40, wanted - unwanted > 30 else { throw CocoaError(.fileReadCorruptFile) }
     }
 }
 
@@ -337,20 +339,24 @@ enum ToneFixture {
         return url
     }
 
-    static func play(_ binary: URL, file: URL) throws -> Process {
+    static func play(_ binary: URL, file: URL, outputUID: String? = nil) throws -> Process {
         let process = Process()
         process.executableURL = binary
         process.arguments = binary.lastPathComponent == "afplay" ? ["-v", "0.15", file.path] : ["play-tone", file.path]
+        if let outputUID { process.arguments?.append(contentsOf: ["--output-uid", outputUID]) }
         try process.run()
         return process
     }
 
     /// The helper side of `tap-selftest`: plays a file quietly and exits when it ends.
     @MainActor
-    static func playFile(_ path: String) async throws {
+    static func playFile(_ path: String, outputUID: String? = nil) async throws {
         let player = try AVAudioPlayer(contentsOf: URL(filePath: path))
+        if let outputUID { player.currentDevice = outputUID }
         player.volume = 0.15
-        player.play()
+        guard player.play() else { throw CocoaError(.fileReadUnknown) }
+        if let outputUID, player.currentDevice != outputUID { throw CocoaError(.validationMissingMandatoryProperty) }
+        print("tone output: \(player.currentDevice ?? "system default")")
         try await Task.sleep(for: .seconds(player.duration + 0.2))
     }
 }
