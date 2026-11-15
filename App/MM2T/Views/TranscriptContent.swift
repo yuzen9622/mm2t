@@ -34,7 +34,7 @@ struct TranscriptContent: View {
             .onChange(of: lines, initial: true) { _, lines in
                 playhead.follow(lines?.map(\.start) ?? [])
             }
-            .onChange(of: model.focusedUtterance) { _, id in
+            .onChange(of: model.focusedUtterance, initial: true) { _, id in
                 if let id { withAnimation(Motion.page) { proxy.scrollTo(id.rawValue, anchor: .center) } }
             }
             .onChange(of: currentID) { _, id in

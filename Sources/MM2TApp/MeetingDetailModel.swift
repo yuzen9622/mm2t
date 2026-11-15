@@ -69,7 +69,7 @@ public final class MeetingDetailModel {
         self.playback = playback
     }
 
-    public func load() async {
+    public func load(at utterance: UtteranceID? = nil) async {
         do {
             let meeting = try await library.meeting(id)
             self.meeting = meeting
@@ -82,6 +82,9 @@ public final class MeetingDetailModel {
                               remote: await library.audioURL(meeting, track: .remote))
             }
             await reminders?.fillMissingDeadlines(reminderDrafts())
+            if !Task.isCancelled, let utterance, let source = meeting.utterance(utterance) {
+                jump(to: JumpTarget(utterance: source.id, time: source.range.start))
+            }
         } catch {
             errorMessage = String(describing: error)
         }

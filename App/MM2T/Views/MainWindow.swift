@@ -39,6 +39,7 @@ final class MainNavigation {
     struct Request: Equatable {
         let section: SidebarItem
         var meeting: MeetingID?
+        var utterance: UtteranceID?
     }
 
     static let shared = MainNavigation()
@@ -48,8 +49,8 @@ final class MainNavigation {
     var settingsSection = SettingsSection.general
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
-    func open(_ section: SidebarItem, meeting: MeetingID? = nil) {
-        request = Request(section: section, meeting: meeting)
+    func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
+        request = Request(section: section, meeting: meeting, utterance: utterance)
         WindowOpener.open(WindowID.main)
     }
 }
@@ -71,6 +72,8 @@ struct MainWindow: View {
     let app: AppController
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
+    @State private var utterance: UtteranceID?
+    @State private var destinationID = UUID()
     @State private var vocabularyEditor: VocabularyView.Editor?
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
     @State private var movedUp = false
@@ -119,7 +122,7 @@ struct MainWindow: View {
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
-            show(request.section, meeting: request.meeting)
+            show(request.section, meeting: request.meeting, utterance: request.utterance)
             MainNavigation.shared.request = nil
         }
     }
@@ -215,7 +218,7 @@ struct MainWindow: View {
         SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
     }
 
-    private func show(_ item: SidebarItem, meeting: MeetingID? = nil) {
+    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
         if item == .settings {
             MainNavigation.shared.settingsOpen = true
             return
@@ -224,6 +227,8 @@ struct MainWindow: View {
         movedUp = order.firstIndex(of: item)! < order.firstIndex(of: section)!
         section = item
         self.meeting = meeting
+        self.utterance = utterance
+        destinationID = UUID()
     }
 
     /// The section's name stays in place and its characters roll to the next name, the way a
@@ -249,11 +254,11 @@ struct MainWindow: View {
                 HomeView(app: app, open: { show(.meetings, meeting: $0) }).transition(.opacity)
             case .meetings:
                 if let meeting {
-                    MeetingDetailView(app: app, id: meeting, back: { self.meeting = nil })
-                        .id(meeting)
+                    MeetingDetailView(app: app, id: meeting, utterance: utterance, back: { self.meeting = nil })
+                        .id(destinationID)
                         .entrance(from: .trailing, distance: 28)
                 } else {
-                    MeetingListView(app: app, open: { meeting = $0 })
+                    MeetingListView(app: app, open: { show(.meetings, meeting: $0) })
                         .transition(.opacity)
                 }
             case .people:

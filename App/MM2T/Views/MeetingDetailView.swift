@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 struct MeetingDetailView: View {
     let app: AppController
     let back: () -> Void
+    let utterance: UtteranceID?
+    @State private var openedAtUtterance = false
     @State private var model: MeetingDetailModel
     @State private var confirmReseparate = false
     @State private var showSpeakers = true
@@ -16,8 +18,9 @@ struct MeetingDetailView: View {
     @State private var playhead = Playhead()
     @State private var confirmRegenerate = false
 
-    init(app: AppController, id: MeetingID, back: @escaping () -> Void) {
+    init(app: AppController, id: MeetingID, utterance: UtteranceID? = nil, back: @escaping () -> Void) {
         self.app = app
+        self.utterance = utterance
         self.back = back
         _model = State(initialValue: app.detail(id, labels: Copy.presentationLabels, playback: TwoTrackPlayer()))
     }
@@ -72,7 +75,8 @@ struct MeetingDetailView: View {
             .motion(Motion.page, value: showSpeakers)
         }
         .task(id: app.queue.revision) {
-            await model.load()
+            await model.load(at: openedAtUtterance ? nil : utterance)
+            if !Task.isCancelled { openedAtUtterance = true }
             sample()
         }
         // Samples the playhead while audio plays; AVAudioPlayer has no time callback of its own.
