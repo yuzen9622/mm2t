@@ -31,6 +31,26 @@
     "Couldn't load audio": {
       "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法載入錄音" } } }
     },
+    "Keyboard shortcut": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鍵盤快速鍵"
+          }
+        }
+      }
+    },
+    "Needs Accessibility permission. Until it is on, the shortcut does nothing.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要「輔助使用」權限，開啟之前快速鍵不會有作用。"
+          }
+        }
+      }
+    },
     "Preparing audio…": {
       "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在準備錄音…" } } }
     },
@@ -1877,6 +1897,26 @@
         }
       }
     },
+    "Press keys…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請按鍵…"
+          }
+        }
+      }
+    },
+    "Press the new shortcut. Esc cancels.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請按下新的快速鍵，按 Esc 取消。"
+          }
+        }
+      }
+    },
     "Previous Month": {
       "localizations": {
         "zh-Hant": {
@@ -2427,6 +2467,16 @@
         }
       }
     },
+    "Some keyboards keep their Fn key to themselves. If the shortcut does nothing, click it and press another, such as ⌃⌥R.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有些鍵盤的 Fn 鍵不會傳給 Mac。如果快速鍵沒有作用，請點一下它，改按其他組合，例如 ⌃⌥R。"
+          }
+        }
+      }
+    },
     "Source code": {
       "localizations": {
         "zh-Hant": {
@@ -2523,6 +2573,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "產生之後說話者已有變更，請重新產生以更新。"
+          }
+        }
+      }
+    },
+    "Start or stop recording": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始或停止錄音"
           }
         }
       }
@@ -3033,6 +3093,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "開啟時，螢幕分享、螢幕錄影與截圖都不會出現 mm2t 的視窗。"
+          }
+        }
+      }
+    },
+    "Works in any app. Press it once to start recording and again to stop.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在任何 App 中都能使用。按一下開始錄音，再按一下停止。"
           }
         }
       }

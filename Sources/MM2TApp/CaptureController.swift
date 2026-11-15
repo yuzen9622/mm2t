@@ -215,6 +215,13 @@ public final class CaptureController {
         }
     }
 
+    /// The global shortcut: finishes the recording in progress, otherwise starts one exactly as the
+    /// record button does. A meeting waiting at the prompt counts as accepted. While a recording is
+    /// starting or stopping a press does nothing, so a double press cannot start a second one.
+    public func toggle(title: String) async {
+        if state.isCapturing { await stop() } else { await startNow(title: title) }
+    }
+
     /// From the menu, when detection missed the meeting or the user wants another app.
     public func startManually(_ target: RecordingTarget) async {
         switch state {

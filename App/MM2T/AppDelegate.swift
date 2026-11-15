@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
             app = try AppController.live(defaults: .standard, credentials: Self.credentials, signedInPage: signedIn,
+                                         recordingTitle: String(localized: "Recording"),
                                          recorder: LiveRecorder(), permissions: LivePermissions())
             startupError = nil
         } catch {

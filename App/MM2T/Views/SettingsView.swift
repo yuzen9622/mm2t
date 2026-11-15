@@ -3,6 +3,7 @@ import MM2TApp
 import MM2TCore
 import MM2TLocal
 import MM2TProviders
+import MM2TSystem
 import SwiftUI
 
 /// Addresses the app points people to. Change them here.
@@ -49,6 +50,7 @@ enum SettingsRow: Hashable {
     case summaryBackend, geminiKey, localSummaries
     case appLanguage
     case hideFromCapture
+    case recordShortcut
     case systemPermissions, calendars, reminders
     case version, sourceCode, author, buyMeACoffee
     case privacyPolicy, terms, licenses
@@ -68,6 +70,7 @@ enum SettingsRow: Hashable {
         case .localSummaries: [String(localized: "Generate on this Mac")]
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
+        case .recordShortcut: [String(localized: "Start or stop recording")]
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
                                   String(localized: "Accessibility"), String(localized: "Automation")]
         case .calendars: ["Apple", "Google", "Outlook"]
@@ -98,6 +101,7 @@ struct SettingsGroup: Identifiable {
                           rows: [.diarizationOrder, .diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
                           rows: [.summaryBackend, .geminiKey, .localSummaries]),
+            SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .general, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
             SettingsGroup(id: "system", section: .permissions, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
@@ -359,6 +363,8 @@ struct SettingsRowView: View {
                 Text("While on, screen shares, recordings and screenshots leave mm2t's windows out.")
                     .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
             }
+        case .recordShortcut:
+            RecordShortcutRow(app: app)
         case .systemPermissions:
             PermissionRows(setup: app.setup)
         case .calendars:
@@ -801,5 +807,132 @@ struct OfflineModelView: View {
         case .transcription: "1.1 GB"
         case .llm: "5.7 GB"
         }
+    }
+}
+
+// MARK: Record shortcut
+
+/// The global shortcut that starts and stops a recording, and what keeps it from working.
+private struct RecordShortcutRow: View {
+    let app: AppController
+    @State private var listening = false
+
+    var body: some View {
+        @Bindable var store = app.settings
+        Group {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start or stop recording")
+                    Group {
+                        if listening {
+                            Text("Press the new shortcut. Esc cancels.")
+                        } else {
+                            Text("Works in any app. Press it once to start recording and again to stop.")
+                        }
+                    }
+                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                ShortcutField(app: app, shortcut: $store.settings.recordShortcut, listening: $listening)
+            }
+            if app.setup.accessibility != .granted {
+                HStack(spacing: 12) {
+                    Text("Needs Accessibility permission. Until it is on, the shortcut does nothing.")
+                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    PillButton("Open System Settings") { SetupModel.openSettings(.accessibility) }
+                }
+            }
+            // macOS cannot tell whether a keyboard has an Fn key it reports, so this is a hint, not a check.
+            if store.settings.recordShortcut.usesFunctionKey {
+                Text("Some keyboards keep their Fn key to themselves. If the shortcut does nothing, click it and press another, such as ⌃⌥R.")
+                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .motion(Motion.reveal, value: app.setup.accessibility)
+        .task {
+            // macOS sends no notification when the Accessibility switch is flipped.
+            while !Task.isCancelled {
+                app.setup.refreshPermissions()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
+/// Shows the shortcut; clicked, it listens for a new one. While it listens the shortcut itself is
+/// off, and the keys pressed go nowhere else.
+private struct ShortcutField: View {
+    let app: AppController
+    @Binding var shortcut: Hotkey
+    @Binding var listening: Bool
+    @State private var recorder = HotkeyRecorder()
+    @State private var monitor: Any?
+    @State private var hovering = false
+
+    /// kVK_Escape.
+    private static let escape: UInt16 = 53
+
+    var body: some View {
+        Button { listening ? stop() : start() } label: {
+            Group {
+                if listening { Text("Press keys…") } else { Text(verbatim: shortcut.symbols) }
+            }
+            .font(Typo.captionStrong)
+            .foregroundStyle(listening ? Palette.orange : Palette.text)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 96)
+            .frame(height: 30)
+            .background(listening ? Palette.orangeSoft : hovering ? Palette.selected : Palette.tonal, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .motion(Motion.touch, value: hovering)
+        .motion(Motion.select, value: listening)
+        .onDisappear(perform: stop)
+        .accessibilityLabel("Start or stop recording")
+        .accessibilityValue(Text(verbatim: shortcut.symbols))
+    }
+
+    private func start() {
+        recorder = HotkeyRecorder()
+        app.suspendsRecordShortcut = true
+        listening = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { event in
+            MainActor.assumeIsolated { listen(event) }
+            // Key presses are swallowed so they neither type nor press a button behind the field.
+            return event.type == .keyDown ? nil : event
+        }
+    }
+
+    private func listen(_ event: NSEvent) {
+        let modifiers = HotkeyModifiers(event.modifierFlags)
+        if event.type == .keyDown, event.keyCode == Self.escape, modifiers.isEmpty { return stop() }
+        let recorded = event.type == .flagsChanged
+            ? recorder.modifiersChanged(modifiers)
+            : recorder.keyDown(event.keyCode, modifiers: modifiers, label: Self.label(event))
+        if let recorded {
+            shortcut = recorded
+            stop()
+        }
+    }
+
+    private func stop() {
+        monitor.map(NSEvent.removeMonitor)
+        monitor = nil
+        listening = false
+        app.suspendsRecordShortcut = false
+    }
+
+    /// Keys that type nothing get the symbols macOS menus use; the rest read as their character.
+    private static func label(_ event: NSEvent) -> String {
+        let named: [UInt16: String] = [
+            49: "Space", 36: "↩", 76: "⌤", 48: "⇥", 51: "⌫", 117: "⌦",
+            123: "←", 124: "→", 125: "↓", 126: "↑", 115: "↖", 119: "↘", 116: "⇞", 121: "⇟",
+            122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+            98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+        ]
+        return named[event.keyCode] ?? event.charactersIgnoringModifiers?.uppercased() ?? "?"
     }
 }

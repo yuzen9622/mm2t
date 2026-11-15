@@ -40,6 +40,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// user turns this off.
     public var hidesFromScreenCapture = true
 
+    /// The global shortcut that starts a recording and stops it again.
+    public var recordShortcut: Hotkey = .commandFn
+
     public init() {}
 
     /// Missing keys take their defaults, so a settings blob written by an older build still loads.
@@ -59,12 +62,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
+        recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
     }
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
         case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
+        case recordShortcut
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.

@@ -55,6 +55,14 @@ public final class AppController {
     @ObservationIgnored private let pipelineSetup: PipelineSetup
     @ObservationIgnored private var monitor: SystemSignalMonitor?
     @ObservationIgnored private var watchMeetings = false
+    @ObservationIgnored private var hotkey: GlobalHotkeyMonitor?
+    @ObservationIgnored private let recordingTitle: String
+    /// Set while the shortcut field in Settings is listening, so pressing the current shortcut
+    /// there to replace it does not also start or stop a recording.
+    public var suspendsRecordShortcut: Bool {
+        get { hotkey?.isSuspended ?? false }
+        set { hotkey?.isSuspended = newValue }
+    }
 
     public init(
         paths: AppPaths,
@@ -72,9 +80,11 @@ public final class AppController {
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
         now: @escaping () -> Date = Date.init,
-        endCountdown: Duration = CaptureController.endCountdown
+        endCountdown: Duration = CaptureController.endCountdown,
+        recordingTitle: String = "Recording"
     ) throws {
         self.paths = paths
+        self.recordingTitle = recordingTitle
         let settings = SettingsStore(defaults: defaults)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
@@ -176,10 +186,11 @@ public final class AppController {
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;
-    /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones).
+    /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones);
+    /// `recordingTitle` names a recording the global shortcut starts with no meeting to name it.
     public static func live(
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
-        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil,
+        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil, recordingTitle: String = "Recording",
         recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions()
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
@@ -203,7 +214,8 @@ public final class AppController {
             runningBrowsers: {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
-            })
+            },
+            recordingTitle: recordingTitle)
     }
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
@@ -243,7 +255,8 @@ public final class AppController {
             learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 
-    /// Meetings are not offered for recording until setup is done.
+    /// Meetings are not offered for recording until setup is done, and the record shortcut, like
+    /// the record buttons, waits for the same.
     private func startMonitorIfReady() {
         guard watchMeetings, monitor == nil, !needsOnboarding else { return }
         let monitor = SystemSignalMonitor()
@@ -251,5 +264,11 @@ public final class AppController {
             Task { await self?.capture.handle(signals) }
         }
         self.monitor = monitor
+        let hotkey = GlobalHotkeyMonitor(hotkey: { [settings] in settings.settings.recordShortcut }) { [weak self] in
+            guard let self else { return }
+            Task { await self.capture.toggle(title: self.recordingTitle) }
+        }
+        hotkey.start()
+        self.hotkey = hotkey
     }
 }
