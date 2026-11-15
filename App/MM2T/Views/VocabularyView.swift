@@ -9,9 +9,9 @@ struct VocabularyView: View {
     @State private var query = ""
     @State private var selected: Set<String> = []
     @State private var pendingDelete: [String] = []
-    @State private var editor: Editor?
+    @Binding var editor: Editor?
 
-    private struct Editor {
+    struct Editor {
         let term: String?
     }
 
@@ -86,20 +86,6 @@ struct VocabularyView: View {
         .onChange(of: query) { _, _ in selected.removeAll() }
         .onChange(of: filter) { _, _ in selected.removeAll() }
         .onChange(of: store.settings.vocabulary) { _, vocabulary in selected.formIntersection(vocabulary) }
-        .disabled(editor != nil)
-        .accessibilityHidden(editor != nil)
-        .overlay {
-            if let editor {
-                ZStack {
-                    Color.black.opacity(0.28)
-                        .onTapGesture { self.editor = nil }
-                    VocabularyEditor(store: store, term: editor.term) { self.editor = nil }
-                        .background(Palette.window, in: RoundedRectangle(cornerRadius: 20))
-                        .shadow(color: .black.opacity(0.25), radius: 30, y: 12)
-                        .padding(16)
-                }
-            }
-        }
         .confirmationDialog("Delete \(pendingDelete.count) terms?", isPresented: Binding(
             get: { !pendingDelete.isEmpty },
             set: { if !$0 { pendingDelete = [] } }
@@ -212,7 +198,7 @@ private struct VocabularyTile: View {
     }
 }
 
-private struct VocabularyEditor: View {
+struct VocabularyEditor: View {
     let store: SettingsStore
     let term: String?
     let dismiss: () -> Void

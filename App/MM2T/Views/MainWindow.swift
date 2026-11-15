@@ -71,6 +71,7 @@ struct MainWindow: View {
     let app: AppController
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
+    @State private var vocabularyEditor: VocabularyView.Editor?
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
     @State private var movedUp = false
     @Namespace private var sidebarSpace
@@ -101,6 +102,9 @@ struct MainWindow: View {
                 .clipped()
             }
             .tipLayer()
+            .disabled(vocabularyEditor != nil)
+            .accessibilityHidden(vocabularyEditor != nil)
+            .overlay { vocabularyDialog }
             .overlay { settings(isOpen: navigation.settingsOpen) }
             }
         }
@@ -188,6 +192,25 @@ struct MainWindow: View {
         .motion(Motion.reveal, value: isOpen)
     }
 
+    private var vocabularyDialog: some View {
+        ZStack {
+            if let editor = vocabularyEditor {
+                Color.black.opacity(0.28)
+                    .contentShape(Rectangle())
+                    .onTapGesture { vocabularyEditor = nil }
+                    .transition(.opacity)
+                VocabularyEditor(store: app.settings, term: editor.term) { vocabularyEditor = nil }
+                    .background(Palette.window)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: .black.opacity(0.25), radius: 30, y: 12)
+                    .padding(24)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .motion(Motion.reveal, value: vocabularyEditor != nil)
+    }
+
     private func row(_ item: SidebarItem) -> some View {
         SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
     }
@@ -236,7 +259,7 @@ struct MainWindow: View {
             case .people:
                 VoiceprintsView(model: app.people).transition(.opacity)
             case .vocabulary:
-                VocabularyView(store: app.settings).transition(.opacity)
+                VocabularyView(store: app.settings, editor: $vocabularyEditor).transition(.opacity)
             }
         }
         .motion(Motion.page, value: section)
