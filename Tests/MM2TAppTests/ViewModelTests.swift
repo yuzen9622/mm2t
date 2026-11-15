@@ -6,7 +6,7 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct MeetingListTests {
-    @Test func searchesTitlesAndTranscriptsAndDeletesWithTheAudio() async throws {
+    @Test func listsAllMeetingsAndDeletesWithTheAudio() async throws {
         let world = try World()
         let budget = try await world.recordedMeeting(title: "預算會議")
         _ = try await world.recordedMeeting(title: "週會")
@@ -16,18 +16,11 @@ import Testing
         #expect(Set(list.rows.map(\.title)) == ["預算會議", "週會"])
         #expect(list.rows.allSatisfy { $0.status == .completed })
 
-        list.query = "預算"
-        await list.reload()
-        #expect(list.rows.map(\.title).contains("預算會議"))
-        list.query = "那就這樣"
-        await list.reload()
-        #expect(list.rows.count == 2, "both transcripts contain the phrase")
-        list.query = "不存在的字"
-        await list.reload()
-        #expect(list.rows.isEmpty)
+        #expect(try await world.library.search("預算", names: [:]).map(\.metadata.title).contains("預算會議"))
+        #expect(try await world.library.search("那就這樣", names: [:]).count == 2)
+        #expect(try await world.library.search("不存在的字", names: [:]).isEmpty)
 
         let folder = await world.library.audioURL(budget, track: .me).deletingLastPathComponent()
-        list.query = ""
         await list.delete(budget.id)
         #expect(list.rows.map(\.title) == ["週會"])
         #expect(!FileManager.default.fileExists(atPath: folder.path), "story 55: recording and text are gone")

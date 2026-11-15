@@ -120,6 +120,42 @@ import Testing
         }
     }
 
+    @Test func observerReportsOnlySuccessfulMutations() async throws {
+        let root = try temporary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = MeetingLibrary(root: root.appending(path: "Meetings"))
+        let (stream, continuation) = AsyncStream<MeetingID>.makeStream()
+        await library.observe { continuation.yield($0) }
+        let mic = root.appending(path: "mic.wav"), remote = root.appending(path: "remote.wav")
+        try Data().write(to: mic)
+        try Data().write(to: remote)
+        let meeting = try await library.create(.init(micTrack: mic, remoteTrack: remote, highlights: [],
+            metadata: .init(title: "Observed", startedAt: Date(), duration: 10)))
+        try await library.save(meeting)
+        let track = TrackTranscript(source: .cloud, content: .unlabeled([]))
+        _ = try await library.attach(.init(me: track, remote: track), to: meeting.id)
+        _ = try await library.attach(.init(me: track, remote: track), to: meeting.id)
+        try await library.delete(meeting.id)
+        await #expect(throws: LibraryError.self) { try await library.delete(meeting.id) }
+        continuation.finish()
+        var events: [MeetingID] = []
+        for await event in stream { events.append(event) }
+        #expect(events == Array(repeating: meeting.id, count: 4))
+    }
+
+    @Test func cancelledQueryDoesNotDamageIndex() async throws {
+        let root = try temporary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = MeetingIndex(fileURL: root.appending(path: "search.sqlite"))
+        try await index.update(fixture())
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await index.search(.init(text: "預算"))
+        }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(try await index.search(.init(text: "預算")).count == 1)
+    }
+
     @Test func reconciliationRepairsMissedChanges() async throws {
         let root = try temporary()
         defer { try? FileManager.default.removeItem(at: root) }

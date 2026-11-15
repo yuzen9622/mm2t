@@ -11,17 +11,16 @@ struct MeetingListView: View {
     private var model: MeetingListModel { app.meetings }
 
     var body: some View {
-        @Bindable var model = model
         VStack(spacing: 0) {
             ScreenHeader {
-                SearchField(text: $model.query).frame(width: 220)
+                SearchPaletteTrigger { MainNavigation.shared.searchOpen = true }
                 PillButton("Start Recording", icon: "microphone", kind: .primary) {
                     Task { await app.capture.startNow(title: String(localized: "Recording")) }
                 }
                 .disabled(app.capture.state != .idle)
             }
             if model.rows.isEmpty {
-                EmptyState(icon: "messages", title: model.query.isEmpty ? "No meetings yet" : "No results")
+                EmptyState(icon: "messages", title: "No meetings yet")
                     .transition(.opacity)
             } else {
                 FadingScrollView(ground: Palette.window) {
@@ -44,7 +43,6 @@ struct MeetingListView: View {
                 }
             }
         }
-        .task(id: model.query) { await model.reload() }
         .task(id: app.queue.revision) { await model.reload() }
         .confirmationDialog("Delete this meeting?", isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { row in

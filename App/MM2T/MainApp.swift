@@ -23,6 +23,10 @@ struct MainApp: App {
         .defaultSize(width: 980, height: 680)
         .commands {
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
+            CommandGroup(after: .textEditing) {
+                Button("Search…") { MainNavigation.shared.searchOpen.toggle() }
+                    .keyboardShortcut("k", modifiers: .command)
+            }
         }
 
         Window(Text("Set up mm2t"), id: WindowID.onboarding) {

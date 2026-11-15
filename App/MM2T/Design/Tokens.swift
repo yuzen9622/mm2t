@@ -4,6 +4,7 @@ import SwiftUI
 /// Every color the app draws with. Two values each: light, dark.
 enum Palette {
     static let window = dynamic(0xF6F5F1, 0x1B1B1D)
+    static let backdrop = Color.black.opacity(0.28)
     static let sidebar = dynamic(0xEEEDE8, 0x151516)
     static let card = dynamic(0xFFFFFF, 0x262628)
     static let field = dynamic(0xEDECE7, 0x303033)

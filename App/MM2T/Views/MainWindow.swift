@@ -46,6 +46,7 @@ final class MainNavigation {
     var request: Request?
     /// Settings open as a dialog over the main window, on this section.
     var settingsOpen = false
+    var searchOpen = false
     var settingsSection = SettingsSection.general
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
@@ -109,6 +110,13 @@ struct MainWindow: View {
             .accessibilityHidden(vocabularyEditor != nil)
             .overlay { vocabularyDialog }
             .overlay { settings(isOpen: navigation.settingsOpen) }
+            }
+        }
+        .disabled(navigation.searchOpen)
+        .accessibilityHidden(navigation.searchOpen)
+        .overlay {
+            SearchPaletteOverlay(app: app, isOpen: navigation.searchOpen) {
+                navigation.searchOpen = false
             }
         }
         .foregroundStyle(Palette.text)
@@ -222,6 +230,10 @@ struct MainWindow: View {
         if item == .settings {
             MainNavigation.shared.settingsOpen = true
             return
+        }
+        if meeting != nil {
+            MainNavigation.shared.settingsOpen = false
+            vocabularyEditor = nil
         }
         let order = SidebarItem.allCases
         movedUp = order.firstIndex(of: item)! < order.firstIndex(of: section)!

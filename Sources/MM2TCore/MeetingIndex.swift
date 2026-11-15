@@ -71,7 +71,7 @@ public actor MeetingIndex {
         if terms.isEmpty {
             let predicate = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
             return try db.rows("SELECT m.id, m.title, m.started FROM meetings m \(predicate) ORDER BY m.started DESC, m.id LIMIT ?",
-                               arguments + [String(query.limit)]).map {
+                               arguments + [String(query.limit)], cancellable: true).map {
                 MeetingHits(id: MeetingID(UUID(uuidString: $0[0]!)!), title: $0[1]!,
                             startedAt: Date(timeIntervalSince1970: Double($0[2]!)!), hits: [], totalHits: 0)
             }
@@ -95,7 +95,7 @@ public actor MeetingIndex {
             WHERE \(conditions.joined(separator: " AND "))
             ORDER BY CASE c.kind WHEN 'title' THEN 0 WHEN 'cleaned' THEN 2 WHEN 'utterance' THEN 3 ELSE 1 END,
                      \(score), m.started DESC, m.id, c.rowid
-            """, arguments)
+            """, arguments, cancellable: true)
         var results: [MeetingHits] = []
         var positions: [MeetingID: Int] = [:]
         for row in rows {
@@ -198,7 +198,12 @@ private final class SearchDatabase {
 
     deinit { sqlite3_close(handle) }
 
-    func rows(_ sql: String, _ arguments: [String?] = []) throws -> [[String?]] {
+    func rows(_ sql: String, _ arguments: [String?] = [], cancellable: Bool = false) throws -> [[String?]] {
+        if cancellable {
+            try Task.checkCancellation()
+            sqlite3_progress_handler(handle, 1_000, { _ in Task.isCancelled ? 1 : 0 }, nil)
+        }
+        defer { if cancellable { sqlite3_progress_handler(handle, 0, nil, nil) } }
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { throw failure() }
         defer { sqlite3_finalize(statement) }
@@ -210,10 +215,14 @@ private final class SearchDatabase {
         var rows: [[String?]] = []
         while true {
             let result = sqlite3_step(statement)
+            if cancellable { try Task.checkCancellation() }
             if result == SQLITE_DONE { return rows }
             guard result == SQLITE_ROW else { throw failure() }
             rows.append((0..<sqlite3_column_count(statement)).map { column in
-                sqlite3_column_text(statement, column).map { String(cString: $0) }
+                if sqlite3_column_type(statement, column) == SQLITE_FLOAT {
+                    return String(sqlite3_column_double(statement, column))
+                }
+                return sqlite3_column_text(statement, column).map { String(cString: $0) }
             })
         }
     }
