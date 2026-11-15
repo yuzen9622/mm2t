@@ -239,7 +239,8 @@ public struct MeetingProcessingPipeline: Sendable {
             let hints = names + vocabulary.filter { !names.contains($0) }
             let micURL = await library.audioURL(meeting, track: .me), remoteURL = await library.audioURL(meeting, track: .remote)
             let cleaned = try? micCleaner?.clean(mic: micURL, remote: remoteURL)
-            defer { if let cleaned { try? FileManager.default.removeItem(at: cleaned.audio) } }
+            // Playback wants the same track, and cleaning it again there is slow for a long meeting.
+            defer { if let cleaned { PlaybackMic.keep(cleaned.audio, beside: micURL) } }
             let heardURL = cleaned?.audio ?? micURL
             let remote: TrackTranscript
             var me: TrackTranscript

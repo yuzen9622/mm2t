@@ -76,7 +76,7 @@ public final class MeetingDetailModel {
             names = await voiceprints.names()
             people = await voiceprints.allPersons().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             if !loadedAudio, let playback {
-                // Queue updates can reenter load while playback prepares its filtered audio.
+                // Queue updates can reenter load while playback is still opening its tracks.
                 loadedAudio = true
                 await playback.load(mic: await library.audioURL(meeting, track: .me),
                               remote: await library.audioURL(meeting, track: .remote))
