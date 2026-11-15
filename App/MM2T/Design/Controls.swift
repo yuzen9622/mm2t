@@ -105,8 +105,12 @@ struct CardModifier: ViewModifier {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-            .shadow(color: Palette.shadow.opacity(lifts && hovering ? 1 : 0.6), radius: lifts && hovering ? 14 : 6, y: lifts && hovering ? 6 : 2)
+            // The shadow is the surface's alone: cast by the whole card, it would be redrawn from the
+            // card's text and controls every time they move.
+            .background {
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(Palette.card)
+                    .shadow(color: Palette.shadow.opacity(lifts && hovering ? 1 : 0.6), radius: lifts && hovering ? 14 : 6, y: lifts && hovering ? 6 : 2)
+            }
             .offset(y: lifts && hovering ? -2 : 0)
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
             .onHover { hovering = $0 }
@@ -250,7 +254,13 @@ struct TipModifier: ViewModifier {
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
-        content.anchorPreference(key: TipKey.self, value: .bounds) { show ? [TipRequest(id: id, anchor: $0, text: text)] : [] }
+        // Reported only while showing: a standing anchor is resolved again for every control on
+        // every frame of a scroll.
+        content.background {
+            if show {
+                Color.clear.anchorPreference(key: TipKey.self, value: .bounds) { [TipRequest(id: id, anchor: $0, text: text)] }
+            }
+        }
     }
 }
 

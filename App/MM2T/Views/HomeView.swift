@@ -15,7 +15,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader { EmptyView() }
-            FadingScrollView {
+            FadingScrollView(ground: Palette.window) {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
                     // Overlays fill the sibling's height without contributing their content's ideal height.

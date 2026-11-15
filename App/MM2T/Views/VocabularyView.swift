@@ -62,7 +62,7 @@ struct VocabularyView: View {
                 }
                 .padding(.bottom, 24)
             } else {
-                FadingScrollView {
+                FadingScrollView(ground: Palette.window) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], spacing: 8) {
                         ForEach(terms, id: \.self) { term in
                             VocabularyTile(

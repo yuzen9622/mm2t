@@ -16,7 +16,7 @@ struct TranscriptContent: View {
             lines.flatMap { $0.indices.contains(index) ? $0[index].id : nil }
         }
         ScrollViewReader { proxy in
-            FadingScrollView {
+            FadingScrollView(ground: Palette.window) {
                 LazyVStack(alignment: .leading, spacing: lines == nil ? 10 : 2) {
                     switch model.selectedView {
                     case .raw, .cleaned:
