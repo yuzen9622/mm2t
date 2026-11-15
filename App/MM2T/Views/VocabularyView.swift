@@ -237,34 +237,71 @@ private struct VocabularyEditor: View {
         return trial.renameVocabulary(term, to: cleaned)
     }
 
+    /// How many terms the draft holds, split the way `addVocabulary` splits it.
+    private var count: Int {
+        draft.split { $0.isNewline || $0 == "," || $0 == "，" }
+            .count { !$0.allSatisfy(\.isWhitespace) }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(term == nil ? "Add terms" : "Edit term").font(Typo.heading)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(term == nil ? "Add terms" : "Edit term").font(Typo.title)
             if term == nil {
                 Text("Separate terms with commas or new lines.")
                     .font(Typo.caption).foregroundStyle(Palette.secondary)
+                    .padding(.top, 6)
                 TextEditor(text: $draft)
                     .font(Typo.body).focused($focused)
-                    .frame(height: 110)
+                    .scrollContentBackground(.hidden)
+                    .tint(Palette.orange)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 10)
+                    .frame(height: 120)
+                    .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                            .strokeBorder(Palette.orange.opacity(focused ? 0.55 : 0), lineWidth: 1.5)
+                    }
+                    .padding(.top, 14)
                     .accessibilityLabel("Terms")
             } else {
                 FieldBox {
                     TextField("Term", text: $draft).focused($focused).onSubmit(save)
                 }
+                .padding(.top, 14)
                 if !cleaned.isEmpty && !valid {
                     Text(splits ? "One term at a time" : "Already in your vocabulary")
                         .font(Typo.caption).foregroundStyle(Palette.danger)
+                        .padding(.top, 8)
                 }
             }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(term == nil ? "Add" : "Save", action: save)
+            HStack(spacing: 8) {
+                if term == nil {
+                    HStack(spacing: 6) {
+                        Text("Adding")
+                        Text(verbatim: "\(count)")
+                            .font(Typo.captionStrong).monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .frame(minWidth: 20, minHeight: 20)
+                            .background(count > 0 ? Palette.orange : Palette.muted, in: Capsule())
+                            .contentTransition(.numericText())
+                        Text(count == 1 ? "term" : "terms")
+                    }
+                    .font(Typo.caption).foregroundStyle(Palette.secondary)
+                    .opacity(count > 0 ? 1 : 0.5)
+                    .motion(Motion.touch, value: count)
+                    .accessibilityElement(children: .combine)
+                }
+                Spacer(minLength: 0)
+                PillButton("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                PillButton(term != nil ? "Save" : count > 0 ? "Add \(count) terms" : "Add terms", kind: .primary, action: save)
                     .keyboardShortcut(.defaultAction).disabled(!valid)
             }
+            .padding(.top, 20)
         }
         .padding(24)
-        .frame(width: 380)
+        .frame(width: term == nil ? 440 : 380)
         .onAppear { focused = true }
     }
 

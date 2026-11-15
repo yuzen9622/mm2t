@@ -18,7 +18,11 @@
     "Learned from corrections": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "從修正學習" } } } },
     "Manually added": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "手動新增" } } } },
     "Edit term": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "編輯詞彙" } } } },
-    "Separate terms with commas or new lines.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "以逗號或換行分隔，可一次新增多個詞彙。" } } } },
+    "Separate terms with commas or new lines.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "以逗號或換行分隔，一次新增多個詞彙。" } } } },
+    "Adding": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "將加入" } } } },
+    "terms": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "個詞彙" } } } },
+    "term": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "個詞彙" } } } },
+    "Add %lld terms": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "新增 %lld 個詞彙" } } } },
     "Terms": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "詞彙" } } } },
     "Term": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "詞彙" } } } },
     "Audio unavailable": {
