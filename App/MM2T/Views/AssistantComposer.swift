@@ -6,7 +6,7 @@ struct AssistantComposer: View {
     @Bindable var model: AssistantModel
     @State private var focused = false
     @State private var hasMarkedText = false
-    @State private var height: CGFloat = 22
+    @State private var height = InputTextView.singleLineHeight
 
     private var showsPlaceholder: Bool {
         AssistantModel.showsPlaceholder(draft: model.draft, hasMarkedText: hasMarkedText)
@@ -16,18 +16,12 @@ struct AssistantComposer: View {
         HStack(alignment: .bottom, spacing: 10) {
             Icon("sparkles", size: 17)
                 .foregroundStyle(showsPlaceholder ? Palette.muted : Palette.orange)
-                .padding(.bottom, 6)
+                .frame(height: 30)
             AssistantInput(text: $model.draft, focused: $focused, height: $height, hasMarkedText: $hasMarkedText,
                 submit: { model.send() }, leave: { if model.draft.isEmpty && !model.isRunning { model.isActive = false } })
                 .frame(height: height)
-                .overlay(alignment: .topLeading) {
-                    if showsPlaceholder {
-                        Text("Ask about your meetings")
-                            .font(.system(size: 15, weight: .regular, design: .rounded))
-                            .foregroundStyle(Palette.muted).padding(.top, 2).allowsHitTesting(false)
-                    }
-                }
-                .padding(.vertical, 4)
+                .padding(.vertical, max(0, (30 - InputTextView.singleLineHeight) / 2))
+                .frame(minHeight: 30)
             Button { if model.isRunning { model.stop() } else { model.send() } } label: {
                 Icon(model.isRunning ? "player-stop" : "arrow-up", size: 14)
                     .id(model.isRunning)
@@ -55,6 +49,7 @@ private struct AssistantInput: NSViewRepresentable {
     @Binding var focused: Bool
     @Binding var height: CGFloat
     @Binding var hasMarkedText: Bool
+    @Environment(\.locale) private var locale
     let submit: () -> Void
     let leave: () -> Void
 
@@ -63,7 +58,7 @@ private struct AssistantInput: NSViewRepresentable {
         let scroll = NSScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
-        let editor = InputTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
+        let editor = InputTextView(frame: NSRect(x: 0, y: 0, width: 300, height: InputTextView.singleLineHeight))
         editor.minSize = .zero
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.textContainer?.containerSize = NSSize(width: 300, height: CGFloat.greatestFiniteMagnitude)
@@ -72,7 +67,7 @@ private struct AssistantInput: NSViewRepresentable {
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.drawsBackground = false
-        editor.font = .systemFont(ofSize: 15).withRoundedDesign
+        editor.font = InputTextView.inputFont
         editor.textColor = NSColor(Palette.text)
         editor.insertionPointColor = NSColor(Palette.orange)
         editor.textContainerInset = .zero
@@ -90,7 +85,7 @@ private struct AssistantInput: NSViewRepresentable {
             DispatchQueue.main.async { coordinator.parent.hasMarkedText = marked }
             coordinator.textChanged(editor)
         }
-        editor.setAccessibilityLabel(String(localized: "Ask about your meetings"))
+        editor.placeholder = String(localized: "Ask about your meetings", locale: locale)
         scroll.documentView = editor
         return scroll
     }
@@ -99,6 +94,8 @@ private struct AssistantInput: NSViewRepresentable {
         guard let editor = scroll.documentView as? InputTextView else { return }
         if editor.string != text && !editor.hasMarkedText() { editor.string = text }
         editor.textColor = NSColor(Palette.text)
+        editor.placeholder = String(localized: "Ask about your meetings", locale: locale)
+        editor.needsDisplay = true
         editor.submit = submit; editor.leave = leave
         context.coordinator.measure(editor)
     }
@@ -110,19 +107,46 @@ private struct AssistantInput: NSViewRepresentable {
             textChanged(editor)
         }
         func textChanged(_ editor: InputTextView) {
+            editor.needsDisplay = true
             if !editor.hasMarkedText() { parent.text = editor.string }
             measure(editor)
         }
         func measure(_ editor: NSTextView) {
             guard let container = editor.textContainer, let layout = editor.layoutManager else { return }
             layout.ensureLayout(for: container)
-            let value = min(132, max(22, ceil(layout.usedRect(for: container).height)))
+            let lineHeight = layout.defaultLineHeight(for: editor.font ?? InputTextView.inputFont)
+            let contentHeight = max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)
+            let value = min(132, max(ceil(lineHeight), ceil(contentHeight)))
             if parent.height != value { DispatchQueue.main.async { self.parent.height = value } }
         }
     }
 }
 
 private final class InputTextView: NSTextView {
+    static var inputFont: NSFont { .systemFont(ofSize: 15).withRoundedDesign }
+    static var singleLineHeight: CGFloat { ceil(NSLayoutManager().defaultLineHeight(for: inputFont)) }
+
+    var placeholder = "" {
+        didSet {
+            setAccessibilityLabel(placeholder)
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard AssistantModel.showsPlaceholder(draft: string, hasMarkedText: hasMarkedText()),
+              let font else { return }
+        (placeholder as NSString).draw(at: textContainerOrigin, withAttributes: [
+            .font: font, .foregroundColor: NSColor(Palette.muted),
+        ])
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
     var submit: () -> Void = {}
     var leave: () -> Void = {}
     var focusChanged: (Bool) -> Void = { _ in }
