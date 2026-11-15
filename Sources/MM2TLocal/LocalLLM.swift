@@ -69,6 +69,10 @@ public struct LocalLLM: LLMProvider, StructuredGenerator {
         try await tasks.vocabularyCorrections(from: old, to: new)
     }
 
+    public func generateText(system: String, input: String) async throws -> String {
+        try await AssistantGeneration.text(generator: self, system: system, input: input)
+    }
+
     package var service: Service { .localLLM }
 
     package func generate(system: String, input: String, schema: JSON) async throws -> String {

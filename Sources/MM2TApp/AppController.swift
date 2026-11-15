@@ -70,6 +70,11 @@ public final class AppController {
         set { hotkey?.isSuspended = newValue }
     }
 
+    public func makeAssistant() -> AssistantModel {
+        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints),
+                       build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
+    }
+
     public init(
         paths: AppPaths,
         defaults: UserDefaults,

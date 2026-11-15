@@ -107,7 +107,30 @@ struct FakeLLMError: Error, CustomStringConvertible {
 }
 
 /// Echoes the transcript back in each output shape, naming speakers only by token.
-struct FakeLLM: LLMProvider {
+struct FakeLLM: LLMProvider, StructuredGenerator {
+    let planJSON = Box(#"{"reasoning":"Look up the meetings.","queries":["預算"],"people":[],"dateFrom":null,"dateTo":null,"needsMeetings":true}"#)
+    let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
+    let answerInputs = Box<[String]>([])
+    let streamCancelled = Box(false)
+    let holdsStream = Box(false)
+    var service: Service { .gemini }
+    func generate(system: String, input: String, schema: JSON) async throws -> String {
+        try await record("plan")
+        return planJSON.get
+    }
+    func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
+        answerInputs.update { $0.append(input) }
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                for text in answerChunks.get { continuation.yield(text) }
+                if holdsStream.get {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { streamCancelled.set(true) }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
     let calls = Box<[String]>([])
     let failNext = Box<Set<String>>([])
     let corrections = Box<[VocabularyCorrection]>([])

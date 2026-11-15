@@ -6,6 +6,17 @@ struct MeetingListView: View {
     let app: AppController
     let open: (MeetingID) -> Void
     @State private var pendingDelete: MeetingRow?
+    @State private var assistant: AssistantModel
+    @State private var layoutActive = false
+    @State private var layoutVisible = true
+    @State private var canvasShown = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    init(app: AppController, open: @escaping (MeetingID) -> Void) {
+        self.app = app
+        self.open = open
+        _assistant = State(initialValue: app.makeAssistant())
+    }
     @Environment(\.openWindow) private var openWindow
 
     private var model: MeetingListModel { app.meetings }
@@ -13,37 +24,70 @@ struct MeetingListView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader {
+                if assistant.isActive {
+                    PillButton("Back to list", icon: "chevron-left") { assistant.isActive = false }
+                }
                 SearchPaletteTrigger { MainNavigation.shared.searchOpen = true }
                 PillButton("Start Recording", icon: "microphone", kind: .primary) {
                     Task { await app.capture.startNow(title: String(localized: "Recording")) }
                 }
                 .disabled(app.capture.state != .idle)
             }
-            if model.rows.isEmpty {
-                EmptyState(icon: "messages", title: "No meetings yet")
-                    .transition(.opacity)
-            } else {
-                FadingScrollView(ground: Palette.window) {
-                    LazyVStack(spacing: 10) {
-                        ForEach(model.rows) { row in
-                            MeetingCard(row: row, isRecovered: app.recovered.contains(row.id),
-                                        process: { Task { await process(row) } },
-                                        setUp: { openWindow(id: WindowID.onboarding) })
-                                .onTapGesture { if row.status == .completed { open(row.id) } }
-                                .contextMenu {
-                                    Button("Delete…", role: .destructive) { pendingDelete = row }
-                                        .disabled(app.queue.isBusy(row.id))
-                                }
-                                .transition(.asymmetric(insertion: .offset(y: 10).combined(with: .opacity), removal: .opacity))
-                        }
+            GeometryReader { geometry in
+                let rail = layoutActive && geometry.size.width >= 760
+                let canvasWidth = geometry.size.width - (rail ? 304 : 0)
+                ZStack(alignment: .trailing) {
+                    if layoutActive {
+                        AssistantCanvas(model: assistant)
+                            .frame(width: canvasWidth)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .opacity(canvasShown ? 1 : 0)
+                            .offset(y: reduce || canvasShown ? 0 : 16)
+                            .motion(Motion.page, value: canvasShown)
+                            .entrance(from: .bottom, distance: 16)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
-                    .motion(Motion.page, value: model.rows.map(\.id))
+                    meetingList(compact: layoutActive)
+                        .frame(width: layoutActive ? 280 : geometry.size.width)
+                        .opacity(layoutActive && !rail ? 0 : 1)
+                        .allowsHitTesting(!layoutActive || rail)
+                        .accessibilityHidden(layoutActive && !rail)
                 }
+                .overlay(alignment: .bottomLeading) {
+                    AssistantComposer(model: assistant)
+                        .frame(maxWidth: 720)
+                        .padding(.horizontal, 24)
+                        .frame(width: layoutActive ? canvasWidth : geometry.size.width)
+                        .padding(.bottom, 20)
+                }
+                .motion(Motion.page, value: layoutActive)
+                .motion(Motion.page, value: rail)
+                .transaction { if reduce { $0.animation = nil } }
+                .opacity(layoutVisible ? 1 : 0)
+                .motion(.easeOut(duration: 0.12), value: layoutVisible)
+            }
+        }
+        .task(id: assistant.isActive) {
+            guard layoutActive != assistant.isActive else { return }
+            if reduce {
+                layoutVisible = false
+                do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            }
+            layoutActive = assistant.isActive
+            canvasShown = false
+            if reduce { canvasShown = true; layoutVisible = true }
+            else if layoutActive {
+                do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+                canvasShown = true
             }
         }
         .task(id: app.queue.revision) { await model.reload() }
+        .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
+            if let question = MainNavigation.shared.assistantQuestion, !assistant.isRunning {
+                MainNavigation.shared.assistantQuestion = nil
+                assistant.send(question)
+            }
+        }
+        .onDisappear { assistant.stop() }
         .confirmationDialog("Delete this meeting?", isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { row in
             Button("Delete Recording and Transcript", role: .destructive) {
@@ -51,6 +95,36 @@ struct MeetingListView: View {
             }
         } message: { _ in
             Text("Both audio tracks and every generated view are removed from this Mac.")
+        }
+    }
+
+    private func meetingList(compact: Bool) -> some View {
+        FadingScrollView(ground: Palette.window) {
+            LazyVStack(alignment: .leading, spacing: compact ? 0 : 10) {
+                if compact {
+                    Text("Meetings").font(Typo.captionStrong).foregroundStyle(Palette.muted).padding(.bottom, 12)
+                }
+                if model.rows.isEmpty { EmptyState(icon: "messages", title: "No meetings yet") }
+                ForEach(compact ? AssistantRail.ordered(model.rows, cited: assistant.citedMeetings) : model.rows) { row in
+                    if compact && assistant.citedMeetings.contains(row.id) && row.id == AssistantRail.ordered(model.rows, cited: assistant.citedMeetings).first?.id {
+                        Text("Cited").font(Typo.captionStrong).foregroundStyle(Palette.muted).padding(.bottom, 4)
+                    }
+                    MeetingCard(row: row, isRecovered: app.recovered.contains(row.id), compact: compact,
+                                cited: assistant.citedMeetings.contains(row.id),
+                                process: { Task { await process(row) } }, setUp: { openWindow(id: WindowID.onboarding) })
+                        .contentShape(Rectangle())
+                        .onTapGesture { if compact || row.status == .completed { open(row.id) } }
+                        .accessibilityAction { open(row.id) }
+                        .focusable().focusEffectDisabled()
+                        .onKeyPress(.return) { open(row.id); return .handled }
+                        .contextMenu {
+                            Button("Delete…", role: .destructive) { pendingDelete = row }.disabled(app.queue.isBusy(row.id))
+                        }
+                }
+            }
+            .padding(.horizontal, compact ? 0 : 24).padding(.bottom, 180)
+            .motion(Motion.select, value: assistant.citedMeetings)
+            .motion(Motion.page, value: model.rows.map(\.id))
         }
     }
 
@@ -69,22 +143,28 @@ struct MeetingCard: View {
     @Environment(\.locale) private var locale
     let row: MeetingRow
     let isRecovered: Bool
+    var compact = false
+    var cited = false
     let process: () -> Void
     let setUp: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(row.title).font(Typo.heading).lineLimit(1)
-                Spacer()
-                Text("\(row.startedAt, format: .dateTime.month().day().hour().minute()) · \(MeetingPresentation.duration(row.duration, locale: locale))")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.secondary)
-                    .monospacedDigit()
+                if compact && cited { Circle().fill(Palette.orange).frame(width: 6, height: 6) }
+                Text(row.title).font(compact ? Typo.bodyStrong : Typo.heading).lineLimit(1)
+                if !compact {
+                    Spacer()
+                    Text("\(row.startedAt, format: .dateTime.month().day().hour().minute()) · \(MeetingPresentation.duration(row.duration, locale: locale))")
+                        .font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
+                }
             }
-            state
+            if compact {
+                Text(row.startedAt, format: .dateTime.month().day()).font(Typo.caption).foregroundStyle(Palette.muted)
+            } else { state }
         }
-        .card(lifts: row.status == .completed)
+        .card(lifts: row.status == .completed, compact: compact)
+        .motion(Motion.page, value: compact)
         .motion(Motion.reveal, value: row.status)
     }
 

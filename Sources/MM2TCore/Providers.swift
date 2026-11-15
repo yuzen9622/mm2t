@@ -290,6 +290,8 @@ public struct SummaryRequest: Hashable, Sendable {
 public protocol LLMProvider: Sendable {
     /// Pins completed background context once for a group of concurrently generated outputs.
     func forGeneration() async -> any LLMProvider
+    func generateText(system: String, input: String) async throws -> String
+    func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error>
     func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess]
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript
     func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest]

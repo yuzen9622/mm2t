@@ -87,7 +87,8 @@ private struct SearchPalette: View {
     }
 
     private var contentHeight: CGFloat {
-        if model.failed || model.rows.isEmpty { return 150 }
+        if model.failed { return model.rows.isEmpty ? 150 : 188 }
+        if model.rows.isEmpty { return 150 }
         return model.rows.reduce(CGFloat(8)) { height, row in
             height + rowHeight(row) + (heading(for: row) == nil ? 0 : 30)
         }
@@ -111,6 +112,11 @@ private struct SearchPalette: View {
         .accessibilityAddTraits(.isModal)
         .task {
             focused = true
+            model.ask = { question in
+                close()
+                MainNavigation.shared.assistantQuestion = question
+                MainNavigation.shared.open(.meetings)
+            }
             await model.open()
         }
         .onDisappear { model.close() }
@@ -194,6 +200,7 @@ private struct SearchPalette: View {
                             EmptyState(icon: "alert-triangle", title: "Search unavailable")
                             PillButton("Retry") { Task { await model.refresh() }; focused = true }
                         }.frame(height: 140)
+                        if let row = model.rows.first(where: { $0.id == .ask }) { resultRow(row).id(row.id) }
                     } else if model.rows.isEmpty {
                         VStack(spacing: 10) {
                             Icon("search", size: 30).foregroundStyle(Palette.muted)
@@ -289,6 +296,11 @@ private struct SearchPalette: View {
 
     @ViewBuilder private func rowContent(_ row: SearchPaletteModel.Row) -> some View {
         switch row.content {
+        case .ask(let question):
+            HStack(spacing: 8) {
+                Icon("sparkles", size: 15).foregroundStyle(Palette.orange)
+                Text("Ask AI: “\(question)”").font(Typo.body).foregroundStyle(Palette.text).lineLimit(1)
+            }
         case .meeting(let meeting):
             HStack(spacing: 8) {
                 Icon("file-text", size: 15).foregroundStyle(Palette.secondary)

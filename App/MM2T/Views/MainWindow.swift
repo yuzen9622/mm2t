@@ -47,6 +47,7 @@ final class MainNavigation {
     /// Settings open as a dialog over the main window, on this section.
     var settingsOpen = false
     var searchOpen = false
+    var assistantQuestion: String?
     var settingsSection = SettingsSection.general
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.

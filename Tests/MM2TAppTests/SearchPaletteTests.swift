@@ -58,14 +58,20 @@ import Testing
         #expect(model.activate()?.meeting == meeting.id)
         #expect(model.activate()?.utterance == nil)
         model.move(1)
+        #expect(model.selection == .ask)
+        model.move(1)
         #expect(model.selection == model.rows.first?.id)
         model.query = "unmatched"
         #expect(model.selection == model.rows.first?.id)
         #expect(!model.rows.isEmpty, "previous results remain during debounce")
         await model.refresh()
-        #expect(model.rows.isEmpty)
+        #expect(model.rows.map(\.id) == [.ask])
+        var asked: String?
+        model.ask = { asked = $0 }
         model.move(1)
-        #expect(model.selection == nil)
+        #expect(model.selection == .ask)
+        #expect(model.activate() == nil)
+        #expect(asked == "unmatched")
     }
 
     @Test func personAndDatePickersAreKeyboardNavigable() async throws {
@@ -137,7 +143,7 @@ import Testing
         #expect(model.names[user.id] == "Renamed")
         model.query = "Putty"
         await model.refresh()
-        #expect(model.rows.isEmpty)
+        #expect(model.rows.map(\.id) == [.ask])
     }
 
     @Test func dateRangesUseCalendarDays() {

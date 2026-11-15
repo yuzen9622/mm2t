@@ -259,7 +259,7 @@ struct TransportBar: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 50)
-        .modifier(PlaybackGlass())
+        .modifier(PlaybackGlass(shape: Capsule()))
         .onChange(of: status) {
             dragging = nil
             isScrubbing = false
@@ -297,22 +297,5 @@ struct TransportBar: View {
         .disabled(status != .ready || playhead.duration <= 0)
         .focusEffectDisabled()
         .accessibilityValue(MeetingPresentation.timestamp(shown))
-    }
-}
-
-private struct PlaybackGlass: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Palette.card, in: Capsule())
-        } else if #available(macOS 26, *) {
-            content
-                .background(Palette.card.opacity(0.45), in: Capsule())
-                .glassEffect(.regular, in: Capsule())
-        } else {
-            content.background(.ultraThinMaterial, in: Capsule())
-                .overlay { Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
-        }
     }
 }

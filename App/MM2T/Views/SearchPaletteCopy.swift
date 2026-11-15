@@ -34,6 +34,7 @@ extension Copy {
         case .more(let meeting): return "\(meeting.title), \(searchMore(meeting.totalHits - meeting.hits.count))"
         case .person(_, let name): return name
         case .date(let date): return searchDate(date)
+        case .ask(let question): return String(localized: "Ask AI: “\(question)”")
         }
     }
 

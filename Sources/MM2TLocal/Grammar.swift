@@ -38,6 +38,8 @@ enum Grammar {
             switch fields["type"] {
             case .text("string")?:
                 return "string"
+            case .text("boolean")?:
+                return define(#"("true" | "false")"#)
             case .list(let types)?:
                 let names = types.compactMap { if case .text(let name) = $0 { name } else { nil } }
                 guard Set(names) == ["string", "null"] else { throw Unsupported(description: "union \(names)") }

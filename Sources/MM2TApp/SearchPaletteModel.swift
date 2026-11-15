@@ -30,10 +30,10 @@ public final class SearchPaletteModel {
 
     public struct Row: Identifiable, Equatable {
         public enum ID: Hashable {
-            case meeting(MeetingID), hit(MeetingID, Int), more(MeetingID), person(PersonID), date(DateFilter)
+            case meeting(MeetingID), hit(MeetingID, Int), more(MeetingID), person(PersonID), date(DateFilter), ask
         }
         public enum Content: Equatable {
-            case meeting(MeetingHits), hit(MeetingHits, Int), more(MeetingHits), person(PersonID, String), date(DateFilter)
+            case meeting(MeetingHits), hit(MeetingHits, Int), more(MeetingHits), person(PersonID, String), date(DateFilter), ask(String)
         }
         public let id: ID
         public let content: Content
@@ -103,6 +103,7 @@ public final class SearchPaletteModel {
     public func activate(_ id: Row.ID? = nil) -> Destination? {
         guard let selected = id ?? selection, let row = rows.first(where: { $0.id == selected }) else { return nil }
         switch row.content {
+        case .ask(let question): ask?(question)
         case .meeting(let meeting), .more(let meeting):
             return Destination(meeting: meeting.id, utterance: nil)
         case .hit(let meeting, let index):
@@ -156,8 +157,9 @@ public final class SearchPaletteModel {
         } catch {
             guard request == revision, !Task.isCancelled else { return }
             failed = true
-            rows = []
-            selection = nil
+            let question = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            rows = question.isEmpty ? [] : [Row(id: .ask, content: .ask(question))]
+            selection = rows.first?.id
             Self.logger.error("Search failed: \(String(describing: error), privacy: .public)")
         }
     }
@@ -182,6 +184,8 @@ public final class SearchPaletteModel {
                 return group
             }
             if isRecent { rows += people.prefix(5) }
+            let question = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !question.isEmpty { rows.append(Row(id: .ask, content: .ask(question))) }
         }
         selection = rows.first?.id
     }

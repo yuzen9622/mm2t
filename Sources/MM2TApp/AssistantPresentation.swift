@@ -1,0 +1,93 @@
+import Foundation
+import MM2TCore
+
+public enum AssistantMarkdown {
+    public struct Run: Equatable, Identifiable {
+        public let offset: Int
+        public let text: String
+        public let bold: Bool
+        public let citation: String?
+        public var id: Int { offset }
+    }
+    public struct Document: Equatable {
+        public let runs: [Run]
+        public let citationIDs: [String]
+        public var plainText: String { runs.map(\.text).joined() }
+    }
+
+    public static func parse(_ input: String, known: Set<String>) -> Document {
+        let characters = Array(input)
+        var index = 0
+        var bold = false
+        var lineStart = true
+        var runs: [Run] = []
+        var citations: [String] = []
+        func append(_ text: String, at offset: Int, citation: String? = nil) {
+            runs.append(Run(offset: offset, text: text, bold: bold, citation: citation))
+        }
+        while index < characters.count {
+            let start = index
+            let char = characters[index]
+            if char == "*" {
+                if index + 1 == characters.count { break }
+                if characters[index + 1] == "*" { bold.toggle(); index += 2; continue }
+            }
+            if char == "[" {
+                if index + 1 == characters.count { break }
+                if characters[index + 1] == "m" {
+                    guard let end = characters[(index + 2)...].firstIndex(of: "]") else { break }
+                    let id = String(characters[(index + 1)..<end])
+                    if known.contains(id) {
+                        if !citations.contains(id) { citations.append(id) }
+                        append("\(citations.firstIndex(of: id)! + 1)", at: start, citation: id)
+                    }
+                    index = end + 1
+                    continue
+                }
+            }
+            if lineStart && char == "-" {
+                if index + 1 == characters.count { break }
+                if characters[index + 1] == " " { append("• ", at: start); index += 2; lineStart = false; continue }
+            }
+            append(String(char), at: start)
+            lineStart = char == "\n"
+            index += 1
+        }
+        return Document(runs: runs, citationIDs: citations)
+    }
+}
+
+public struct AssistantBatch: Sendable, Equatable {
+    public let endOffset: Int
+    public let arrived: Date
+}
+
+public struct AssistantBatcher {
+    public private(set) var text = ""
+    public private(set) var batches: [AssistantBatch] = []
+    private var pending = ""
+    private var lastFlush: Date?
+    public init() {}
+    public mutating func append(_ delta: String) { pending += delta }
+    @discardableResult public mutating func flush(at now: Date, force: Bool = false) -> Bool {
+        guard !pending.isEmpty, force || lastFlush == nil || now.timeIntervalSince(lastFlush!) >= 0.05 else { return false }
+        text += pending
+        pending = ""
+        batches.append(.init(endOffset: text.count, arrived: now))
+        lastFlush = now
+        return true
+    }
+}
+
+public struct AssistantFollowScroll {
+    public private(set) var follows = true
+    public init() {}
+    public mutating func userScrolled(bottomDistance: Double) { follows = bottomDistance <= 40 }
+    public mutating func sent() { follows = true }
+}
+
+public enum AssistantRail {
+    public static func ordered(_ rows: [MeetingRow], cited: Set<MeetingID>) -> [MeetingRow] {
+        rows.filter { cited.contains($0.id) } + rows.filter { !cited.contains($0.id) }
+    }
+}
