@@ -5,6 +5,7 @@ import MM2TDiarization
 import MM2TLocal
 import MM2TProviders
 import MM2TSystem
+import MM2TWidgetData
 import Observation
 
 /// Where the app keeps its data. `MM2TDataRoot` in UserDefaults (or `-MM2TDataRoot <path>` on the
@@ -45,6 +46,8 @@ public final class AppController {
     public let todoStatus: TodoStatus
     public let reminders: RemindersSync
     public let enrollment: VoiceEnrollmentModel
+    /// Nil when this copy cannot share data with the desktop widget (an ad-hoc build has no team).
+    public let widget: WidgetPublisher?
 
     /// The app is not usable until setup is finished and the user's voice is enrolled.
     public var needsOnboarding: Bool { !settings.settings.hasCompletedOnboarding || !enrollment.hasVoice }
@@ -79,6 +82,7 @@ public final class AppController {
         reminders: any ReminderStore = SystemReminders(),
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
+        widgetFile: URL? = nil,
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
         recordingTitle: String = "Recording"
@@ -169,6 +173,11 @@ public final class AppController {
         dashboard = DashboardModel(
             library: library, voiceprints: voiceprints, settings: settings, calendars: calendars,
             todosFile: paths.root.appending(path: "todos.json"), status: todoStatus, now: now)
+        if let widgetFile {
+            widget = WidgetPublisher(file: widgetFile, dashboard: dashboard, capture: capture, now: now)
+        } else {
+            widget = nil
+        }
         enrollment = VoiceEnrollmentModel(
             voiceprints: voiceprints, recorder: voiceRecorder, permissions: permissions,
             scratch: paths.recordings.appending(path: "enrollment.wav"),
@@ -215,6 +224,7 @@ public final class AppController {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
             },
+            widgetFile: WidgetLink.snapshotFile(),
             recordingTitle: recordingTitle)
     }
 
@@ -228,6 +238,7 @@ public final class AppController {
         await meetings.reload()
         await enrollment.refresh()
         reminders.start()
+        widget?.start()
         self.watchMeetings = watchMeetings
         startMonitorIfReady()
     }

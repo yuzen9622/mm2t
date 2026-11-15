@@ -54,6 +54,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// A desktop widget's Join click arrives as an `mm2t:` link naming an event; the app opens that
+    /// event's call. Recording is left to the usual prompt once the call is live.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { app?.widget?.open(url) }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationDidBecomeActive(_ notification: Notification) {
