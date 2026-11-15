@@ -5,18 +5,23 @@ import SwiftUI
 struct AssistantComposer: View {
     @Bindable var model: AssistantModel
     @State private var focused = false
+    @State private var hasMarkedText = false
     @State private var height: CGFloat = 22
+
+    private var showsPlaceholder: Bool {
+        AssistantModel.showsPlaceholder(draft: model.draft, hasMarkedText: hasMarkedText)
+    }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
             Icon("sparkles", size: 17)
-                .foregroundStyle(model.draft.isEmpty ? Palette.muted : Palette.orange)
+                .foregroundStyle(showsPlaceholder ? Palette.muted : Palette.orange)
                 .padding(.bottom, 6)
-            AssistantInput(text: $model.draft, focused: $focused, height: $height,
+            AssistantInput(text: $model.draft, focused: $focused, height: $height, hasMarkedText: $hasMarkedText,
                 submit: { model.send() }, leave: { if model.draft.isEmpty && !model.isRunning { model.isActive = false } })
                 .frame(height: height)
                 .overlay(alignment: .topLeading) {
-                    if model.draft.isEmpty {
+                    if showsPlaceholder {
                         Text("Ask about your meetings")
                             .font(.system(size: 15, weight: .regular, design: .rounded))
                             .foregroundStyle(Palette.muted).padding(.top, 2).allowsHitTesting(false)
@@ -49,6 +54,7 @@ private struct AssistantInput: NSViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     @Binding var height: CGFloat
+    @Binding var hasMarkedText: Bool
     let submit: () -> Void
     let leave: () -> Void
 
@@ -79,6 +85,11 @@ private struct AssistantInput: NSViewRepresentable {
         editor.submit = submit
         editor.leave = leave
         editor.focusChanged = { focused = $0 }
+        editor.markedTextChanged = { [weak coordinator = context.coordinator, weak editor] marked in
+            guard let coordinator, let editor else { return }
+            DispatchQueue.main.async { coordinator.parent.hasMarkedText = marked }
+            coordinator.textChanged(editor)
+        }
         editor.setAccessibilityLabel(String(localized: "Ask about your meetings"))
         scroll.documentView = editor
         return scroll
@@ -95,8 +106,11 @@ private struct AssistantInput: NSViewRepresentable {
         var parent: AssistantInput
         init(_ parent: AssistantInput) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
-            guard let editor = notification.object as? NSTextView else { return }
-            parent.text = editor.string
+            guard let editor = notification.object as? InputTextView, !editor.isUpdatingInput else { return }
+            textChanged(editor)
+        }
+        func textChanged(_ editor: InputTextView) {
+            if !editor.hasMarkedText() { parent.text = editor.string }
             measure(editor)
         }
         func measure(_ editor: NSTextView) {
@@ -112,7 +126,31 @@ private final class InputTextView: NSTextView {
     var submit: () -> Void = {}
     var leave: () -> Void = {}
     var focusChanged: (Bool) -> Void = { _ in }
+    var markedTextChanged: (Bool) -> Void = { _ in }
     var resized: (NSTextView) -> Void = { _ in }
+    private var inputUpdateDepth = 0
+    var isUpdatingInput: Bool { inputUpdateDepth > 0 }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        inputUpdateDepth += 1
+        defer { finishInputUpdate() }
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+    }
+    override func unmarkText() {
+        inputUpdateDepth += 1
+        defer { finishInputUpdate() }
+        super.unmarkText()
+    }
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        inputUpdateDepth += 1
+        defer { finishInputUpdate() }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+    private func finishInputUpdate() {
+        inputUpdateDepth -= 1
+        if !isUpdatingInput { markedTextChanged(hasMarkedText()) }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         resized(self)

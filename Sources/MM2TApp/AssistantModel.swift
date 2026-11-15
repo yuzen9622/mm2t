@@ -55,6 +55,10 @@ public final class AssistantModel {
     }
     deinit { task?.cancel(); flushTask?.cancel() }
 
+    public static func showsPlaceholder(draft: String, hasMarkedText: Bool) -> Bool {
+        draft.isEmpty && !hasMarkedText
+    }
+
     public func send(_ question: String? = nil) {
         let question = (question ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isRunning, !question.isEmpty else { return }

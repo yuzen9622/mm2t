@@ -4,6 +4,22 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct AssistantTests {
+    @Test(arguments: [
+        ("", false, true),
+        ("", true, false),
+        ("既有草稿", true, false),
+        ("已提交文字", false, false),
+        (" \n", false, false),
+    ])
+    func composerPlaceholder(draft: String, hasMarkedText: Bool, expected: Bool) {
+        #expect(AssistantModel.showsPlaceholder(draft: draft, hasMarkedText: hasMarkedText) == expected)
+    }
+
+    @Test func composerPlaceholderReturnsAfterCompositionIsCancelled() {
+        #expect(!AssistantModel.showsPlaceholder(draft: "", hasMarkedText: true))
+        #expect(AssistantModel.showsPlaceholder(draft: "", hasMarkedText: false))
+    }
+
     @Test func eventOrderAndCitations() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting(title: "預算")
