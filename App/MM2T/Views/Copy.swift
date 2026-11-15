@@ -27,6 +27,12 @@ enum Copy {
         }
     }
 
+    /// The prompt's title: a meeting for the four platforms; any other app or site is only known
+    /// to be using the mic, which may not be a call.
+    static func detectedCall(_ meeting: DetectedMeeting, name: String) -> String {
+        meeting.platform != nil ? String(localized: "\(name) meeting") : String(localized: "\(name) is using the mic")
+    }
+
     static func step(_ step: ProcessingStep?) -> String {
         switch step {
         case nil: String(localized: "Preparing")

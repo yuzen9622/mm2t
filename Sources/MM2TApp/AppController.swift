@@ -104,6 +104,8 @@ public final class AppController {
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
+            rules: { settings.settings.detectionRules },
+            saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
                 // Only with hosted speech recognition and the on-device speaker model: an on-device
                 // speech model would compete with the meeting for the machine, and pieces carry no

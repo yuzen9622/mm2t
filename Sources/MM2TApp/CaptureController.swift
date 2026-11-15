@@ -103,8 +103,8 @@ public final class RecordingMeters {
 @MainActor @Observable
 public final class CaptureController {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
-    /// A meeting the user dismissed stays dismissed until it has been over this long, so the
-    /// detector ending and re-detecting one call (a rejoin, a device switch) does not prompt again.
+    /// A call the user declined stays declined until its app has been off the mic this long, so a
+    /// rejoin or device switch within one call does not prompt again; after that it is a new call.
     public static let dismissalCooldown: TimeInterval = 120
     /// How long the capsule counts down after a meeting ends before the recording stops; zero stops at once.
     public static let endCountdown = Duration.seconds(5)
@@ -124,11 +124,16 @@ public final class CaptureController {
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
     @ObservationIgnored private var detected: DetectedMeeting?
-    @ObservationIgnored private var dismissed: (meeting: DetectedMeeting, endedAt: Date?)?
+    /// Declined calls by bundle ID, kept out of detection so they neither prompt again nor hide
+    /// another meeting. `releasedAt` is when the app last let go of the mic; nil while it holds it.
+    @ObservationIgnored private var declined: [String: (meeting: DetectedMeeting, releasedAt: Date?)] = [:]
     @ObservationIgnored private var session: (any RecordingSession)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private let endCountdown: Duration
     @ObservationIgnored private var countdown: (task: Task<Void, Never>, resumeTo: CaptureState)?
+    @ObservationIgnored private let rules: @MainActor () -> DetectionRules
+    @ObservationIgnored private let saveRules: @MainActor (DetectionRules) -> Void
+    @ObservationIgnored private let appName: @MainActor (String) -> String?
 
     public init(
         recorder: any Recorder,
@@ -137,9 +142,15 @@ public final class CaptureController {
         recordingsDirectory: URL,
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
+        rules: @escaping @MainActor () -> DetectionRules = { DetectionRules() },
+        saveRules: @escaping @MainActor (DetectionRules) -> Void = { _ in },
+        appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
         onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
     ) {
+        self.rules = rules
+        self.saveRules = saveRules
+        self.appName = appName
         self.makeLive = makeLive
         self.endCountdown = endCountdown
         self.recorder = recorder
@@ -154,7 +165,17 @@ public final class CaptureController {
 
     /// Feeds one poll of system signals through `MeetingDetector`.
     public func handle(_ signals: SystemSignals) async {
-        let (next, events) = MeetingDetector.evaluate(signals, current: detected)
+        let time = now()
+        for (bundleID, call) in declined {
+            if let releasedAt = call.releasedAt, time.timeIntervalSince(releasedAt) >= Self.dismissalCooldown {
+                declined[bundleID] = nil
+            } else if signals.micBundleIDs.contains(bundleID) {
+                declined[bundleID]?.releasedAt = nil
+            } else if call.releasedAt == nil {
+                declined[bundleID]?.releasedAt = time
+            }
+        }
+        let (next, events) = MeetingDetector.evaluate(signals, current: detected, declined: Set(declined.keys), rules: rules())
         detected = next
         for event in events {
             switch event {
@@ -166,19 +187,10 @@ public final class CaptureController {
 
     private func detect(_ meeting: DetectedMeeting) {
         guard state == .idle else { return }
-        if let dismissed, dismissed.meeting == meeting {
-            if let endedAt = dismissed.endedAt, now().timeIntervalSince(endedAt) >= Self.dismissalCooldown {
-                self.dismissed = nil
-            } else {
-                self.dismissed?.endedAt = nil
-                return
-            }
-        }
         state = .prompting(meeting)
     }
 
     private func end(_ meeting: DetectedMeeting) async {
-        if dismissed?.meeting == meeting { dismissed?.endedAt = now() }
         switch state {
         case .prompting(let prompted) where prompted == meeting:
             state = .idle
@@ -191,25 +203,68 @@ public final class CaptureController {
         }
     }
 
-    /// Answers the prompt with "not this one".
+    /// Answers the prompt with "not this one". The call stops being the tracked one, so another
+    /// meeting that starts while it still holds the mic is prompted.
     public func dismiss() {
         guard case .prompting(let meeting) = state else { return }
-        dismissed = (meeting, nil)
+        declined[meeting.bundleID] = (meeting, nil)
+        if detected?.bundleID == meeting.bundleID { detected = nil }
         state = .idle
+    }
+
+    /// Answers an unlisted app's or site's prompt with "always prompt": the rule is saved and the
+    /// prompt stays up, without the learn choices, for the user to record this call or not.
+    public func alwaysPrompt() {
+        guard case .prompting(var meeting) = state, meeting.isUnlisted else { return }
+        remember(meeting, prompts: true)
+        meeting.isUnlisted = false
+        if detected?.bundleID == meeting.bundleID { detected = meeting }
+        state = .prompting(meeting)
+    }
+
+    /// Answers an unlisted app's or site's prompt with "never ask": the rule is saved and the prompt closes.
+    public func neverAsk() {
+        guard case .prompting(let meeting) = state, meeting.isUnlisted else { return }
+        remember(meeting, prompts: false)
+        state = .idle
+    }
+
+    private func remember(_ meeting: DetectedMeeting, prompts: Bool) {
+        var rules = rules()
+        if let domain = meeting.domain {
+            rules.set(DetectionRule(key: domain, name: domain, prompts: prompts), in: \.sites)
+        } else {
+            rules.set(DetectionRule(key: meeting.bundleID, name: displayName(of: meeting), prompts: prompts), in: \.apps)
+        }
+        saveRules(rules)
+    }
+
+    /// What the prompt and the recording call a detected call: the platform, the site's domain or
+    /// the app's own name; the bundle ID only when the app cannot be found.
+    public func displayName(of meeting: DetectedMeeting) -> String {
+        meeting.platform?.displayName ?? meeting.domain ?? DetectionPolicy.callApp(meeting.bundleID)?.name
+            ?? appName(meeting.bundleID) ?? rules().app(meeting.bundleID)?.name ?? meeting.bundleID
     }
 
     /// Answers the prompt with "record".
     public func startPrompted() async {
         guard case .prompting(let meeting) = state else { return }
-        await begin(RecordingTarget(bundleID: meeting.bundleID, name: meeting.platform.displayName, platform: meeting.platform))
+        await begin(RecordingTarget(bundleID: meeting.bundleID, name: displayName(of: meeting), platform: meeting.platform))
     }
 
     /// The record button: the meeting in progress if the detector sees one, otherwise the Mac's
     /// whole sound output. `title` names a recording that has no meeting to name it.
     public func startNow(title: String) async {
+        // A declined call still on the mic is the meeting the user changed their mind about; it is
+        // tracked again so its end stops the recording.
+        if detected == nil, state.target == nil,
+           let call = declined.values.filter({ $0.releasedAt == nil }).map(\.meeting).min(by: { $0.bundleID < $1.bundleID }) {
+            declined[call.bundleID] = nil
+            detected = call
+        }
         if let detected {
             await startManually(RecordingTarget(
-                bundleID: detected.bundleID, name: detected.platform.displayName, platform: detected.platform))
+                bundleID: detected.bundleID, name: displayName(of: detected), platform: detected.platform))
         } else {
             await startManually(RecordingTarget(bundleID: nil, name: title, platform: nil))
         }

@@ -448,12 +448,20 @@ struct MeetingPrompt: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
                     Icon("video", size: 16)
-                    Text("\(meeting.platform.displayName) meeting")
+                    Text(Copy.detectedCall(meeting, name: capture.displayName(of: meeting)))
                 }
                 if meeting.client == .browser {
                     Text("The whole browser is recorded. Don't play other audio in it during the meeting.")
                         .font(Typo.caption)
                         .foregroundStyle(.white.opacity(0.65))
+                }
+                if meeting.isUnlisted {
+                    // Asked once per app or site, as quiet text so the card keeps one main action.
+                    HStack(spacing: 12) {
+                        PromptLearnButton("Always ask") { capture.alwaysPrompt() }
+                        PromptLearnButton("Never ask") { capture.neverAsk() }
+                    }
+                    .padding(.top, 2)
                 }
             }
             .padding(.leading, 10)
@@ -461,6 +469,29 @@ struct MeetingPrompt: View {
                 .keyboardShortcut(.defaultAction)
             CircleButton("Not This Time", icon: "x") { capture.dismiss() }
         }
+    }
+}
+
+/// One of the prompt's two learn choices: caption text that brightens on hover.
+private struct PromptLearnButton: View {
+    let title: LocalizedStringKey
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ title: LocalizedStringKey, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Typo.caption)
+                .foregroundStyle(.white.opacity(hovering ? 0.95 : 0.65))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .motion(Motion.touch, value: hovering)
     }
 }
 

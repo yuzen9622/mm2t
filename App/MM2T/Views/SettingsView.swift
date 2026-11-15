@@ -51,6 +51,7 @@ enum SettingsRow: Hashable {
     case appLanguage
     case hideFromCapture
     case recordShortcut
+    case promptApps, promptSites
     case systemPermissions, calendars, reminders
     case version, sourceCode, author, buyMeACoffee
     case privacyPolicy, terms, licenses
@@ -71,6 +72,8 @@ enum SettingsRow: Hashable {
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
         case .recordShortcut: [String(localized: "Start or stop recording")]
+        case .promptApps: [String(localized: "Apps")] + DetectionPolicy.callApps.map(\.name)
+        case .promptSites: [String(localized: "Websites")] + MeetingPlatform.allCases.map(\.displayName)
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
                                   String(localized: "Accessibility"), String(localized: "Automation")]
         case .calendars: ["Apple", "Google", "Outlook"]
@@ -104,6 +107,8 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .general, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
+            SettingsGroup(id: "prompts", section: .general, title: String(localized: "Recording prompts"),
+                          rows: [.promptApps, .promptSites]),
             SettingsGroup(id: "system", section: .permissions, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
             SettingsGroup(id: "calendars", section: .permissions, title: String(localized: "Calendars"), rows: [.calendars]),
             SettingsGroup(id: "reminders", section: .permissions, title: String(localized: "Reminders"), rows: [.reminders]),
@@ -365,6 +370,10 @@ struct SettingsRowView: View {
             }
         case .recordShortcut:
             RecordShortcutRow(app: app)
+        case .promptApps:
+            PromptAppRules(store: store)
+        case .promptSites:
+            PromptSiteRules(store: store)
         case .systemPermissions:
             PermissionRows(setup: app.setup)
         case .calendars:

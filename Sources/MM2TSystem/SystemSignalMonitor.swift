@@ -23,6 +23,13 @@ public enum SystemSignalReader {
             browserURL: bundleID.flatMap(activeTabURL))
     }
 
+    /// The name Finder shows for an installed app; nil when no app has `bundleID`.
+    public static func appName(bundleID: String) -> String? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let name = FileManager.default.displayName(atPath: url.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+
     public static func focusedWindowTitle(pid: pid_t) -> String? {
         guard AXIsProcessTrusted() else { return nil }
         let app = AXUIElementCreateApplication(pid)

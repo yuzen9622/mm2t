@@ -43,6 +43,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// The global shortcut that starts a recording and stops it again.
     public var recordShortcut: Hotkey = .commandFn
 
+    // MARK: Recording prompts
+    /// Which apps and websites bring up the recording prompt, beyond and instead of the built-in
+    /// lists in `DetectionPolicy`. Learned from the prompt's answers and edited in Settings.
+    public var detectionRules = DetectionRules()
+
     public init() {}
 
     /// Missing keys take their defaults, so a settings blob written by an older build still loads.
@@ -63,6 +68,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
+        detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +76,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
         case recordShortcut
+        case detectionRules
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
