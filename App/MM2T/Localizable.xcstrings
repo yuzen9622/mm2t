@@ -277,26 +277,6 @@
         }
       }
     },
-    "Add": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新增"
-          }
-        }
-      }
-    },
-    "Add a name, product or term": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新增人名、產品名稱或術語"
-          }
-        }
-      }
-    },
     "Add to Reminders": {
       "localizations": {
         "zh-Hant": {
