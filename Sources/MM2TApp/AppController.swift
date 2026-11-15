@@ -238,7 +238,8 @@ public final class AppController {
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
-        await searchSync.start()
+        // Indexing reads every meeting; the rest of launch does not wait for it.
+        Task { [searchSync] in await searchSync.start() }
         let scanner = RecordingRecoveryScanner(recordingsDirectory: paths.recordings, library: library)
         let outcome = await scanner.recoverAll()
         recoveryFailures = outcome.failures
