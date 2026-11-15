@@ -42,6 +42,8 @@ public final class AssistantModel {
     public private(set) var turns: [AssistantTurn] = []
     public var isActive = false
     public var draft = ""
+    public var scroll = AssistantFollowScroll()
+    public var shownContent = AssistantShownContent()
     public var isRunning: Bool { turns.last?.state == .running }
     public var citedMeetings: Set<MeetingID> { Set(turns.flatMap(\.citedSources).map(\.meeting)) }
     @ObservationIgnored private let engine: AssistantEngine
@@ -64,6 +66,7 @@ public final class AssistantModel {
         guard !isRunning, !question.isEmpty else { return }
         draft = ""
         isActive = true
+        scroll.sent()
         let previous = turns.map(\.question)
         turns.append(AssistantTurn(question: question))
         let position = turns.count - 1
@@ -96,6 +99,19 @@ public final class AssistantModel {
         for index in turns[last].steps.indices where turns[last].steps[index].state == .running {
             turns[last].steps[index].state = .stopped
         }
+    }
+
+    public func pageDisappeared() {
+        shownContent.settleAnswers(turns)
+    }
+
+    public func close() {
+        stop()
+        turns = []
+        isActive = false
+        draft = ""
+        scroll = AssistantFollowScroll()
+        shownContent = AssistantShownContent()
     }
 
     public func retry() {

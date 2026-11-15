@@ -172,7 +172,7 @@ import Testing
         guard case .failed = model.turns.last?.steps.last?.state else { Issue.record("Missing failed answer activity"); return }
     }
 
-    @Test func paletteHandoffStopsCurrentTurnAndSendsImmediately() async throws {
+    @Test func paletteHandoffFromMeetingStopsCurrentTurnAndSendsToSameModel() async throws {
         let world = try World()
         let llm = FakeLLM()
         llm.planJSON.set(plan(queries: [], lookup: false))
@@ -183,9 +183,15 @@ import Testing
             voiceprints: world.app.voiceprints), build: { .ready(llm) })
         model.send("First")
         #expect(await eventually { model.turns.last?.answer.text == "First partial" })
+        let firstID = model.turns.first?.id
+        model.scroll.userScrolled(offset: 240, bottomDistance: 500)
+        model.pageDisappeared()
+        #expect(model.isActive && model.isRunning)
         llm.holdsStream.set(false)
         llm.answerChunks.set(["Second answer"])
         model.handoff("Second")
+        #expect(model.isActive && model.scroll.follows)
+        #expect(model.turns.first?.id == firstID)
         #expect(model.turns.count == 2)
         #expect(model.turns.first?.state == .stopped)
         #expect(model.turns.first?.answer.text == "First partial")
@@ -282,9 +288,9 @@ import Testing
         #expect(batcher.text == "你好世界")
         #expect(batcher.batches.map(\.endOffset) == [2, 4])
         var scroll = AssistantFollowScroll()
-        scroll.userScrolled(bottomDistance: 100)
+        scroll.userScrolled(offset: 200, bottomDistance: 100)
         #expect(!scroll.follows)
-        scroll.userScrolled(bottomDistance: 10)
+        scroll.userScrolled(offset: 290, bottomDistance: 10)
         #expect(scroll.follows)
         let world = try World()
         let first = try await world.recordedMeeting(title: "First")
@@ -293,6 +299,122 @@ import Testing
         let rows = world.app.meetings.rows
         #expect(AssistantRail.ordered(rows, cited: [first.id]).first?.id == first.id)
         #expect(AssistantRail.ordered(rows, cited: []).map(\.id) == rows.map(\.id))
+    }
+
+    @Test(arguments: [true, false], [true, false])
+    func leavingPageKeepsTurnRunningAndRestoresPresentation(finishWhileAway: Bool, expandActivity: Bool) async throws {
+        let world = try World()
+        let llm = FakeLLM()
+        let gate = Gate<Bool>()
+        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.answerChunks.set(["Before leaving"])
+        llm.resumedAnswerChunks.set([" and after leaving"])
+        llm.holds.set(["answer": gate])
+        let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
+            voiceprints: world.app.voiceprints), build: { .ready(llm) })
+        model.send("Question")
+        #expect(await eventually { model.turns.last?.answer.text == "Before leaving" })
+        let turn = try #require(model.turns.last)
+        if expandActivity { model.toggleActivity(turn.id) }
+        let expanded = model.turns.last?.activityExpanded
+        #expect(expanded == expandActivity)
+        model.scroll.userScrolled(offset: 240, bottomDistance: 500)
+        model.pageDisappeared()
+        #expect(model.isActive && model.isRunning)
+        #expect(model.turns.last?.id == turn.id)
+        #expect(!llm.streamCancelled.get)
+        if finishWhileAway {
+            await gate.open(true)
+            #expect(await eventually { !model.isRunning })
+        }
+        let returnedLayout = AssistantLayoutState(active: model.isActive)
+        #expect(returnedLayout.active && returnedLayout.canvasShown && returnedLayout.visible)
+        #expect(model.turns.last?.activityExpanded == expanded)
+        #expect(model.scroll.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 240)
+        #expect(!model.scroll.follows)
+        if !finishWhileAway { await gate.open(true) }
+        #expect(await eventually { model.turns.last?.state == .finished })
+        #expect(model.turns.last?.answer.text == "Before leaving and after leaving")
+        #expect(model.turns.last?.id == turn.id)
+        #expect(model.isActive)
+    }
+
+    @Test func rememberedScrollRestoresOffsetOrFollowsNewBottom() {
+        var scroll = AssistantFollowScroll()
+        scroll.userScrolled(offset: 325, bottomDistance: 475)
+        let remembered = scroll
+        #expect(remembered.offset == 325)
+        #expect(!remembered.follows)
+        #expect(remembered.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 325)
+        #expect(remembered.restoredOffset(contentHeight: 700, viewportHeight: 600) == 100)
+        #expect(remembered.restoredOffset(contentHeight: 300, viewportHeight: 600) == 0)
+        scroll.userScrolled(offset: 800, bottomDistance: 0)
+        #expect(scroll.follows)
+        #expect(scroll.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 1400)
+        scroll.userScrolled(offset: 325, bottomDistance: 475)
+        scroll.sent()
+        #expect(scroll.follows)
+        #expect(scroll.restoredOffset(contentHeight: 2500, viewportHeight: 600) == 1900)
+    }
+
+    @Test func shownContentSurvivesPageAndModeChangesUntilWindowCloses() async throws {
+        let world = try World()
+        let llm = FakeLLM()
+        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.answerChunks.set(["Answer"])
+        let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
+            voiceprints: world.app.voiceprints), build: { .ready(llm) })
+        model.send("First")
+        #expect(await eventually { model.turns.last?.state == .finished })
+        let turn = try #require(model.turns.last)
+        let step = try #require(turn.steps.first)
+        let activity = AssistantShownContent.Element.activity(step.id)
+        let source = AssistantShownContent.Element.source(turn: turn.id, id: "m1")
+        #expect(!model.shownContent.contains(activity))
+        #expect(!model.shownContent.contains(source))
+        model.shownContent.insert(activity)
+        model.shownContent.insert(source)
+        model.pageDisappeared()
+        model.isActive = false
+        #expect(model.turns.count == 1)
+        #expect(model.shownContent.contains(activity))
+        #expect(model.shownContent.contains(source))
+        #expect(model.shownContent.settledAnswerOffset(for: turn.id) == "Answer".count)
+        model.send("Follow-up")
+        #expect(model.isActive)
+        #expect(model.turns.count == 2)
+        #expect(await eventually { model.turns.last?.state == .finished })
+        #expect(model.shownContent.contains(activity))
+        #expect(!model.shownContent.contains(.source(turn: model.turns[1].id, id: "m1")))
+        model.draft = "Unsent"
+        model.close()
+        #expect(model.turns.isEmpty && !model.isActive && !model.isRunning && model.draft.isEmpty)
+        #expect(model.scroll.follows && model.scroll.offset == 0)
+        #expect(!model.shownContent.contains(activity) && !model.shownContent.contains(source))
+        #expect(model.shownContent.settledAnswerOffset(for: turn.id) == 0)
+    }
+
+    @Test func windowCloseCancelsRunningAnswerAndReopensEmpty() async throws {
+        let world = try World()
+        let llm = FakeLLM()
+        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.answerChunks.set(["Partial"])
+        llm.holdsStream.set(true)
+        let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
+            voiceprints: world.app.voiceprints), build: { .ready(llm) })
+        model.send("Question")
+        #expect(await eventually { model.turns.last?.answer.text == "Partial" })
+        model.pageDisappeared()
+        #expect(model.isRunning)
+        model.close()
+        #expect(await eventually { llm.streamCancelled.get })
+        #expect(model.turns.isEmpty && !model.isActive)
+        llm.holdsStream.set(false)
+        llm.answerChunks.set(["New window"])
+        model.send("New question")
+        #expect(await eventually { model.turns.last?.state == .finished })
+        #expect(model.turns.count == 1)
+        #expect(model.turns.last?.answer.text == "New window")
     }
 
     private func plan(queries: [String], people: [String] = [], from: String? = nil, to: String? = nil, lookup: Bool = true) -> String {

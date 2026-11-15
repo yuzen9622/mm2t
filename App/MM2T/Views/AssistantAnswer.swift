@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AssistantAnswer: View {
     let turn: AssistantTurn
+    let settledOffset: Int
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var regions: [CitationRegion] = []
     @State private var hovering: String?
@@ -40,7 +41,7 @@ struct AssistantAnswer: View {
                 }
         }
         .task(id: last) {
-            settling = !reduce && Date().timeIntervalSince(last) < 0.3
+            settling = !reduce && turn.answer.text.count > settledOffset && Date().timeIntervalSince(last) < 0.3
             if settling {
                 do { try await Task.sleep(for: .milliseconds(310)) } catch { return }
                 settling = false
@@ -56,7 +57,7 @@ struct AssistantAnswer: View {
     @ViewBuilder private func answer(at date: Date) -> some View {
         if #available(macOS 15, *) {
             text(at: date).textRenderer(AssistantTextRenderer(regions: $regions))
-        } else { AssistantLegacyText(turn: turn, date: date, reduce: reduce, regions: $regions) }
+        } else { AssistantLegacyText(turn: turn, settledOffset: settledOffset, date: date, reduce: reduce, regions: $regions) }
     }
 
     private func text(at date: Date) -> Text {
@@ -70,7 +71,8 @@ struct AssistantAnswer: View {
         }
         var fragments: [Fragment] = []
         for run in document.runs {
-            let arrival = turn.answer.batches.first { run.offset < $0.endOffset }?.arrived ?? .distantPast
+            let arrival = run.offset < settledOffset ? Date.distantPast
+                : turn.answer.batches.first { run.offset < $0.endOffset }?.arrived ?? .distantPast
             if let last = fragments.last, last.arrival == arrival, last.bold == run.bold,
                last.citation == nil, run.citation == nil {
                 fragments[fragments.count - 1].text += run.text
@@ -101,6 +103,7 @@ struct AssistantAnswer: View {
 
 private struct AssistantLegacyText: NSViewRepresentable {
     let turn: AssistantTurn
+    let settledOffset: Int
     let date: Date
     let reduce: Bool
     @Binding var regions: [CitationRegion]
@@ -120,7 +123,8 @@ private struct AssistantLegacyText: NSViewRepresentable {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = Typo.readingLineSpacing
         for run in turn.document.runs {
-            let arrival = turn.answer.batches.first { run.offset < $0.endOffset }?.arrived ?? .distantPast
+            let arrival = run.offset < settledOffset ? Date.distantPast
+                : turn.answer.batches.first { run.offset < $0.endOffset }?.arrived ?? .distantPast
             let progress = reduce ? 1 : min(1, max(0, date.timeIntervalSince(arrival) / 0.3))
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: run.citation == nil ? 16 : 12, weight: run.bold ? .bold : .regular),

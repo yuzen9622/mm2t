@@ -72,6 +72,7 @@ enum ContentColumn {
 
 struct MainWindow: View {
     let app: AppController
+    @State private var assistant: AssistantModel
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
     @State private var utterance: UtteranceID?
@@ -83,6 +84,11 @@ struct MainWindow: View {
     @Environment(\.openURL) private var openURL
 
     static let sidebarWidth: CGFloat = 220
+
+    init(app: AppController) {
+        self.app = app
+        _assistant = State(initialValue: app.makeAssistant())
+    }
 
     var body: some View {
         let navigation = MainNavigation.shared
@@ -122,12 +128,21 @@ struct MainWindow: View {
         }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
-        .background(WindowChrome())
+        .background(WindowChrome(close: { assistant.close() }))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            assistant.close()
+        }
         .ignoresSafeArea()
         .frame(minWidth: 820, minHeight: 540)
         .onAppear {
             app.meetings.meLabel = Copy.presentationLabels.me
             app.dashboard.meLabel = Copy.presentationLabels.me
+        }
+        .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
+            guard let question = MainNavigation.shared.assistantQuestion else { return }
+            MainNavigation.shared.assistantQuestion = nil
+            assistant.handoff(question)
+            show(.meetings)
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
@@ -271,7 +286,7 @@ struct MainWindow: View {
                         .id(destinationID)
                         .entrance(from: .trailing, distance: 28)
                 } else {
-                    MeetingListView(app: app, open: { show(.meetings, meeting: $0) })
+                    MeetingListView(app: app, assistant: assistant, open: { show(.meetings, meeting: $0) })
                         .transition(.opacity)
                 }
             case .people:
@@ -337,8 +352,11 @@ struct SidebarRow: View {
 /// Lets the content run under the title bar so the sidebar reaches the top, and makes the empty
 /// background drag the window.
 struct WindowChrome: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+    let close: () -> Void
+
+    func makeNSView(context: Context) -> WindowHost {
+        let view = WindowHost()
+        view.close = close
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.titlebarAppearsTransparent = true
@@ -359,7 +377,19 @@ struct WindowChrome: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: NSView, context: Context) {}
+    func updateNSView(_ view: WindowHost, context: Context) { view.close = close }
+
+    final class WindowHost: NSView {
+        var close: () -> Void = {}
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            NotificationCenter.default.addObserver(self, selector: #selector(windowClosed),
+                name: NSWindow.willCloseNotification, object: window)
+        }
+        @objc private func windowClosed() { close() }
+    }
 }
 
 /// The row at the top of every screen: its name on the left, its controls on the right. A section's

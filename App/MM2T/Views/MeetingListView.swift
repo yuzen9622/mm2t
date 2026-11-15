@@ -6,14 +6,15 @@ struct MeetingListView: View {
     let app: AppController
     let open: (MeetingID) -> Void
     @State private var pendingDelete: MeetingRow?
-    @State private var assistant: AssistantModel
-    @State private var layout = AssistantLayoutState()
+    let assistant: AssistantModel
+    @State private var layout: AssistantLayoutState
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    init(app: AppController, open: @escaping (MeetingID) -> Void) {
+    init(app: AppController, assistant: AssistantModel, open: @escaping (MeetingID) -> Void) {
         self.app = app
+        self.assistant = assistant
         self.open = open
-        _assistant = State(initialValue: app.makeAssistant())
+        _layout = State(initialValue: AssistantLayoutState(active: assistant.isActive))
     }
     @Environment(\.openWindow) private var openWindow
 
@@ -42,7 +43,6 @@ struct MeetingListView: View {
                             .opacity(layout.canvasShown ? 1 : 0)
                             .offset(y: reduce || layout.canvasShown ? 0 : 16)
                             .motion(Motion.page, value: layout.canvasShown)
-                            .entrance(from: .bottom, distance: 16)
                     }
                     meetingList(compact: layout.active)
                         .frame(width: layout.active ? 280 : geometry.size.width)
@@ -68,13 +68,6 @@ struct MeetingListView: View {
             await layout.transition(active: assistant.isActive, reduced: reduce)
         }
         .task(id: app.queue.revision) { await model.reload() }
-        .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
-            if let question = MainNavigation.shared.assistantQuestion {
-                MainNavigation.shared.assistantQuestion = nil
-                assistant.handoff(question)
-            }
-        }
-        .onDisappear { assistant.stop() }
         .confirmationDialog("Delete this meeting?", isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { row in
             Button("Delete Recording and Transcript", role: .destructive) {

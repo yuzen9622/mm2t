@@ -5,38 +5,28 @@ import SwiftUI
 
 struct AssistantCanvas: View {
     let model: AssistantModel
-    @State private var follow = AssistantFollowScroll()
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        ScrollViewReader { proxy in
-            FadingScrollView(ground: Palette.window) {
-                VStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 40) {
-                        ForEach(model.turns) { turn in
-                            AssistantTurnView(turn: turn, isLast: turn.id == model.turns.last?.id,
-                                toggle: { model.toggleActivity(turn.id) }, retry: { model.retry() },
-                                setUp: { openWindow(id: WindowID.onboarding) })
-                        }
-                    }
-                    .frame(maxWidth: 680, alignment: .leading)
-                    .padding(.horizontal, 32).padding(.top, 24).padding(.bottom, 180)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Color.clear.frame(height: 1).id("assistant-bottom")
+        FadingScrollView(ground: Palette.window) {
+            VStack(alignment: .leading, spacing: 40) {
+                ForEach(model.turns) { turn in
+                    AssistantTurnView(model: model, turn: turn, isLast: turn.id == model.turns.last?.id,
+                        toggle: { model.toggleActivity(turn.id) }, retry: { model.retry() },
+                        setUp: { openWindow(id: WindowID.onboarding) })
                 }
-                .background(AssistantScrollObserver { follow.userScrolled(bottomDistance: $0) })
             }
-            .onChange(of: model.turns.count) { follow.sent(); proxy.scrollTo("assistant-bottom", anchor: .bottom) }
-            .onChange(of: model.turns.last?.answer.text) {
-                if follow.follows { proxy.scrollTo("assistant-bottom", anchor: .bottom) }
-            }
-            .onChange(of: model.turns.last?.state) {
-                if follow.follows { proxy.scrollTo("assistant-bottom", anchor: .bottom) }
-                if let turn = model.turns.last, turn.state == .finished { announce(turn.document.plainText) }
-            }
-            .onChange(of: model.turns.last?.steps.map { Copy.assistantStep($0) + Copy.assistantDetail($0) }) {
-                if let step = model.turns.last?.steps.last { announce(Copy.assistantStep(step) + " " + Copy.assistantDetail(step)) }
-            }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(.horizontal, 32).padding(.top, 24).padding(.bottom, 180)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AssistantScrollObserver(model: model))
+        }
+        .onDisappear { model.pageDisappeared() }
+        .onChange(of: model.turns.last?.state) {
+            if let turn = model.turns.last, turn.state == .finished { announce(turn.document.plainText) }
+        }
+        .onChange(of: model.turns.last?.steps.map { Copy.assistantStep($0) + Copy.assistantDetail($0) }) {
+            if let step = model.turns.last?.steps.last { announce(Copy.assistantStep(step) + " " + Copy.assistantDetail(step)) }
         }
     }
     private func announce(_ text: String) {
@@ -48,6 +38,7 @@ struct AssistantCanvas: View {
 }
 
 private struct AssistantTurnView: View {
+    let model: AssistantModel
     let turn: AssistantTurn
     let isLast: Bool
     let toggle: () -> Void
@@ -66,7 +57,10 @@ private struct AssistantTurnView: View {
                 }.padding(.top, 14)
             } else {
                 activity.padding(.top, 14)
-                if !turn.answer.text.isEmpty { AssistantAnswer(turn: turn).padding(.top, 16) }
+                if !turn.answer.text.isEmpty {
+                    AssistantAnswer(turn: turn, settledOffset: model.shownContent.settledAnswerOffset(for: turn.id))
+                        .padding(.top, 16)
+                }
                 if turn.state == .finished && !turn.citedSources.isEmpty { sources.padding(.top, 20) }
                 if turn.state == .stopped { Text("Stopped").font(Typo.caption).foregroundStyle(Palette.muted).padding(.top, 12) }
                 if case .failed(let reason) = turn.state {
@@ -100,7 +94,10 @@ private struct AssistantTurnView: View {
                 }.buttonStyle(.plain).focusEffectDisabled().accessibilityLabel("Show activity")
             }
             if turn.activityExpanded {
-                ForEach(turn.steps) { step in AssistantActivityRow(step: step).modifier(AssistantArrival()) }
+                ForEach(turn.steps) { step in
+                    AssistantActivityRow(step: step)
+                        .modifier(AssistantArrival(model: model, element: .activity(step.id)))
+                }
             }
         }
     }
@@ -125,7 +122,8 @@ private struct AssistantTurnView: View {
                         Spacer(minLength: 0)
                     }.card()
                 }.buttonStyle(.plain).focusEffectDisabled()
-                    .modifier(AssistantArrival(delay: Double(index) * 0.06))
+                    .modifier(AssistantArrival(model: model, element: .source(turn: turn.id, id: source.id),
+                        delay: Double(index) * 0.06))
             }
         }
     }
@@ -189,14 +187,27 @@ private struct AssistantThinking: View {
 }
 
 struct AssistantArrival: ViewModifier {
-    var delay = 0.0
-    @State private var shown = false
+    let model: AssistantModel
+    let element: AssistantShownContent.Element
+    let delay: Double
+    @State private var shown: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
+
+    init(model: AssistantModel, element: AssistantShownContent.Element, delay: Double = 0) {
+        self.model = model
+        self.element = element
+        self.delay = delay
+        _shown = State(initialValue: model.shownContent.contains(element))
+    }
+
     func body(content: Content) -> some View {
         content.opacity(shown ? 1 : 0).blur(radius: reduce || shown ? 0 : 6)
             .offset(y: reduce || shown ? 0 : 6)
             .motion(.easeOut(duration: 0.35).delay(reduce ? 0 : delay), value: shown)
-            .onAppear { shown = true }
+            .onAppear {
+                model.shownContent.insert(element)
+                shown = true
+            }
     }
 }
 
@@ -246,16 +257,27 @@ private struct AssistantMeetingChips: View {
 }
 
 private struct AssistantScrollObserver: NSViewRepresentable {
-    let changed: (Double) -> Void
-    func makeNSView(context: Context) -> ScrollProbe { let view = ScrollProbe(); view.changed = changed; return view }
-    func updateNSView(_ view: ScrollProbe, context: Context) { view.changed = changed }
+    let model: AssistantModel
+    func makeNSView(context: Context) -> ScrollProbe {
+        let view = ScrollProbe()
+        view.model = model
+        return view
+    }
+    func updateNSView(_ view: ScrollProbe, context: Context) {
+        view.model = model
+        view.scheduleRestore()
+    }
 }
 
 private final class ScrollProbe: NSView {
-    var changed: (Double) -> Void = { _ in }
+    weak var model: AssistantModel?
     private weak var observedScroll: NSScrollView?
     private var lastHeight: CGFloat = 0
+    private var lastViewport: CGFloat = 0
     private var lastY: CGFloat = 0
+    private var restoring = false
+    private var restoreScheduled = false
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         NotificationCenter.default.removeObserver(self)
@@ -264,21 +286,52 @@ private final class ScrollProbe: NSView {
         DispatchQueue.main.async { [weak self] in self?.observe() }
     }
     private func observe() {
-        guard let scroll = enclosingScrollView else { return }
-        lastHeight = scroll.documentView?.frame.height ?? 0
-        lastY = scroll.contentView.bounds.minY
-        scroll.contentView.postsBoundsChangedNotifications = true
+        guard window != nil, let scroll = enclosingScrollView, let document = scroll.documentView else { return }
         observedScroll = scroll
+        scroll.contentView.postsBoundsChangedNotifications = true
+        document.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled),
             name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        NotificationCenter.default.addObserver(self, selector: #selector(contentResized),
+            name: NSView.frameDidChangeNotification, object: document)
+        restore()
     }
-    @objc private func scrolled() {
-        guard let scroll = observedScroll else { return }
-        let height = scroll.documentView?.frame.height ?? 0
-        let y = scroll.contentView.bounds.minY
-        if height == lastHeight && y != lastY {
-            changed(Double(height - scroll.contentView.bounds.maxY))
+    func scheduleRestore() {
+        guard !restoreScheduled else { return }
+        restoreScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.restoreScheduled = false
+            self.restore()
         }
-        lastHeight = height; lastY = y
+    }
+    private func restore() {
+        guard !restoring, let scroll = observedScroll, let model else { return }
+        restoring = true
+        defer { restoring = false }
+        scroll.layoutSubtreeIfNeeded()
+        let height = scroll.documentView?.frame.height ?? 0
+        let viewport = scroll.contentView.bounds.height
+        let y = model.scroll.restoredOffset(contentHeight: height, viewportHeight: viewport)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        lastHeight = height
+        lastViewport = viewport
+        lastY = scroll.contentView.bounds.minY
+    }
+    @objc private func contentResized() { scheduleRestore() }
+    @objc private func scrolled() {
+        guard !restoring, let scroll = observedScroll else { return }
+        let height = scroll.documentView?.frame.height ?? 0
+        let viewport = scroll.contentView.bounds.height
+        let y = scroll.contentView.bounds.minY
+        if height != lastHeight || viewport != lastViewport {
+            scheduleRestore()
+            return
+        }
+        if y != lastY {
+            model?.scroll.userScrolled(offset: y, bottomDistance: height - scroll.contentView.bounds.maxY)
+        }
+        lastY = y
     }
 }

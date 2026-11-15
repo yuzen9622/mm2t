@@ -110,6 +110,7 @@ struct FakeLLMError: Error, CustomStringConvertible {
 struct FakeLLM: LLMProvider, StructuredGenerator {
     let planJSON = Box(#"{"reasoning":"Look up the meetings.","queries":["預算"],"people":[],"dateFrom":null,"dateTo":null,"needsMeetings":true}"#)
     let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
+    let resumedAnswerChunks = Box<[String]>([])
     let answerInputs = Box<[String]>([])
     let streamCancelled = Box(false)
     let holdsStream = Box(false)
@@ -125,6 +126,8 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
         return AsyncThrowingStream { continuation in
             let task = Task {
                 for text in answerChunks.get { continuation.yield(text) }
+                if let gate = holds.get["answer"] { _ = await gate.wait() }
+                for text in resumedAnswerChunks.get { continuation.yield(text) }
                 if holdsStream.get {
                     do { try await Task.sleep(for: .seconds(60)) } catch {
                         for text in lateAfterCancellation.get { continuation.yield(text) }

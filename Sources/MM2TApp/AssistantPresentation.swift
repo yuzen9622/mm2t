@@ -82,9 +82,33 @@ public struct AssistantBatcher {
 
 public struct AssistantFollowScroll {
     public private(set) var follows = true
+    public private(set) var offset: Double = 0
     public init() {}
-    public mutating func userScrolled(bottomDistance: Double) { follows = bottomDistance <= 40 }
+    public mutating func userScrolled(offset: Double, bottomDistance: Double) {
+        self.offset = max(0, offset)
+        follows = bottomDistance <= 40
+    }
+    public func restoredOffset(contentHeight: Double, viewportHeight: Double) -> Double {
+        let bottom = max(0, contentHeight - viewportHeight)
+        return follows ? bottom : min(offset, bottom)
+    }
     public mutating func sent() { follows = true }
+}
+
+public struct AssistantShownContent {
+    public enum Element: Hashable {
+        case activity(UUID)
+        case source(turn: UUID, id: String)
+    }
+    private var elements: Set<Element> = []
+    private var answerOffsets: [UUID: Int] = [:]
+    public init() {}
+    public func contains(_ element: Element) -> Bool { elements.contains(element) }
+    public mutating func insert(_ element: Element) { elements.insert(element) }
+    public func settledAnswerOffset(for turn: UUID) -> Int { answerOffsets[turn] ?? 0 }
+    public mutating func settleAnswers(_ turns: [AssistantTurn]) {
+        for turn in turns { answerOffsets[turn.id] = turn.answer.text.count }
+    }
 }
 
 @MainActor @Observable
@@ -92,7 +116,10 @@ public final class AssistantLayoutState {
     public private(set) var active = false
     public private(set) var visible = true
     public private(set) var canvasShown = false
-    public init() {}
+    public init(active: Bool = false) {
+        self.active = active
+        canvasShown = active
+    }
 
     public func transition(active target: Bool, reduced: Bool) async {
         guard !Task.isCancelled, begin(active: target, reduced: reduced) else { return }
