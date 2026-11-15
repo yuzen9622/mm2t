@@ -14,6 +14,8 @@ struct SpeakerPanel: View {
                                canClaim: model.canClaimAsMe(speaker.id),
                                rename: { renaming = speaker },
                                claim: { Task { await model.claimAsMe(speaker.id) } },
+                               learn: { Task { await model.learnVoice(of: speaker.id) } },
+                               forget: { Task { await model.forgetVoice(of: speaker.id) } },
                                merge: { other in Task { await model.merge(speaker.id, into: other) } },
                                accept: { Task { await model.acceptSuggestion(for: speaker.id) } })
             }
@@ -27,8 +29,8 @@ struct SpeakerPanel: View {
         .opacity(model.canEditSpeakers ? 1 : 0.6)
         .motion(Motion.reveal, value: model.speakers.map(\.displayName))
         .sheet(item: $renaming) { speaker in
-            RenameSheet(speaker: speaker, people: model.people) { target in
-                Task { await model.rename(speaker.id, to: target) }
+            RenameSheet(speaker: speaker, people: model.people) { target, learn in
+                Task { await model.rename(speaker.id, to: target, learn: learn) }
             }
         }
     }
@@ -40,6 +42,8 @@ struct SpeakerRowView: View {
     var canClaim = false
     let rename: () -> Void
     var claim: () -> Void = {}
+    var learn: () -> Void = {}
+    var forget: () -> Void = {}
     let merge: (SpeakerID) -> Void
     let accept: () -> Void
     @State private var hovering = false
@@ -81,6 +85,12 @@ struct SpeakerRowView: View {
             if canClaim {
                 Button("This Is Me", action: claim)
             }
+            if speaker.canLearnVoice {
+                Button("Update \(speaker.displayName)'s Voiceprint", action: learn)
+            }
+            if speaker.canForgetVoice {
+                Button("Remove This Meeting from \(speaker.displayName)'s Voiceprint", action: forget)
+            }
             Menu("Merge Into") {
                 ForEach(others) { other in Button(other.displayName) { merge(other.id) } }
             }
@@ -107,8 +117,9 @@ struct SpeakerRowView: View {
 struct RenameSheet: View {
     let speaker: SpeakerRow
     let people: [Person]
-    let commit: (SpeakerEditing.Target) -> Void
+    let commit: (SpeakerEditing.Target, _ learn: Bool) -> Void
     @State private var name = ""
+    @State private var learn = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -124,13 +135,21 @@ struct RenameSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(people) { person in
                             PersonPick(name: person.name) {
-                                commit(.existing(person.id))
+                                commit(.existing(person.id), learn)
                                 dismiss()
                             }
                         }
                     }
                 }
                 .frame(maxHeight: 220)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Update voiceprint with this voice", isOn: $learn).toggleStyle(SwitchStyle())
+                    .disabled(!speaker.hasVoice)
+                if !speaker.hasVoice {
+                    Text("This meeting has too little clear speech from them to update a voiceprint.")
+                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
             HStack {
                 Spacer()
@@ -147,7 +166,7 @@ struct RenameSheet: View {
 
     private func save() {
         guard !trimmed.isEmpty else { return }
-        commit(.newPerson(name: trimmed))
+        commit(.newPerson(name: trimmed), learn)
         dismiss()
     }
 }

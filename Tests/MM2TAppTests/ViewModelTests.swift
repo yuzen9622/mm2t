@@ -143,6 +143,28 @@ import Testing
         #expect(await world.app.voiceprints.allPersons().count == 1)
     }
 
+    @Test func namingASpeakerAndTeachingTheirVoiceprintAreSeparateChoices() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let id = SpeakerID("r1")
+        func row() throws -> SpeakerRow { try #require(detail.speakers.first { $0.id == id }) }
+        #expect(try row().hasVoice && !row().canLearnVoice && !row().canForgetVoice)
+
+        await detail.rename(id, to: .newPerson(name: "Amy"), learn: false)
+        #expect(try row().displayName == "Amy" && row().canLearnVoice && !row().canForgetVoice)
+        #expect(detail.people.first?.embeddings.isEmpty == true)
+
+        await detail.learnVoice(of: id)
+        #expect(try !row().canLearnVoice && row().canForgetVoice)
+        #expect(detail.people.first?.embeddings.isEmpty == false)
+
+        await detail.forgetVoice(of: id)
+        #expect(try row().canLearnVoice && !row().canForgetVoice)
+        #expect(detail.errorMessage == nil)
+    }
+
     @Test func editsAreRefusedWhileTheMeetingIsRegenerating() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()

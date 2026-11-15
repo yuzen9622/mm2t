@@ -2167,6 +2167,16 @@
         }
       }
     },
+    "Remove This Meeting from %@'s Voiceprint": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從「%@」的聲紋移除這場會議"
+          }
+        }
+      }
+    },
     "Rename": {
       "localizations": {
         "zh-Hant": {
@@ -2797,6 +2807,16 @@
         }
       }
     },
+    "This meeting has too little clear speech from them to update a voiceprint.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這場會議中此人的清晰語音不足，無法更新聲紋。"
+          }
+        }
+      }
+    },
     "This meeting is longer than %@ can process at once.": {
       "localizations": {
         "zh-Hant": {
@@ -2903,6 +2923,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "請至少開啟一個轉錄來源。"
+          }
+        }
+      }
+    },
+    "Update %@'s Voiceprint": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新「%@」的聲紋"
+          }
+        }
+      }
+    },
+    "Update voiceprint with this voice": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同時用這段聲音更新聲紋"
           }
         }
       }

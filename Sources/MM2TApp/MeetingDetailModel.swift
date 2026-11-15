@@ -20,6 +20,12 @@ public struct SpeakerRow: Hashable, Sendable, Identifiable {
     public let displayName: String
     public let person: PersonID?
     public let suggestion: Suggestion?
+    /// Whether the meeting heard enough of them to keep a voiceprint from.
+    public let hasVoice: Bool
+    /// Whether their person's voiceprint still lacks some of this meeting's voice.
+    public let canLearnVoice: Bool
+    /// Whether their person's voiceprint holds some of this meeting's voice.
+    public let canForgetVoice: Bool
 
     /// The recording's owner, who has no voice of their own to rename or merge.
     public var isMe: Bool { id == .me }
@@ -129,7 +135,8 @@ public final class MeetingDetailModel {
     public var speakers: [SpeakerRow] {
         guard let meeting, let presentation else { return [] }
         let me = meeting.utterances.contains { meeting.resolve($0.speaker) == .me }
-            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil)]
+            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil,
+                          hasVoice: false, canLearnVoice: false, canForgetVoice: false)]
             : []
         return me + meeting.speakers.map { speaker in
             let suggestion = meeting.suggestions.items.first { $0.speaker == speaker.id }.flatMap { item -> SpeakerRow.Suggestion? in
@@ -140,8 +147,11 @@ public final class MeetingDetailModel {
                     .inferred(name: name, reason: presentation.substitute(reason))
                 }
             }
+            let stored = people.first { $0.id == speaker.person }?.embeddings
+            let learned = speaker.embeddings.filter { stored?.contains($0) == true }.count
             return SpeakerRow(id: speaker.id, label: speaker.label, displayName: presentation.speakerName(speaker.id),
-                              person: speaker.person, suggestion: suggestion)
+                              person: speaker.person, suggestion: suggestion, hasVoice: !speaker.embeddings.isEmpty,
+                              canLearnVoice: stored != nil && learned < speaker.embeddings.count, canForgetVoice: learned > 0)
         }
     }
 
@@ -221,8 +231,23 @@ public final class MeetingDetailModel {
         playback?.play(from: row.start)
     }
 
-    public func rename(_ speaker: SpeakerID, to target: SpeakerEditing.Target) async {
-        await edit { try await $0.rename(speaker, in: self.id, to: target) }
+    /// `learn` also teaches the person's voiceprint this meeting's voice; off, the speaker is only labelled.
+    public func rename(_ speaker: SpeakerID, to target: SpeakerEditing.Target, learn: Bool = true) async {
+        await edit { try await $0.rename(speaker, in: self.id, to: target, learn: learn) }
+    }
+
+    public func learnVoice(of speaker: SpeakerID) async {
+        await edit {
+            try await $0.learnVoice(of: speaker, in: self.id)
+            return try await self.library.meeting(self.id)
+        }
+    }
+
+    public func forgetVoice(of speaker: SpeakerID) async {
+        await edit {
+            try await $0.forgetVoice(of: speaker, in: self.id)
+            return try await self.library.meeting(self.id)
+        }
     }
 
     public func acceptSuggestion(for speaker: SpeakerID) async {

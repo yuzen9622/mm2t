@@ -124,6 +124,12 @@ public actor VoiceprintStore {
         }
     }
 
+    /// Takes back vectors a meeting taught. A person already deleted has nothing left to take back.
+    public func removeEmbeddings(_ embeddings: [Embedding], from id: PersonID) throws {
+        guard person(id) != nil else { return }
+        try update(id) { person in person.embeddings.removeAll(where: embeddings.contains) }
+    }
+
     public func rename(_ id: PersonID, to name: String) throws {
         try update(id) { $0.name = name }
     }
