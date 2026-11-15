@@ -17,20 +17,11 @@ struct VoiceprintsView: View {
                 FadingScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(model.rows) { person in
-                            HStack(spacing: 12) {
-                                Avatar(name: person.name, isNamed: true, size: 34)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(person.name).font(Typo.bodyStrong)
-                                    VoiceprintSummary(count: person.voiceprintCount, channels: person.channels)
-                                }
-                                Spacer()
-                                IconButton("Rename…", icon: "pencil") {
-                                    newName = person.name
-                                    editing = person
-                                }
-                                IconButton("Delete…", icon: "trash") { deleting = person }
-                            }
-                            .card()
+                            PersonCard(id: person.id, name: person.name, count: person.voiceprintCount,
+                                       channels: person.channels, rename: {
+                                newName = person.name
+                                editing = person
+                            }, delete: { deleting = person })
                             .transition(.asymmetric(insertion: .offset(y: 10).combined(with: .opacity), removal: .opacity))
                         }
                     }
@@ -55,6 +46,38 @@ struct VoiceprintsView: View {
     }
 }
 
+struct PersonCard: View {
+    let id: PersonID
+    let name: String
+    let count: Int
+    let channels: Set<VoiceChannel>
+    let rename: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            PersonSigil(id: id)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(Typo.bodyStrong).fixedSize(horizontal: false, vertical: true)
+                VoiceprintSummary(count: count, channels: channels)
+            }
+            Spacer(minLength: 0)
+                .overlay {
+                    GeometryReader { geometry in
+                        if geometry.size.width >= 160 {
+                            PersonWatermark(id: id)
+                        }
+                    }
+                    .frame(height: 140)
+                }
+            IconButton("Rename…", icon: "pencil", action: rename)
+            IconButton("Delete…", icon: "trash", action: delete)
+        }
+        .card()
+        .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+    }
+}
+
 /// How many vectors a person has and where they were heard. A voice known only from the room
 /// scores low on a call until it is named there once, so that gap is spelled out.
 struct VoiceprintSummary: View {
@@ -70,10 +93,6 @@ struct VoiceprintSummary: View {
                     Text("^[\(count) voiceprint](inflect: true)").font(Typo.caption).foregroundStyle(Palette.secondary)
                     if channels.contains(.room) { ChannelTag(title: "In the room") }
                     if channels.contains(.call) { ChannelTag(title: "On calls") }
-                }
-                if !channels.contains(.call) {
-                    Text("No call voiceprint yet. Name them once during a call and they will be recognized.")
-                        .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

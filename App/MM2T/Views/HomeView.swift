@@ -18,17 +18,21 @@ struct HomeView: View {
             FadingScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
+                    // Overlays fill the sibling's height without contributing their content's ideal height.
                     HStack(alignment: .top, spacing: 14) {
-                        // Equal halves: both cards stretch, so neither takes the other's room.
-                        TodoCard(model: model, open: open)
+                        Color.clear
                             .frame(maxWidth: .infinity)
+                            .overlay { TodoCard(model: model, open: open) }
                         MeetingsCard(stats: model.stats, days: model.activity, revealed: revealed)
                             .frame(maxWidth: .infinity)
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     HStack(alignment: .top, spacing: 14) {
                         VoicesCard(voices: model.voices, revealed: revealed)
-                        TermsCard(terms: model.terms, revealed: revealed)
+                            .frame(minHeight: model.terms.isEmpty ? 0 : 240)
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .overlay { TermsCard(terms: model.terms, revealed: revealed) }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 }
@@ -532,12 +536,15 @@ private struct TodoCard: View {
             if model.todos.isEmpty {
                 Hint(text: "Action items from your meetings' summaries collect here.")
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(shown) { todo in TodoRowView(todo: todo, toggle: { model.toggle(todo) }, open: { open(todo.meeting) }) }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(shown) { todo in TodoRowView(todo: todo, toggle: { model.toggle(todo) }, open: { open(todo.meeting) }) }
+                        let visible = shown.filter { !$0.isDone }.count
+                        if remaining > visible { Hint(text: "\(remaining - visible) more in your meetings") }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .motion(Motion.select, value: shown.map(\.id))
                 }
-                .motion(Motion.select, value: shown.map(\.id))
-                let visible = shown.filter { !$0.isDone }.count
-                if remaining > visible { Hint(text: "\(remaining - visible) more in your meetings") }
             }
         }
     }

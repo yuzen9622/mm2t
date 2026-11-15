@@ -8,7 +8,7 @@ import MM2TCore
 /// The track streams through the model in 30 s blocks from a memory-mapped 16 kHz copy. For a
 /// two-hour meeting that measured about 110 MB above the loaded models at peak, where passing the
 /// whole file to `processComplete` measured 1.3 GB, at the same speed.
-public actor NemotronDiarizer: MM2TCore.Diarizer {
+public actor NemotronDiarizer: MM2TCore.Diarizer, StreamingDiarizerFactory {
     /// Same-speaker pauses shorter than this join one turn; see `SpeakerTurns.bridgingGaps`.
     public static let gapBridging: TimeInterval = 0.5
 
@@ -19,6 +19,13 @@ public actor NemotronDiarizer: MM2TCore.Diarizer {
     public init(models: DiarizationModels, embedder: WeSpeakerEmbedder) {
         self.models = models
         self.embedder = embedder
+    }
+
+    public func makeStreamingSession() async throws -> any StreamingDiarizationSession {
+        // Each meeting gets its own model input/output backings. The session serializes both
+        // tracks against those backings while keeping independent speaker histories.
+        let loaded = try await models.loadNemotron()
+        return NemotronStreamingSession(models: loaded, embedder: embedder)
     }
 
     /// Throws `DiarizationModelError.missing` when the models were never downloaded, so the

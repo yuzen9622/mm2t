@@ -6,6 +6,15 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct ProcessingTests {
+    @Test func rewritingRetainsItsExistingSetupRequirements() async {
+        let queue = ProcessingQueue(
+            makePipeline: { .needsSetup([.noTranscriptionSource]) },
+            makeLLM: { throw URLError(.badServerResponse) })
+        await #expect(throws: RewriteUnsupported.self) {
+            try await queue.rewrite("Original passage", instruction: "Make it concise")
+        }
+    }
+
     @Test func missingKeysRouteToSetupBeforeAnyStepRuns() async throws {
         let world = try World(keys: false)
         let meeting = try await world.recordedMeeting()
@@ -68,6 +77,61 @@ import Testing
         #expect(world.catalog.cloud.calls.get.first?.hints == ["mm2t", "Typeless"])
     }
 
+    @Test func aLocalSpeechFallbackDoesNotSerializeTheCloudLLM() async throws {
+        let world = try World()
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        world.app.settings.settings.transcriptionOrder = [.cloud, .local]
+        let gate = Gate<Bool>()
+        world.catalog.llm.holds.update { $0["inferNames"] = gate }
+        await world.capture.startNow(title: "Concurrent cloud summary")
+        let stopping = Task { await world.capture.stop() }
+        #expect(await eventually { Set(world.catalog.llm.calls.get) == Set(["inferNames", "cleanTranscript", "digestPerPerson", "summarize"]) },
+                "the other hosted LLM tasks finish while name inference is still waiting")
+        await gate.open(true)
+        await stopping.value
+        #expect(try await world.library.list().first?.status == .completed)
+    }
+
+    @Test func hostedSpeechStillKeepsTheOnDeviceLLMSerial() async throws {
+        let world = try World()
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        world.app.settings.settings.llmLocation = .local
+        let gate = Gate<Bool>()
+        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
+        await world.capture.startNow(title: "Serial local summary")
+        let stopping = Task { await world.capture.stop() }
+        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames"])
+        await gate.open(true)
+        await stopping.value
+        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames", "cleanTranscript", "digestPerPerson", "summarize"])
+    }
+
+    @Test func speechAndLLMConcurrencyFollowTheirOwnModelLocations() throws {
+        let world = try World()
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
+                                  credentials: world.credentials, catalog: world.catalog)
+        for (speech, llm, concurrentSpeech, concurrentLLM) in [
+            ([TranscriptionSource.cloud, .local], LLMLocation.cloud, false, true),
+            ([.local, .cloud], .cloud, false, true),
+            ([.cloud], .local, true, false),
+            ([.local], .local, false, false),
+        ] {
+            var settings = AppSettings()
+            settings.transcriptionOrder = speech
+            settings.llmLocation = llm
+            guard case .ready(let pipeline) = try setup.build(settings) else {
+                Issue.record("expected configured pipeline")
+                continue
+            }
+            #expect(pipeline.transcribesConcurrently == concurrentSpeech)
+            #expect(pipeline.runsConcurrently == concurrentLLM)
+        }
+    }
+
     @Test func aFailedStepShowsItsReasonKeepsTheAudioAndRetriesFromThatStep() async throws {
         let world = try World()
         world.catalog.llm.failNext.set(["summarize"])
@@ -117,7 +181,8 @@ import Testing
         }
         let world = try World()
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints, credentials: Locked(), catalog: world.catalog)
-        let queue = ProcessingQueue { try setup.build(AppSettings()) }
+        let queue = ProcessingQueue(makePipeline: { try setup.build(AppSettings()) },
+                                    makeLLM: { try setup.buildLLM(AppSettings()) })
         let meeting = try await world.library.create(Recording(
             micTrack: try silentTrack(in: world.root, "a.wav"), remoteTrack: try silentTrack(in: world.root, "b.wav"),
             highlights: [], metadata: MeetingMetadata(title: "x", startedAt: Date(), duration: 1)))

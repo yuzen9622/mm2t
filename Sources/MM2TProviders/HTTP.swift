@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 struct HTTPResponse {
@@ -76,6 +77,55 @@ private extension Data {
 }
 
 enum AudioFile {
+    struct Upload {
+        let data: Data
+        let filename: String
+        let mimeType: String
+    }
+
+    /// A WAV is sent as 32 kbps AAC: a 48-minute 16 kHz track drops from 92 MB to about 12 MB,
+    /// and upload time, not GPU time, dominated self-hosted runs over a relayed Tailscale link.
+    /// Measured on a Mandarin meeting, Breeze-ASR-25's error rate did not change. If encoding
+    /// fails the original file is sent unchanged.
+    static func upload(_ url: URL, for service: Service) throws -> Upload {
+        let original = try read(url, for: service)
+        let name = url.deletingPathExtension().lastPathComponent
+        if url.pathExtension.lowercased() == "wav", let compressed = try? aac(url) {
+            return Upload(data: compressed, filename: "\(name).m4a", mimeType: "audio/mp4")
+        }
+        return Upload(data: original, filename: url.lastPathComponent, mimeType: mimeType(url))
+    }
+
+    static func aac(_ url: URL, bitRate: Int = 32_000) throws -> Data {
+        let out = FileManager.default.temporaryDirectory.appending(path: "mm2t-upload-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try encode(url, to: out, bitRate: bitRate)
+        return try Data(contentsOf: out)
+    }
+
+    /// A separate function so the writer is released, and its file finalized, before the caller reads it.
+    private static func encode(_ url: URL, to out: URL, bitRate: Int) throws {
+        let input = try AVAudioFile(forReading: url)
+        let format = input.processingFormat
+        let output = try AVAudioFile(
+            forWriting: out,
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: format.sampleRate,
+                AVNumberOfChannelsKey: format.channelCount,
+                AVEncoderBitRateKey: bitRate,
+            ],
+            commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1 << 16) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        while input.framePosition < input.length {
+            try input.read(into: buffer)
+            if buffer.frameLength == 0 { break }
+            try output.write(from: buffer)
+        }
+    }
+
     static func read(_ url: URL, for service: Service) throws -> Data {
         do {
             let data = try Data(contentsOf: url, options: .mappedIfSafe)

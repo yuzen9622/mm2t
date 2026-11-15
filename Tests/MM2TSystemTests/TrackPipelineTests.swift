@@ -6,6 +6,28 @@ import Testing
 /// Drives two track pipelines the way the IO threads and the recorder do, with devices at
 /// different rates, a pause and a device gap, and checks the files stay on one timeline.
 @Suite struct TrackPipelineTests {
+    @Test func systemAudioPulsesAreNotRepeatedByBufferingOrResampling() throws {
+        let url = try temporaryDirectory().appending(path: "remote.wav")
+        let pipeline = try TrackPipeline(track: .remote, url: url, sampleRate: 16_000)
+        var timeline = RecordingTimeline(startedAt: 1000)
+        let inputRate = 48_000, block = 512
+        for start in stride(from: 0, to: inputRate * 3, by: block) {
+            let samples = (start..<min(start + block, inputRate * 3)).map { index -> Float in
+                (inputRate..<inputRate + 240).contains(index) ? 0.5 : 0
+            }
+            write(samples, to: pipeline.ring, hostSeconds: 1000 + Double(start) / Double(inputRate), rate: Double(inputRate))
+            // Drain in approximately the recorder's 50 ms batches, rather than every callback.
+            if start / block % 5 == 4 { pipeline.drain(timeline) }
+        }
+        timeline.stop(at: 1003)
+        pipeline.drain(timeline)
+        try pipeline.finish(duration: 3)
+        let audio = try WAVFormat.read(url)
+        #expect(audio.samples[16_000..<16_080].contains { $0 > 10_000 })
+        // Both observed echo lags (50 ms and 181 ms) fall in this otherwise silent interval.
+        #expect(audio.samples[16_480..<24_000].allSatisfy { abs(Int($0)) < 10 })
+    }
+
     @Test func bothTracksStayAlignedAcrossPauseAndDeviceGap() throws {
         let directory = try temporaryDirectory()
         let mic = try TrackPipeline(track: .me, url: directory.appending(path: "mic.wav"), sampleRate: 16_000)

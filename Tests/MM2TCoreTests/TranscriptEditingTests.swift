@@ -28,17 +28,27 @@ import Testing
         }
     }
 
-    @Test(arguments: [
-        ("我們用酷柏內提斯部署", "我們用 Kubernetes 部署", ["Kubernetes"]),
-        ("請蘇里確認", "請舒立確認", ["舒立"]),
-        ("deploy to kubernets today", "deploy to kubernetes today", ["kubernetes"]),
-        ("我們在開會", "我們再開會", []),
-        ("好的，謝謝", "好的。謝謝", []),
-        ("嗯那個我覺得可以", "我覺得可以", []),
-        ("短", "這是一段被整個重寫而且非常非常長的句子，不應該被當成一個詞彙", []),
-    ])
-    func correctionsTeachTheReplacedTerm(old: String, new: String, terms: [String]) {
-        #expect(VocabularyLearning.terms(correcting: old, to: new) == terms)
+    @Test func correctionsKeepBothSpellingsAndSupportSeveralTerms() {
+        let pairs = [VocabularyCorrection(incorrect: "酷柏內提斯", correct: "Kubernetes"),
+                     VocabularyCorrection(incorrect: "蘇里", correct: "舒立")]
+        #expect(VocabularyLearning.validated(pairs, from: "請蘇里用酷柏內提斯部署", to: "請舒立用 Kubernetes 部署") == pairs)
+        #expect(VocabularyLearning.validated([.init(incorrect: "kubernets", correct: "kubernetes")],
+            from: "deploy to kubernets today", to: "deploy to kubernetes today").count == 1)
+    }
+
+    @Test func inventedSpellingsUnchangedWordsAndInsertionsAreNotCorrections() {
+        let pairs = [VocabularyCorrection(incorrect: "酷柏內提斯", correct: "Kubernetes"),
+                     VocabularyCorrection(incorrect: "部署", correct: "production"),
+                     VocabularyCorrection(incorrect: "部署", correct: "部署"),
+                     VocabularyCorrection(incorrect: "用", correct: "用 Kubernetes")]
+        #expect(VocabularyLearning.validated(pairs, from: "我們用部署", to: "我們用 Kubernetes 部署").isEmpty)
+        #expect(VocabularyLearning.validated([.init(incorrect: "Kubernets", correct: "Kubernetes Cloud")],
+            from: "使用 Kubernets", to: "使用 Kubernetes").isEmpty)
+        #expect(VocabularyLearning.validated([.init(incorrect: "Foo", correct: "Baz")],
+            from: "Use Foo and Bar", to: "Use Foo and Baz").isEmpty,
+            "an unchanged occurrence elsewhere must not become an invented correction")
+        #expect(VocabularyLearning.validated([.init(incorrect: "，", correct: "。")],
+            from: "好的，謝謝", to: "好的。謝謝").isEmpty)
     }
 
     @Test func subtitlesCutLongLinesAndShareTheTimeByLength() async throws {

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="180" viewBox="0 0 680 180" role="img" aria-label="mm2t">
+  <defs><path id="m" d="M210 520V378C210 300 273 237 353 237C431 237 490 298 490 378V423C490 445 499 457 512 457C525 457 534 445 534 423V378C534 298 593 237 671 237C751 237 814 300 814 378V520C814 547 792 569 765 569C738 569 716 547 716 520V378C716 352 697 334 671 334C648 334 628 352 628 378V423C628 499 578 557 512 557C446 557 396 499 396 423V378C396 352 376 334 353 334C327 334 308 352 308 378V520C308 547 286 569 259 569C232 569 210 547 210 520Z"/></defs>
+  <g fill="#F0700F"><use href="#m" transform="translate(-39 -21) scale(.3)"/><use href="#m" transform="translate(166 -21) scale(.3)"/></g>
+  <g fill="none" stroke="#FFFFFF" stroke-width="29.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M450 69C455 42 513 41 523 65C538 101 456 109 450 135H530"/>
+    <path d="M596 30V112Q596 135 620 135H636M570 65H635"/>
+  </g>
+</svg>

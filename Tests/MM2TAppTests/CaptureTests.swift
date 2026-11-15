@@ -243,6 +243,36 @@ import Testing
         await gate.open(true)
         await ending.value
     }
+
+    @Test func liveSetupFinishingAfterStopDoesNotLeakIntoTheNextMeeting() async throws {
+        let root = try temporaryDirectory()
+        let starting = Gate<Bool>(), release = Gate<Bool>(), returned = Gate<Bool>()
+        var setups = 0
+        var receivedLive: [Bool] = []
+        let capture = CaptureController(
+            recorder: FakeRecorder(), permissions: FakePermissions(), library: MeetingLibrary(root: root.appending(path: "meetings")),
+            recordingsDirectory: root.appending(path: "recordings"),
+            makeLive: { directory in
+                setups += 1
+                guard setups == 1 else { return nil }
+                await starting.open(true)
+                _ = await release.wait()
+                await returned.open(true)
+                return LiveTranscriber(mic: directory.appending(path: "mic.wav"), remote: directory.appending(path: "remote.wav"),
+                    chain: TranscriptionChain([.init(.cloud, PieceSTT())]), hints: [], scratch: directory.appending(path: "scratch"))
+            },
+            onRecorded: { _, live in receivedLive.append(live != nil) })
+        await capture.startNow(title: "First")
+        _ = await starting.wait()
+        await capture.stop()
+        await release.open(true)
+        _ = await returned.wait()
+        try await Task.sleep(for: .milliseconds(20))
+
+        await capture.startNow(title: "Second")
+        await capture.stop()
+        #expect(receivedLive == [false, false])
+    }
 }
 
 extension DetectedMeeting {

@@ -132,6 +132,7 @@ struct SearchField: View {
             if !text.isEmpty {
                 Button { text = "" } label: { Icon("x", size: 13).foregroundStyle(Palette.secondary) }
                     .buttonStyle(Pressable())
+                    .accessibilityLabel("Clear search")
                     .transition(.scale.combined(with: .opacity))
             }
         }
@@ -249,8 +250,7 @@ struct TipModifier: ViewModifier {
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
-        let shown = show || SnapshotStage.shared.tip == text
-        return content.anchorPreference(key: TipKey.self, value: .bounds) { shown ? [TipRequest(id: id, anchor: $0, text: text)] : [] }
+        content.anchorPreference(key: TipKey.self, value: .bounds) { show ? [TipRequest(id: id, anchor: $0, text: text)] : [] }
     }
 }
 

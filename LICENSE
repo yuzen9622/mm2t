@@ -1,3 +1,51 @@
+MM2T LICENSING SCOPE AND BRAND ASSETS
+
+The mm2t source code remains licensed under the GNU Affero General Public
+License, version 3 (AGPL-3.0), reproduced unchanged below. Third-party
+materials remain subject to their respective licenses and notices.
+
+Brand assets are separately licensed under this notice, not under the
+project's general AGPL grant, to the extent the applicable rights are held
+by the mm2t rights holders. Brand assets means the mm2t product logo, app
+icon, wordmark, and their source artwork and exported variants, including:
+
+  - App/DesignAssets/mm2t-icon/
+  - App/DesignAssets/mm2t-brand/
+  - docs/assets/icon.png
+  - web/src/app/icon.png
+  - web/public/media/icon.png
+  - Copies of the same brand artwork in app bundles and asset catalogs.
+
+This definition does not include source code, third-party interface icons,
+fonts, or other independently licensed materials.
+
+Permission is granted, without a fee, to reproduce unmodified brand assets
+when accurately referring to, reviewing, documenting, or linking to mm2t,
+and when redistributing mm2t, including source-code copies and forks that
+retain the assets to identify the original project. These permissions do
+not authorize using the assets as the branding of a different product or
+implying official status, sponsorship, or endorsement where none exists.
+Other uses or modifications of the brand artwork require permission from
+the applicable rights holders, unless otherwise permitted by law or by an
+existing license. All other rights in the brand assets are reserved to the
+extent they exist under applicable law.
+
+No trademark license to use the mm2t name or marks as the branding of a
+different product is granted. Truthful references to mm2t and uses otherwise
+permitted by law are not restricted. This notice does not assert that any
+mark is registered or create rights that do not otherwise exist.
+
+This notice does not restrict rights granted under the AGPL for source code,
+or revoke, narrow, or supersede any license already validly granted for
+previously released materials, including brand assets. Any such materials
+remain usable under those earlier grants. Brand assets may be removed or
+replaced without changing the source code's AGPL license.
+
+The following is the unmodified AGPL-3.0 license text for the source code.
+The copyright notice within it belongs to the license text itself.
+
+------------------------------------------------------------------------
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

@@ -259,14 +259,7 @@ public actor AudioRecorder {
             restartMicrophone(reason: "no microphone audio for \(Self.stallTimeout) s")
         }
         if isStalled(remote.ring, since: tapStartedAt, now: now) {
-            stopTap()
-            do {
-                try startTap()
-                continuation.yield(.captureRestarted(.remote, reason: "no tap audio for \(Self.stallTimeout) s"))
-            } catch {
-                tapStartedAt = now
-                continuation.yield(.captureRestarted(.remote, reason: "rebuild failed: \(error)"))
-            }
+            restartTap(reason: "no tap audio for \(Self.stallTimeout) s")
         }
     }
 
@@ -310,18 +303,26 @@ public actor AudioRecorder {
         tapStartedAt = HostTime.now
     }
 
-    private func tapScope() throws -> TapScope {
-        if let target = configuration.targetBundleID {
-            return .only(try AudioProcesses.objects(ownedBy: target))
+    private func restartTap(reason: String) {
+        guard timeline.state != .stopped else { return }
+        stopTap()
+        tapStartedAt = HostTime.now
+        do {
+            try startTap()
+            continuation.yield(.captureRestarted(.remote, reason: reason))
+        } catch {
+            continuation.yield(.captureRestarted(.remote, reason: "\(reason); rebuild failed: \(error)"))
         }
-        // Our own playback of a past meeting must not be recorded into the new one.
-        let own = Bundle.main.bundleIdentifier.flatMap { try? AudioProcesses.objects(ownedBy: $0) } ?? []
-        return .allExcept(own)
+    }
+
+    private func tapScope() throws -> TapScope {
+        TapScope.recording(targetBundleID: configuration.targetBundleID,
+                           ownBundleID: Bundle.main.bundleIdentifier, processes: try AudioProcesses.list())
     }
 
     private func isTapped(_ owner: String?) -> Bool {
         if let target = configuration.targetBundleID { return owner == target }
-        return owner != Bundle.main.bundleIdentifier
+        return owner != Bundle.main.bundleIdentifier && !TapScope.isAudioRelay(owner)
     }
 
     private func stopTap() {

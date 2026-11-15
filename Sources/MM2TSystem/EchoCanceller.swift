@@ -15,11 +15,19 @@ public enum EchoCanceller {
     /// The latest the speakers' sound is expected back at the mic.
     static let maxDelay: TimeInterval = 0.5
     /// Seconds the echo profile measures loudness in.
-    static let profileFrame: TimeInterval = 0.05
+    public static let profileFrame: TimeInterval = 0.05
 
     public struct Result: Sendable {
         public let samples: [Int16]
         public let echo: EchoProfile
+    }
+
+    /// An unfiltered piece still contributes its actual mic energy to whole-speaker echo
+    /// decisions. Equal before/after energy is evidence that this speech was not removed.
+    public static func unchangedProfile(mic: [Int16], sampleRate: Int) -> EchoProfile {
+        let step = max(1, Int(profileFrame * Double(sampleRate)))
+        let energy = loudness(floats(mic, mic.count), step: step)
+        return EchoProfile(frameDuration: Double(step) / Double(sampleRate), before: energy, after: energy)
     }
 
     /// nil when the remote track is silent over this span, so there is nothing to remove.

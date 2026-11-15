@@ -18,7 +18,7 @@
 
 1. `swift test` 全部通過。需要說話者分群模型或 `Evaluation/` 錄音的測試，在缺少這些檔案時會自動略過。
 2. App 能用 `xcodebuild` 建置。
-3. 新增或修改 UI 字串時，在 `App/Tools/zh-Hant.json` 加上繁體中文翻譯（使用臺灣用語），並讓 `python3 App/Tools/strings.py <derived-data-path>` 回傳 0。
+3. 新增或修改 UI 字串時，直接在 `App/MM2T/Localizable.xcstrings` 加上繁體中文翻譯（使用臺灣用語），並讓 `python3 App/Tools/strings.py <derived-data-path>` 回傳 0。
 4. 改動對外連線（`Sources/MM2TProviders`）或處理流程送出的資料時，同步更新 [PRIVACY.md](PRIVACY.md)。
 
 CI（`.github/workflows/ci.yml`）會在每個 pull request 上執行第 1 到 3 項。

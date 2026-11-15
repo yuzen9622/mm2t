@@ -49,6 +49,18 @@ import Testing
         #expect(EchoCanceller.clean(mic: mic, remote: [Int16](repeating: 0, count: remote.count), sampleRate: Self.rate) == nil)
     }
 
+    @Test func unfilteredProfilesPreserveEnergyIncludingThePartialTail() {
+        let frame = Int(EchoCanceller.profileFrame * Double(Self.rate))
+        let mic = [Int16](repeating: 8192, count: frame) + [Int16](repeating: 16384, count: 137)
+        let profile = EchoCanceller.unchangedProfile(mic: mic, sampleRate: Self.rate)
+        #expect(profile.frameDuration == 0.05)
+        #expect(profile.before == [0.0625, 0.25])
+        #expect(profile.before == profile.after)
+        #expect(!profile.isEcho([TimeRange(start: 0, end: Double(mic.count) / Double(Self.rate))]))
+        let empty = EchoCanceller.unchangedProfile(mic: [], sampleRate: Self.rate)
+        #expect(empty.before.isEmpty && empty.after.isEmpty)
+    }
+
     @Test func aRecordingIsCleanedIntoAFileOfTheSameLength() throws {
         let directory = try temporaryDirectory()
         let (mic, remote) = Self.room

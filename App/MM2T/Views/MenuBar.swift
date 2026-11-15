@@ -49,15 +49,11 @@ struct MeterReading: Equatable {
 /// coming up and what was recorded last. Drawn in the app's own cards and buttons.
 struct MenuBarContent: View {
     let app: AppController
-    /// A capture state and meters to draw instead of the recorder's, for still pictures.
-    var preview: (state: CaptureState, meters: MeterReading)?
-    /// Whether to draw the menu as after setup, for still pictures; nil reads the app.
-    var previewSetUp: Bool?
     @Environment(\.dismiss) private var dismiss
 
-    private var state: CaptureState { preview?.state ?? app.capture.state }
-    private var meters: MeterReading { preview?.meters ?? MeterReading(app.capture.meters) }
-    private var needsOnboarding: Bool { previewSetUp.map { !$0 } ?? app.needsOnboarding }
+    private var state: CaptureState { app.capture.state }
+    private var meters: MeterReading { MeterReading(app.capture.meters) }
+    private var needsOnboarding: Bool { app.needsOnboarding }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

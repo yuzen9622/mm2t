@@ -56,18 +56,143 @@ import Testing
         #expect(settings.source(of: "mm2t") == .manual)
     }
 
-    @Test func aProcessedMeetingTeachesItsTermsAndACorrectionTeachesItsWord() async throws {
+    @Test func vocabularyPersistsOnlyTermsAndIgnoresRemovedDetails() throws {
+        let old = Data(#"{"vocabulary":["Kubernetes"],"learnedVocabulary":["Kubernetes"],"vocabularyDetails":[{"term":"Kubernetes","incorrectSpellings":["酷柏內提斯"],"definition":"容器編排平台","pronunciation":"koo-ber-NET-eez"}]}"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: old)
+        #expect(settings.vocabulary == ["Kubernetes"])
+        #expect(settings.learnedVocabulary == ["Kubernetes"])
+        let data = try JSONEncoder().encode(settings)
+        let restored = try JSONDecoder().decode(AppSettings.self, from: data)
+        #expect(restored == settings)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["vocabulary"] as? [String] == ["Kubernetes"])
+        #expect(json["vocabularyDetails"] == nil)
+    }
+
+    @Test func savingDoesNotWaitForLearningAndStaleResultsAreIgnored() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()
-        #expect(world.app.settings.settings.learnedVocabulary == ["Kubernetes", "報價單"])
-
         let detail = world.detail(meeting.id)
         await detail.load()
         let row = try #require(detail.presentation?.raw.first)
         let corrected = "Grafana " + row.text.dropFirst(2)
-        await detail.edit(row.id, to: corrected)
-        #expect(detail.presentation?.raw.first?.text == corrected)
-        #expect(world.app.settings.settings.learnedVocabulary.contains("Grafana"))
+        let gate = Gate<Bool>()
+        world.catalog.llm.holds.set(["vocabularyCorrections": gate])
+        world.catalog.llm.corrections.set([.init(incorrect: String(row.text.prefix(2)), correct: "Grafana")])
+        let first = Task { await detail.edit(row.id, to: corrected) }
+        #expect(await eventually { !world.catalog.llm.correctionRequests.get.isEmpty })
+        #expect(try await world.library.meeting(meeting.id).utterance(row.id)?.text == corrected)
+        world.catalog.llm.corrections.set([])
+        let second = Task { await detail.edit(row.id, to: row.text) }
+        #expect(await eventually { world.catalog.llm.correctionRequests.get.count == 2 })
+        await gate.open(true)
+        await first.value
+        await second.value
+        #expect(world.app.settings.settings.vocabulary.isEmpty)
+        #expect(try await world.library.meeting(meeting.id).utterance(row.id)?.text == row.text)
+    }
+
+    @Test(arguments: [false, true])
+    func reopeningADetailAndUndoingRejectsTheOldModelsReply(cleaned: Bool) async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let raw = try #require(detail.presentation?.raw.first)
+        let paragraph = try #require(detail.presentation?.cleaned?.first)
+        let original = cleaned ? paragraph.text : raw.text
+        let corrected = "Grafana " + original.dropFirst(2)
+        func edit(_ detail: MeetingDetailModel, to text: String) async {
+            if cleaned, let row = detail.presentation?.cleaned?.first {
+                await detail.editCleaned(row, to: text)
+            } else {
+                await detail.edit(raw.id, to: text)
+            }
+        }
+        let gate = Gate<Bool>()
+        world.catalog.llm.holds.set(["vocabularyCorrections": gate])
+        world.catalog.llm.corrections.set([.init(incorrect: String(original.prefix(2)), correct: "Grafana")])
+        let first = Task { await edit(detail, to: corrected) }
+        #expect(await eventually { world.catalog.llm.correctionRequests.get.count == 1 })
+
+        let reopened = world.detail(meeting.id)
+        await reopened.load()
+        world.catalog.llm.corrections.set([])
+        let undo = Task { await edit(reopened, to: original) }
+        #expect(await eventually { world.catalog.llm.correctionRequests.get.count == 2 })
+        await gate.open(true)
+        await first.value
+        await undo.value
+        #expect(world.app.settings.settings.vocabulary.isEmpty)
+        let saved = try await world.library.meeting(meeting.id)
+        #expect((cleaned ? saved.outputs.cleaned?.paragraphs.first?.text : saved.utterance(raw.id)?.text) == original)
+    }
+
+    @Test(arguments: LLMLocation.allCases)
+    func learningOnlyRequiresTheSelectedLanguageModel(location: LLMLocation) async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let row = try #require(detail.presentation?.raw.first)
+        world.credentials.values.update { $0[.elevenLabsAPIKey] = nil }
+        world.catalog.modelsDownloaded.set(false)
+        world.app.settings.settings.llmLocation = location
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        let llm = location == .local ? world.catalog.onDeviceLLM : world.catalog.llm
+        llm.corrections.set([.init(incorrect: String(row.text.prefix(2)), correct: "Grafana")])
+        await detail.edit(row.id, to: "Grafana " + row.text.dropFirst(2))
+        #expect(world.app.settings.settings.learnedVocabulary == ["Grafana"])
+        #expect(llm.correctionRequests.get.count == 1)
+    }
+
+    @Test func knownNamesAndLearnedTermsArePlainWordsWithoutDuplicates() async throws {
+        let world = try World()
+        _ = try await world.app.voiceprints.addPerson(name: "舒立")
+        world.app.settings.settings.addVocabulary("舒立", source: .learned)
+        world.app.settings.settings.addVocabulary("Grafana", source: .learned)
+        _ = try await world.recordedMeeting()
+        let glossary = try #require(world.catalog.llm.cleanGlossaries.get.first)
+        #expect(glossary.filter { $0.contains("舒立") } == ["舒立"])
+        #expect(glossary.contains("Grafana"))
+    }
+
+    @Test func modelFailureDoesNotUndoASavedCorrection() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let row = try #require(detail.presentation?.raw.first)
+        world.catalog.llm.failNext.set(["vocabularyCorrections"])
+        await detail.edit(row.id, to: "修正後的逐字稿")
+        #expect(try await world.library.meeting(meeting.id).utterance(row.id)?.text == "修正後的逐字稿")
+        #expect(detail.errorMessage == nil)
+        #expect(world.app.settings.settings.vocabulary.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func onlyASavedCorrectionTeachesVocabulary(cleaned: Bool) async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        #expect(world.app.settings.settings.learnedVocabulary.isEmpty)
+
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let row = try #require(detail.presentation?.raw.first)
+        let paragraph = try #require(detail.presentation?.cleaned?.first)
+        let original = cleaned ? paragraph.text : row.text
+        let corrected = "Grafana " + original.dropFirst(2)
+        world.catalog.llm.corrections.set([.init(incorrect: String(original.prefix(2)), correct: "Grafana")])
+        if cleaned {
+            await detail.editCleaned(paragraph, to: corrected)
+        } else {
+            await detail.edit(row.id, to: corrected)
+        }
+        #expect((cleaned ? detail.presentation?.cleaned?.first?.text : detail.presentation?.raw.first?.text) == corrected)
+        #expect(world.app.settings.settings.vocabulary == ["Grafana"])
+        #expect(world.app.settings.settings.learnedVocabulary == ["Grafana"])
+        #expect(world.catalog.llm.correctionRequests.get.first?.0 == original)
+        #expect(world.catalog.llm.correctionRequests.get.first?.1 == corrected)
 
         await detail.rename(to: "Q3 預算")
         #expect(detail.meeting?.metadata.title == "Q3 預算")

@@ -13,6 +13,23 @@ enum TapScope: Equatable {
         case .only(let processes), .allExcept(let processes): processes
         }
     }
+
+    /// Capture original producers once. FineTune re-renders their audio after processing; a
+    /// global tap otherwise records both the original and its delayed, re-rendered copy.
+    /// Keep idle relay processes excluded too, since they can start output without a list change.
+    static func recording(targetBundleID: String?, ownBundleID: String?, processes: [AudioProcess]) -> TapScope {
+        if let targetBundleID {
+            return .only(processes.filter { $0.ownerBundleID == targetBundleID }.map(\.objectID).sorted())
+        }
+        return .allExcept(processes.filter { process in
+            (ownBundleID != nil && process.ownerBundleID == ownBundleID)
+                || isAudioRelay(process.ownerBundleID) || isAudioRelay(process.identity.bundleID)
+        }.map(\.objectID).sorted())
+    }
+
+    static func isAudioRelay(_ bundleID: String?) -> Bool {
+        bundleID == "com.finetuneapp.FineTune"
+    }
 }
 
 /// A private Core Audio process tap, wrapped in a private aggregate device so it can be read with
@@ -21,18 +38,20 @@ final class ProcessTap {
     private(set) var tapID = AudioObjectID(kAudioObjectUnknown)
     private(set) var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private(set) var scope: TapScope
+    private let outputUID: String?
+    private let uuid = UUID()
     var processes: [AudioObjectID] { scope.processes }
 
-    init(scope: TapScope) throws {
+    init(scope: TapScope, outputDevice: AudioObjectID? = nil) throws {
         self.scope = scope
-        let description = Self.description(scope)
+        outputUID = try outputDevice.map { try CoreAudioProperty.string($0, kAudioDevicePropertyDeviceUID) }
+        let description = Self.description(scope, outputUID: outputUID, uuid: uuid)
         var tap = AudioObjectID(kAudioObjectUnknown)
         try check(AudioHardwareCreateProcessTap(description, &tap), "create process tap")
         tapID = tap
         do {
             let tapUID = try CoreAudioProperty.string(tap, kAudioTapPropertyUID)
-            // Tap-only aggregate: no output sub-device, so plugging in headphones or changing the
-            // default output does not invalidate it; the tap follows the processes, not a device.
+            // A tap-only aggregate follows the producer without owning its output device.
             let composition: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "mm2t remote tap",
                 kAudioAggregateDeviceUIDKey: "mm2t.tap.\(UUID().uuidString)",
@@ -53,7 +72,7 @@ final class ProcessTap {
     func setScope(_ scope: TapScope) throws {
         guard scope != self.scope else { return }
         var address = AudioObjectPropertyAddress(kAudioTapPropertyDescription)
-        var description: CATapDescription = Self.description(scope)
+        var description: CATapDescription = Self.description(scope, outputUID: outputUID, uuid: uuid)
         try withUnsafeMutablePointer(to: &description) { pointer in
             try check(AudioObjectSetPropertyData(tapID, &address, 0, nil, UInt32(MemoryLayout<CATapDescription>.size), pointer),
                       "update process tap")
@@ -61,11 +80,15 @@ final class ProcessTap {
         self.scope = scope
     }
 
-    private static func description(_ scope: TapScope) -> CATapDescription {
-        let description: CATapDescription = switch scope {
-        case .only(let processes): CATapDescription(monoMixdownOfProcesses: processes)
-        case .allExcept(let processes): CATapDescription(monoGlobalTapButExcludeProcesses: processes)
+    static func description(_ scope: TapScope, outputUID: String? = nil, uuid: UUID) -> CATapDescription {
+        let description: CATapDescription = switch (scope, outputUID) {
+        case (.only(let processes), nil): CATapDescription(monoMixdownOfProcesses: processes)
+        case (.allExcept(let processes), nil): CATapDescription(monoGlobalTapButExcludeProcesses: processes)
+        case (.only(let processes), .some(let uid)): CATapDescription(processes: processes, deviceUID: uid, stream: 0)
+        case (.allExcept(let processes), .some(let uid)): CATapDescription(excludingProcesses: processes, deviceUID: uid, stream: 0)
         }
+        // Record all routes by default. Only device diagnostics opt into a single stream.
+        description.uuid = uuid
         description.name = "mm2t remote"
         description.isPrivate = true
         description.muteBehavior = .unmuted

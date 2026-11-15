@@ -76,6 +76,32 @@ extension StubServer.Request {
         #expect(request.geminiSystem.contains("繁體中文"))
     }
 
+    @Test func correctionLearningUsesOnlyTheSavedPassageAndRejectsInventedTerms() async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"corrections":[{"incorrect":"酷柏內提斯","correct":"Kubernetes","category":"technical"},{"incorrect":"蘇里","correct":"舒立","category":"name"},{"incorrect":"原詞","correct":"新增字","category":"technical"}]}"#))
+        let pairs = try await gemini(server).vocabularyCorrections(from: "請蘇里用酷柏內提斯部署", to: "請舒立用 Kubernetes 部署")
+        #expect(pairs == [.init(incorrect: "酷柏內提斯", correct: "Kubernetes"), .init(incorrect: "蘇里", correct: "舒立")])
+        let request = try #require(server.requests.first)
+        #expect(request.geminiInput == "修改前：\n請蘇里用酷柏內提斯部署\n\n修改後：\n請舒立用 Kubernetes 部署")
+        #expect(request.geminiSystem.contains("短句"))
+        #expect(request.geminiSystem.contains("空陣列"))
+    }
+
+    @Test func correctionLearningHasNoTwelveTermCap() async throws {
+        let items = (0..<15).map { ["incorrect": "Wrong\($0)", "correct": "Right\($0)", "category": "technical"] }
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["corrections": items]), as: UTF8.self)
+        let server = StubServer(status: 200, body: Fixture.gemini(json))
+        let old = items.map { $0["incorrect"]! }.joined(separator: " and ")
+        let new = items.map { $0["correct"]! }.joined(separator: " and ")
+        #expect(try await gemini(server).vocabularyCorrections(from: old, to: new).count == 15)
+    }
+
+    @Test func shortSentenceEditsAreNotANounCategory() async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"corrections":[{"incorrect":"不行","correct":"可以","category":"sentence"}]}"#))
+        await #expect(throws: ProviderError.self) {
+            try await gemini(server).vocabularyCorrections(from: "我覺得不行", to: "我覺得可以")
+        }
+    }
+
     @Test func anEmptyRewriteIsAMalformedResponse() async throws {
         let server = StubServer(status: 200, body: Fixture.gemini(#"{"text":"  "}"#))
         await #expect(throws: ProviderError.self) { try await gemini(server).rewrite("原文", instruction: "精簡") }
@@ -230,9 +256,9 @@ extension StubServer.Request {
          "decisions":[{"text":"禮拜四前升級 cluster","sources":["u2"]}],
          "discussionPoints":[{"text":"{{speaker:me}} 提出 migration","sources":["u1"]}],
          "actionItems":[
-           {"text":"寫 migration plan","owner":"r2","sources":["u3"]},
-           {"text":"通知客戶","owner":"r9","sources":[]},
-           {"text":"排時程","owner":null,"sources":["u2"]}]}
+           {"text":"寫 migration plan","owner":"r2","sources":["u3"],"dueDate":null},
+           {"text":"通知客戶","owner":"r9","sources":[],"dueDate":null},
+           {"text":"排時程","owner":null,"sources":["u2"],"dueDate":null}]}
         """#
         let server = StubServer(status: 200, body: Fixture.gemini(output))
         let summary = try await gemini(server).summarize(SummaryRequest(
@@ -248,6 +274,32 @@ extension StubServer.Request {
     }
 
     // MARK: Malformed output
+
+    @Test func summaryCarriesMeetingTimeZoneAndDecodesDueDates() async throws {
+        let output = #"""
+        {"headline":"交付排程","decisions":[],"discussionPoints":[],"actionItems":[
+          {"text":"明天下午三點半寄出","owner":null,"sources":["u1"],"dueDate":"2026-11-15T15:30:00+08:00"},
+          {"text":"今天確認","owner":null,"sources":["u1"],"dueDate":"2026-11-14"},
+          {"text":"明天中午十二點聯絡","owner":null,"sources":["u1"],"dueDate":null},
+          {"text":"有空整理","owner":null,"sources":[],"dueDate":null}]}
+        """#
+        let server = StubServer(status: 200, body: Fixture.gemini(output))
+        let reference = ISO8601DateFormatter().date(from: "2026-11-14T10:00:00+08:00")!
+        let summary = try await gemini(server).summarize(SummaryRequest(transcript: transcript, prioritized: [],
+            meetingStartedAt: reference, timeZoneIdentifier: "Asia/Taipei"))
+        #expect(summary.actionItems[0].due?.dateComponents.hour == 15)
+        #expect(summary.actionItems[0].due?.dateComponents.minute == 30)
+        #expect(summary.actionItems[1].due?.hasTime == false)
+        #expect(summary.actionItems[2].due == nil)
+        #expect(summary.actionItems[3].due == nil)
+        let request = try #require(server.requests.first)
+        #expect(request.geminiInput.contains("2026-11-14T10:00:00+08:00"))
+        #expect(request.geminiInput.contains("Asia/Taipei"))
+        let config = try #require(request.json["generationConfig"] as? [String: Any])
+        let schema = try #require(config["responseJsonSchema"] as? [String: Any])
+        let action = ((schema["properties"] as? [String: Any])?["actionItems"] as? [String: Any])?["items"] as? [String: Any]
+        #expect((action?["properties"] as? [String: Any])?["dueDate"] != nil)
+    }
 
     static let malformed: [(name: String, body: String)] = [
         ("text is not JSON", Fixture.gemini("Sure! Here is the transcript:")),

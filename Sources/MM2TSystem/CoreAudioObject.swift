@@ -81,10 +81,11 @@ final class PropertyListener: @unchecked Sendable {
     private let block: AudioObjectPropertyListenerBlock
     private var isRegistered = false
 
-    init(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, queue: DispatchQueue,
+    init(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+         scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, queue: DispatchQueue,
          _ handler: @escaping @Sendable () -> Void) throws {
         self.object = object
-        self.address = AudioObjectPropertyAddress(selector)
+        self.address = AudioObjectPropertyAddress(selector, scope)
         self.queue = queue
         self.block = { _, _ in handler() }
         try check(AudioObjectAddPropertyListenerBlock(object, &address, queue, block), "listen to '\(CoreAudioProperty.selectorName(selector))'")

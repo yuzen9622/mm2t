@@ -1,6 +1,7 @@
 import AppKit
 import EventKit
 import Foundation
+import MM2TCore
 import Observation
 
 // MARK: Boundary
@@ -17,10 +18,10 @@ public struct ReminderDraft: Hashable, Sendable {
     public let todoID: String
     public let title: String
     public let notes: String
-    public let due: Date?
+    public let due: ActionDeadline?
     public let isCompleted: Bool
 
-    public init(todoID: String, title: String, notes: String, due: Date? = nil, isCompleted: Bool = false) {
+    public init(todoID: String, title: String, notes: String, due: ActionDeadline? = nil, isCompleted: Bool = false) {
         self.todoID = todoID
         self.title = title
         self.notes = notes
@@ -44,6 +45,8 @@ public protocol ReminderStore: Sendable {
     /// Whether each reminder is completed; a reminder that no longer exists is left out.
     func completion(of ids: [String]) async -> [String: Bool]
     func setCompleted(_ id: String, _ completed: Bool) async throws
+    /// Adds a deadline only when the title still matches and the reminder has no date.
+    func fillMissingDeadline(_ id: String, expectedTitle: String, due: ActionDeadline) async throws
     /// Fires whenever anything in Reminders changes.
     var changes: AsyncStream<Void> { get }
 }
@@ -72,12 +75,15 @@ public final class SystemReminders: ReminderStore, @unchecked Sendable {
         reminder.title = draft.title
         reminder.notes = draft.notes
         reminder.calendar = try calendar(named: list)
-        if let due = draft.due {
-            reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
-        }
+        Self.applyDeadline(draft.due, to: reminder)
         reminder.isCompleted = draft.isCompleted
         try store.save(reminder, commit: true)
         return reminder.calendarItemIdentifier
+    }
+
+    static func applyDeadline(_ due: ActionDeadline?, to reminder: EKReminder) {
+        reminder.dueDateComponents = due?.dateComponents
+        reminder.alarms = due.flatMap { $0.hasTime ? [EKAlarm(absoluteDate: $0.date)] : nil }
     }
 
     private func calendar(named name: String) throws -> EKCalendar {
@@ -108,6 +114,20 @@ public final class SystemReminders: ReminderStore, @unchecked Sendable {
         try store.save(reminder, commit: true)
     }
 
+    public func fillMissingDeadline(_ id: String, expectedTitle: String, due: ActionDeadline) async throws {
+        guard access == .granted else { throw ReminderError.denied }
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else { throw ReminderError.notFound }
+        guard Self.applyMissingDeadline(due, expectedTitle: expectedTitle, to: reminder) else { return }
+        try store.save(reminder, commit: true)
+    }
+
+    static func applyMissingDeadline(_ due: ActionDeadline, expectedTitle: String, to reminder: EKReminder) -> Bool {
+        guard reminder.title == expectedTitle, reminder.dueDateComponents == nil else { return false }
+        reminder.dueDateComponents = due.dateComponents
+        if due.hasTime, reminder.alarms?.isEmpty != false { reminder.addAlarm(EKAlarm(absoluteDate: due.date)) }
+        return true
+    }
+
     public var changes: AsyncStream<Void> {
         AsyncStream { continuation in
             let task = Task {
@@ -131,12 +151,14 @@ public final class RemindersSync {
 
     public private(set) var access: RemindersAccess
     public private(set) var links: [String: String]
-    /// Set when the last `add` could not create every reminder.
+    /// Set when the last write could not create or update every reminder.
     public private(set) var failed = false
 
     @ObservationIgnored private let store: any ReminderStore
     @ObservationIgnored private let status: TodoStatus
     @ObservationIgnored private let file: URL
+    @ObservationIgnored private let deadlineFile: URL
+    @ObservationIgnored private var deadlineRepairs: Set<String>
     @ObservationIgnored private let list: String
     @ObservationIgnored private var tail: Task<Void, Never> = Task {}
     @ObservationIgnored private var watching: [Task<Void, Never>] = []
@@ -145,6 +167,9 @@ public final class RemindersSync {
         self.store = store
         self.status = status
         self.file = file
+        let deadlineFile = file.deletingPathExtension().appendingPathExtension("deadlines.json")
+        self.deadlineFile = deadlineFile
+        deadlineRepairs = Set((try? JSONDecoder().decode([String].self, from: Data(contentsOf: deadlineFile))) ?? [])
         self.list = list
         access = store.access
         links = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: file))) ?? [:]
@@ -186,13 +211,50 @@ public final class RemindersSync {
                 draft = ReminderDraft(todoID: draft.todoID, title: draft.title, notes: draft.notes, due: draft.due,
                                       isCompleted: self.status.isDone(draft.todoID))
                 do {
-                    self.links[draft.todoID] = try await self.store.create(draft, inList: self.list)
+                    let reminder = try await self.store.create(draft, inList: self.list)
+                    self.links[draft.todoID] = reminder
+                    if draft.due != nil { self.markDeadlineRepaired(reminder) }
                     self.save()
                 } catch {
                     self.failed = true
                 }
             }
+            let deadlineFailed = await self.fillDeadlines(drafts)
+            self.failed = self.failed || deadlineFailed
         }
+    }
+
+    /// Repairs reminders exported by older versions, without creating unlinked to-dos or
+    /// replacing user changes. Each reminder is considered once; failed writes can retry.
+    public func fillMissingDeadlines(_ drafts: [ReminderDraft]) async {
+        await serialized {
+            self.access = self.store.access
+            guard self.access == .granted else { return }
+            self.failed = await self.fillDeadlines(drafts)
+        }
+    }
+
+    private func fillDeadlines(_ drafts: [ReminderDraft]) async -> Bool {
+        var failed = false
+        for draft in drafts {
+            guard let reminder = links[draft.todoID], let due = draft.due, !deadlineRepairs.contains(reminder) else { continue }
+            do {
+                try await store.fillMissingDeadline(reminder, expectedTitle: draft.title, due: due)
+                markDeadlineRepaired(reminder)
+            } catch ReminderError.notFound {
+                links[draft.todoID] = nil
+                save()
+            } catch {
+                failed = true
+            }
+        }
+        return failed
+    }
+
+    private func markDeadlineRepaired(_ reminder: String) {
+        deadlineRepairs.insert(reminder)
+        try? FileManager.default.createDirectory(at: deadlineFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(deadlineRepairs.sorted()).write(to: deadlineFile, options: .atomic)
     }
 
     /// Pulls completion from Reminders into the to-dos and drops links to deleted reminders.

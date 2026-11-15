@@ -77,15 +77,19 @@ public struct MeetingMetadata: Codable, Hashable, Sendable {
     public var startedAt: Date
     public var duration: TimeInterval
     public var platform: MeetingPlatform?
+    /// Retained so relative deadlines keep the meeting's local date after travelling.
+    public var timeZoneIdentifier: String?
     /// Set once the user names the meeting, so a regenerated summary does not rename it.
     public var titleEdited: Bool?
     public var isTitleEdited: Bool { titleEdited ?? false }
 
-    public init(title: String, startedAt: Date, duration: TimeInterval, platform: MeetingPlatform? = nil) {
+    public init(title: String, startedAt: Date, duration: TimeInterval, platform: MeetingPlatform? = nil,
+                timeZoneIdentifier: String = TimeZone.current.identifier) {
         self.title = title
         self.startedAt = startedAt
         self.duration = duration
         self.platform = platform
+        self.timeZoneIdentifier = timeZoneIdentifier
     }
 }
 
@@ -258,10 +262,12 @@ public struct Summary: Codable, Hashable, Sendable {
         public let text: String
         public let owner: SpeakerID?
         public let sources: [UtteranceID]
-        public init(text: String, owner: SpeakerID?, sources: [UtteranceID]) {
+        public let due: ActionDeadline?
+        public init(text: String, owner: SpeakerID?, sources: [UtteranceID], due: ActionDeadline? = nil) {
             self.text = text
             self.owner = owner
             self.sources = sources
+            self.due = due
         }
     }
 

@@ -59,6 +59,11 @@ public enum PipelineBuild: Sendable {
     case needsSetup([SetupIssue])
 }
 
+public enum LLMBuild: Sendable {
+    case ready(any LLMProvider)
+    case needsSetup([SetupIssue])
+}
+
 /// Turns settings and stored secrets into a pipeline, or into the list of what is missing.
 public struct PipelineSetup: Sendable {
     public let library: MeetingLibrary
@@ -101,6 +106,30 @@ public struct PipelineSetup: Sendable {
         }
         if settings.transcriptionOrder.isEmpty { issues.append(.noTranscriptionSource) }
 
+        let llm: (any LLMProvider)?
+        switch try buildLLM(settings) {
+        case .ready(let provider): llm = provider
+        case .needsSetup(let missing): llm = nil; issues += missing
+        }
+
+        let models = catalog.localSpeakerModels()
+        if settings.diarizationOrder.contains(.local), models == nil { issues.append(.diarizationModelsMissing) }
+
+        guard issues.isEmpty, let llm else { return .needsSetup(issues) }
+        return .ready(MeetingProcessingPipeline(
+            library: library, voiceprints: voiceprints,
+            diarizer: models?.diarizer, embedder: models?.embedder,
+            diarizationOrder: settings.diarizationOrder,
+            transcription: TranscriptionChain(routes), llm: llm,
+            thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
+            runsConcurrently: settings.llmLocation == .cloud,
+            transcribesConcurrently: !settings.transcriptionOrder.contains(.local),
+            micCleaner: EchoRemover()))
+    }
+
+    /// Text-only tasks need the selected LLM, independently of recording and speaker setup.
+    public func buildLLM(_ settings: AppSettings) throws -> LLMBuild {
+        var issues: [SetupIssue] = []
         var llm: (any LLMProvider)?
         switch settings.llmLocation {
         case .cloud:
@@ -119,18 +148,8 @@ public struct PipelineSetup: Sendable {
             if let local = catalog.localLLM() { llm = local } else { issues.append(.offlineModelMissing(.llm)) }
         }
 
-        let models = catalog.localSpeakerModels()
-        if settings.diarizationOrder.contains(.local), models == nil { issues.append(.diarizationModelsMissing) }
-
-        guard issues.isEmpty, let llm else { return .needsSetup(issues) }
-        return .ready(MeetingProcessingPipeline(
-            library: library, voiceprints: voiceprints,
-            diarizer: models?.diarizer, embedder: models?.embedder,
-            diarizationOrder: settings.diarizationOrder,
-            transcription: TranscriptionChain(routes), llm: llm,
-            thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
-            runsConcurrently: settings.llmLocation == .cloud && !settings.transcriptionOrder.contains(.local),
-            micCleaner: EchoRemover()))
+        guard let llm else { return .needsSetup(issues) }
+        return .ready(llm)
     }
 
     private func nonEmpty(_ credential: Credential) throws -> Secret? {

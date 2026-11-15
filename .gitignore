@@ -20,3 +20,4 @@ generated_images/
 /App/Config/GoogleOAuth.local.plist
 /App/Config/.google-oauth-*
 promo/
+/version-video/

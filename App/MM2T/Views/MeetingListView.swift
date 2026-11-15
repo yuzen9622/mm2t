@@ -68,6 +68,7 @@ struct MeetingListView: View {
 /// Title with the time to its right, the summary's preview below, then who spoke. While a meeting
 /// is not finished the preview line carries its state instead.
 struct MeetingCard: View {
+    @Environment(\.locale) private var locale
     let row: MeetingRow
     let isRecovered: Bool
     let process: () -> Void
@@ -78,7 +79,7 @@ struct MeetingCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(row.title).font(Typo.heading).lineLimit(1)
                 Spacer()
-                Text("\(row.startedAt, format: .dateTime.month().day().hour().minute()) · \(Duration.seconds(row.duration), format: .units(allowed: [.hours, .minutes], width: .abbreviated))")
+                Text("\(row.startedAt, format: .dateTime.month().day().hour().minute()) · \(MeetingPresentation.duration(row.duration, locale: locale))")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.secondary)
                     .monospacedDigit()

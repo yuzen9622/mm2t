@@ -79,7 +79,9 @@ public final class AppController {
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
         let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
-        let queue = ProcessingQueue { try pipelineSetup.build(settings.settings) }
+        let queue = ProcessingQueue(
+            makePipeline: { try pipelineSetup.build(settings.settings) },
+            makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
         self.settings = settings
         self.library = library
         self.voiceprints = voiceprints
@@ -93,22 +95,51 @@ public final class AppController {
                 // speech model would compete with the meeting for the machine, and pieces carry no
                 // speaker labels for the fallback separation to use.
                 let current = settings.settings
-                guard !current.transcriptionOrder.contains(.local), current.diarizationOrder.first == .local,
-                      case .ready(let pipeline)? = try? pipelineSetup.build(current), pipeline.diarizer != nil else { return nil }
+                guard current.diarizationOrder.first == .local,
+                      case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
+                      let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
+                let pipeline: MeetingProcessingPipeline
+                if current.llmLocation == .cloud, let gemini = configured.llm as? GeminiLLM {
+                    pipeline = configured.withLLM(gemini.forRecording())
+                } else if current.llmLocation == .cloud, let compatible = configured.llm as? OpenAICompatibleLLM {
+                    pipeline = configured.withLLM(compatible.forRecording())
+                } else { pipeline = configured }
+                let speechCredentials: [Credential] = chain.routes.compactMap {
+                    switch $0.source { case .cloud: .elevenLabsAPIKey; case .selfHosted: .selfHostedToken; case .local: nil }
+                }
+                let credentialKinds = speechCredentials + (current.llmLocation == .cloud
+                    ? [current.cloudLLM == .gemini ? Credential.geminiAPIKey : .openAICompatibleAPIKey] : [])
+                guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
+                let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
+                    settings.settings == current && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
+                }
+                let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
+                let processing: LiveRecordingProcessor?
+                if current.llmLocation == .cloud, let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
+                   let session = try? await factory.makeStreamingSession() {
+                    processing = LiveRecordingProcessor(pipeline: pipeline, session: session,
+                        scratch: scratch.appending(path: "speakers"), configurationIsCurrent: configurationIsCurrent)
+                } else { processing = nil }
                 let names = await voiceprints.spokenNames()
+                guard configurationIsCurrent(), !Task.isCancelled else { await processing?.discard(); return nil }
                 return LiveTranscriber(
                     mic: directory.appending(path: RecordingManifest.micFile),
                     remote: directory.appending(path: RecordingManifest.remoteFile),
-                    chain: pipeline.transcription, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
-                    scratch: paths.recordings.appending(path: "live-\(UUID().uuidString)"))
+                    chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
+                    scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
             onRecorded: { id, live in
+                let prepared = live?.processing
                 if let live, let meeting = try? await library.meeting(id),
                    let transcription = await live.finish(
                        mic: await library.audioURL(meeting, track: .me), remote: await library.audioURL(meeting, track: .remote)) {
-                    _ = try? await library.attach(transcription, to: id)
+                    if (try? await prepared?.attach(transcription, to: id)) != true {
+                        _ = try? await library.attach(transcription, to: id)
+                    }
                 }
-                await queue.run(.process, on: id)
+                let reusable = await live?.isConfigurationCurrent() == true
+                await queue.run(.process, on: id, using: reusable ? prepared?.pipeline : nil,
+                                whileValid: { await live?.isConfigurationCurrent() == true })
             })
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
@@ -142,16 +173,14 @@ public final class AppController {
                 let segment = Diarization.Segment(cluster: voice, range: TimeRange(start: 0, end: duration))
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
-        queue.onCompleted = { meeting in
-            for term in meeting.outputs.summary?.terms ?? [] { settings.settings.addVocabulary(term, source: .learned) }
-        }
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;
     /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones).
     public static func live(
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
-        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil
+        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil,
+        recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions()
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
@@ -162,7 +191,7 @@ public final class AppController {
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
             catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm),
-            recorder: LiveRecorder(), permissions: LivePermissions(),
+            recorder: recorder, permissions: permissions,
             installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
             validator: LiveKeyValidator(),
             calendars: calendars ?? [

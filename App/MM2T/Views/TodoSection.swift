@@ -67,11 +67,19 @@ private struct TodoRowView: View {
             .buttonStyle(Pressable())
             .accessibilityLabel(done ? "Mark as not done" : "Mark as done")
             if let name = row.speakerName { Avatar(name: name, isNamed: true) }
-            Text(row.text)
-                .strikethrough(done)
-                .foregroundStyle(done ? Palette.muted : Palette.text)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.text)
+                    .strikethrough(done)
+                    .foregroundStyle(done ? Palette.muted : Palette.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let due = row.due {
+                    Text(due.date, format: Date.FormatStyle(date: .abbreviated,
+                        time: due.hasTime ? .shortened : .omitted,
+                        timeZone: TimeZone(identifier: due.timeZoneIdentifier) ?? .current))
+                        .font(Typo.caption).foregroundStyle(Palette.secondary)
+                }
+            }
             Spacer(minLength: 8)
             if canAdd {
                 if model.isInReminders(row) {

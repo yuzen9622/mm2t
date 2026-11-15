@@ -61,6 +61,7 @@ public struct SourcedRow: Hashable, Sendable, Identifiable {
     /// When each source utterance was spoken, in order: the rewritten text has no word times of
     /// its own, so playback spreads it across these.
     public var spans: [TimeRange] = []
+    public var due: ActionDeadline? = nil
 }
 
 public struct DigestSection: Hashable, Sendable, Identifiable {
@@ -129,7 +130,8 @@ public struct MeetingPresentation: Sendable {
                 discussionPoints: rows(summary.discussionPoints, section: "discussion"),
                 actionItems: summary.actionItems.enumerated().map { index, item in
                     SourcedRow(id: "action-\(index)", speakerName: item.owner.map(speakerName),
-                               text: substitute(item.text), jump: jump(item.sources))
+                               text: substitute(item.text), jump: jump(item.sources),
+                               due: item.due)
                 })
         }
     }
@@ -192,6 +194,15 @@ public struct MeetingPresentation: Sendable {
             }
         }
         return out.text
+    }
+
+    /// Meeting lengths use minutes/seconds below an hour and hours/minutes from an hour onward.
+    public static func duration(_ seconds: TimeInterval, locale: Locale = .current) -> String {
+        let seconds = seconds.isFinite ? max(0, seconds.rounded(.down)) : 0
+        let units: Set<Duration.UnitsFormatStyle.Unit> = seconds < 3600 ? [.minutes, .seconds] : [.hours, .minutes]
+        return Duration.seconds(seconds).formatted(
+            .units(allowed: units, width: .wide, maximumUnitCount: 2,
+                   zeroValueUnits: .show(length: 1), fractionalPart: .hide(rounded: .down)).locale(locale))
     }
 
     /// `hh:mm:ss`, as exports and the transcript show it.

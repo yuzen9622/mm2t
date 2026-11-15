@@ -57,36 +57,6 @@ public struct TranscriptEditing: Sendable {
     }
 }
 
-/// What a correction teaches: the words the user typed in place of what speech recognition heard.
-public enum VocabularyLearning {
-    /// Longest replacement taken as a term; a longer one is a rewritten sentence, not a spelling.
-    static let maxTermCharacters = 24
-
-    /// The replaced stretch of `new`, widened to whole Latin words. Empty when the edit only
-    /// deleted text, changed punctuation or spacing, or rewrote too much to be one term.
-    public static func terms(correcting old: String, to new: String) -> [String] {
-        let a = Array(old), b = Array(new)
-        var prefix = 0
-        while prefix < a.count, prefix < b.count, a[prefix] == b[prefix] { prefix += 1 }
-        var suffix = 0
-        while suffix < a.count - prefix, suffix < b.count - prefix, a[a.count - 1 - suffix] == b[b.count - 1 - suffix] { suffix += 1 }
-        var start = prefix, end = b.count - suffix
-        guard start < end else { return [] }
-        while start > 0, isLatinWord(b[start - 1]), isLatinWord(b[start]) { start -= 1 }
-        while end < b.count, isLatinWord(b[end]), isLatinWord(b[end - 1]) { end += 1 }
-        let term = String(b[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters).union(.symbols))
-        guard !term.isEmpty, term.count <= maxTermCharacters,
-              term.contains(where: { $0.isLetter }), !term.contains(where: \.isNewline) else { return [] }
-        // One changed Han character is a fixed typo ("在" for "再"), not a term.
-        if term.count == 1, !isLatinWord(Character(term)) { return [] }
-        return [term]
-    }
-
-    private static func isLatinWord(_ character: Character) -> Bool {
-        character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_")
-    }
-}
-
 /// The video-call address in a calendar event.
 public enum MeetingLink {
     static let hosts = ["zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com", "webex.com", "whereby.com", "meet.jit.si"]

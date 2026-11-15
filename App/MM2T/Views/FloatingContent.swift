@@ -176,8 +176,6 @@ struct FloatingContent: View {
 struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
     let metrics: NotchMetrics
     let stays: Bool
-    /// Draws the island open without the pointer, for still pictures.
-    var forcesOpen = false
     @ViewBuilder let expanded: Expanded
     @ViewBuilder let leading: Leading
     @ViewBuilder let trailing: Trailing
@@ -187,7 +185,7 @@ struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
     /// The width of each wing beside the notch.
     static var wing: CGFloat { 34 }
 
-    private var isOpen: Bool { stays || hovering || forcesOpen }
+    private var isOpen: Bool { stays || hovering }
     private var shape: NotchShape { NotchShape(ear: isOpen ? 12 : 6, radius: isOpen ? 22 : min(10, metrics.height / 2)) }
     private var restWidth: CGFloat { metrics.width + Self.wing * 2 }
 
@@ -544,7 +542,6 @@ struct CapsuleBar: View {
 struct Waveform: View {
     let level: Double?
     @State private var history = Array(repeating: 0.0, count: Waveform.half)
-    @Environment(\.snapshotWaveform) private var fixed
 
     private static let half = 6
 
@@ -569,7 +566,7 @@ struct Waveform: View {
         guard level != nil else { return 3 }
         // Outer bars are shorter so the shape tapers like speech rather than a block.
         let taper = 1 - Double(distance) / Double(Self.half) * 0.75
-        return 3 + 21 * (fixed ?? history)[distance] * taper
+        return 3 + 21 * history[distance] * taper
     }
 }
 
@@ -590,17 +587,5 @@ struct CaptureFailureView: View {
             }
             CircleButton("OK", icon: "x") { capture.acknowledgeFailure() }
         }
-    }
-}
-
-private struct SnapshotWaveformKey: EnvironmentKey {
-    static let defaultValue: [Double]? = nil
-}
-
-extension EnvironmentValues {
-    /// Fixed bar levels for still pictures of the waveform; nil in the running app.
-    var snapshotWaveform: [Double]? {
-        get { self[SnapshotWaveformKey.self] }
-        set { self[SnapshotWaveformKey.self] = newValue }
     }
 }

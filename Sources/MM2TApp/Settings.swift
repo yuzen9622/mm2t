@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 /// Where the four LLM tasks run. `.local` needs the on-device model downloaded first.
@@ -23,7 +24,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var selfHostedURL: URL?
     /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
     public private(set) var vocabulary: [String] = []
-    /// The subset of `vocabulary` that mm2t added itself, from a meeting or from a correction.
+    /// The subset of `vocabulary` learned from the user's transcript corrections.
     public private(set) var learnedVocabulary: [String] = []
     /// Learned terms the user deleted, so they are not learned again.
     public private(set) var dismissedVocabulary: [String] = []
@@ -75,7 +76,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     /// Same parsing for the OpenAI-compatible server's API root.
-    public static func openAIBaseURL(from text: String) -> URL? { selfHostedURL(from: text) }
+    public static func openAIBaseURL(from text: String) -> URL? {
+        selfHostedURL(from: text).map(OpenAICompatibleLLM.apiRoot)
+    }
 
     public enum TermSource: Sendable { case manual, learned }
 
@@ -99,6 +102,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
                 learnedVocabulary.append(term)
             }
         }
+    }
+
+    public mutating func removeVocabulary(_ terms: [String]) {
+        for term in terms { removeVocabulary(term) }
     }
 
     public mutating func removeVocabulary(_ term: String) {

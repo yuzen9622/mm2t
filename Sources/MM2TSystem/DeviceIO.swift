@@ -15,8 +15,8 @@ final class DeviceIO {
         }
         let format = try CoreAudioProperty.scalar(stream, kAudioStreamPropertyVirtualFormat, as: AudioStreamBasicDescription.self)
         guard format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0,
-              format.mBitsPerChannel == 32, format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0 || format.mChannelsPerFrame == 1
-        else { throw CoreAudioError(operation: "device \(device) input is not interleaved Float32", status: OSStatus(kAudioDeviceUnsupportedFormatError)) }
+              format.mBitsPerChannel == 32
+        else { throw CoreAudioError(operation: "device \(device) input is not Float32", status: OSStatus(kAudioDeviceUnsupportedFormatError)) }
         let sampleRate = format.mSampleRate
         var procID: AudioDeviceIOProcID?
         // The block runs on the device's real-time IO thread: no allocation, no awaiting, no locks
@@ -45,6 +45,14 @@ final class DeviceIO {
 }
 
 enum AudioDevices {
+    static func defaultOutput() throws -> AudioObjectID {
+        let device = try CoreAudioProperty.scalar(systemObject, kAudioHardwarePropertyDefaultOutputDevice, as: AudioObjectID.self)
+        guard device != kAudioObjectUnknown else {
+            throw CoreAudioError(operation: "find default output device", status: OSStatus(kAudioHardwareBadDeviceError))
+        }
+        return device
+    }
+
     static func defaultInput() throws -> AudioObjectID {
         let device = try CoreAudioProperty.scalar(systemObject, kAudioHardwarePropertyDefaultInputDevice, as: AudioObjectID.self)
         guard device != kAudioObjectUnknown else { throw RecorderError.noInputDevice }

@@ -4,6 +4,8 @@ import Foundation
 public enum Alignment {
     /// A pause longer than this starts a new utterance even when the speaker does not change.
     static let maxPause: TimeInterval = 1.5
+    /// Bound continuous speech so completed prefixes can be processed while recording continues.
+    static let maxUtteranceDuration: TimeInterval = 20
 
     /// Each remote word goes to the segment it overlaps most, or the nearest segment when it falls
     /// in a gap. Mic words go to `micSegments` the same way, and are all `.me` when there are none.
@@ -86,7 +88,8 @@ public enum Alignment {
         var drafts: [Draft] = []
         for (speaker, word) in attributed.sorted(by: { $0.1.range.start < $1.1.range.start }) {
             if let last = drafts.last, last.speaker == speaker,
-               word.range.start - last.range.end <= maxPause {
+               word.range.start - last.range.end <= maxPause,
+               word.range.end - last.range.start <= maxUtteranceDuration {
                 drafts[drafts.count - 1].words.append(word)
             } else {
                 drafts.append(Draft(speaker: speaker, words: [word]))

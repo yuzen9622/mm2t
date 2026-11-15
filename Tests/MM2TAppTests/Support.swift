@@ -110,6 +110,9 @@ struct FakeLLMError: Error, CustomStringConvertible {
 struct FakeLLM: LLMProvider {
     let calls = Box<[String]>([])
     let failNext = Box<Set<String>>([])
+    let corrections = Box<[VocabularyCorrection]>([])
+    let correctionRequests = Box<[(String, String)]>([])
+    let cleanGlossaries = Box<[[String]]>([])
     /// Suspends the named task until the gate opens, to observe the app mid-step.
     let holds = Box<[String: Gate<Bool>]>([:])
 
@@ -122,6 +125,13 @@ struct FakeLLM: LLMProvider {
         }
     }
 
+    func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
+        correctionRequests.update { $0.append((old, new)) }
+        let result = corrections.get
+        try await record("vocabularyCorrections")
+        return result
+    }
+
     func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess] {
         try await record("inferNames")
         return request.unnamedSpeakers.filter { $0 == SpeakerID("r1") }.map {
@@ -130,6 +140,7 @@ struct FakeLLM: LLMProvider {
     }
 
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript {
+        cleanGlossaries.update { $0.append(transcript.glossary) }
         try await record("cleanTranscript")
         return CleanedTranscript(paragraphs: transcript.utterances.map {
             .init(speaker: $0.speaker, text: "整理：\($0.text)", sources: [$0.id])
