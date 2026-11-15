@@ -200,14 +200,35 @@ struct AssistantContext {
                 text += "Action: \(render(item.text)) | \(item.owner.map(name) ?? "") | \(due)\n"
             }
         }
+        func originalText(_ hit: MeetingHits.Hit) -> String? {
+            let summary = meeting.outputs.summary
+            let texts: [String]
+            switch hit.kind {
+            case .title: return meeting.metadata.title
+            case .headline: return summary?.headline
+            case .utterance: return hit.utterance.flatMap(meeting.utterance)?.text
+            case .cleaned:
+                texts = (meeting.outputs.cleaned?.paragraphs ?? []).filter { $0.sources.first == hit.utterance }.map(\.text)
+            case .decision:
+                texts = (summary?.decisions ?? []).filter { $0.sources.first == hit.utterance }.map(\.text)
+            case .discussion:
+                texts = (summary?.discussionPoints ?? []).filter { $0.sources.first == hit.utterance }.map(\.text)
+            case .action:
+                texts = (summary?.actionItems ?? []).filter { $0.sources.first == hit.utterance }.map(\.text)
+            }
+            return texts.isEmpty ? nil : texts.joined(separator: "\n")
+        }
         var included: Set<UtteranceID> = []
         for hit in hits.hits {
+            guard let original = originalText(hit) else { continue }
             if let uid = hit.utterance, let offset = meeting.utterances.firstIndex(where: { $0.id == uid }), included.insert(uid).inserted {
                 let utterance = meeting.utterances[offset]
                 let citation = "\(id).u\(offset + 1)"
-                text += "[\(citation)] \(name(utterance.speaker)) @\(MeetingPresentation.timestamp(utterance.range.start)): \(render(hit.snippet))\n"
+                text += "[\(citation)] \(name(utterance.speaker)) @\(MeetingPresentation.timestamp(utterance.range.start)): \(render(original))\n"
                 sources.append(source(citation, utterance: utterance))
-            } else if hit.utterance == nil { text += "[\(id)] \(render(hit.snippet))\n" }
+            } else {
+                text += "[\(id)] \(render(original))\n"
+            }
         }
         return Item(text: text + "\n", sources: sources)
     }

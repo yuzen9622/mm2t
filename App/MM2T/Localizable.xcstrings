@@ -1,6 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Answer": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "回答" } } } },
     "%lld meetings": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 場會議" } } } },
     "Ask AI: “%@”": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "詢問 AI：「%@」" } } } },
     "Ask about your meetings": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "詢問會議內容" } } } },

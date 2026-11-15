@@ -3,7 +3,7 @@ import MM2TCore
 import Observation
 
 public struct AssistantStep: Identifiable {
-    public enum Kind { case plan, search, read }
+    public enum Kind { case plan, search, read, answer }
     public enum State: Equatable { case running, done, failed(String), stopped }
     public let id: UUID
     public let kind: Kind
@@ -76,6 +76,12 @@ public final class AssistantModel {
         } catch { turns[position].state = .failed(String(describing: error)) }
     }
 
+    public func handoff(_ question: String) {
+        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        stop()
+        send(question)
+    }
+
     public func stop() {
         guard isRunning else { return }
         task?.cancel(); task = nil
@@ -135,6 +141,8 @@ public final class AssistantModel {
             turns[index].activityExpanded = true
             if let step = turns[index].steps.lastIndex(where: { $0.state == .running }) {
                 turns[index].steps[step].state = .failed(reason)
+            } else {
+                turns[index].steps.append(.init(id: UUID(), kind: .answer, state: .failed(reason)))
             }
         }
     }

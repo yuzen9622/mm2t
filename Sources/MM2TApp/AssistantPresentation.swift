@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import Observation
 
 public enum AssistantMarkdown {
     public struct Run: Equatable, Identifiable {
@@ -84,6 +85,45 @@ public struct AssistantFollowScroll {
     public init() {}
     public mutating func userScrolled(bottomDistance: Double) { follows = bottomDistance <= 40 }
     public mutating func sent() { follows = true }
+}
+
+@MainActor @Observable
+public final class AssistantLayoutState {
+    public private(set) var active = false
+    public private(set) var visible = true
+    public private(set) var canvasShown = false
+    public init() {}
+
+    public func transition(active target: Bool, reduced: Bool) async {
+        guard !Task.isCancelled, begin(active: target, reduced: reduced) else { return }
+        if reduced {
+            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+        }
+        guard !Task.isCancelled else { return }
+        apply(active: target, reduced: reduced)
+        if !reduced && target {
+            do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+            revealCanvas()
+        }
+    }
+
+    func begin(active target: Bool, reduced: Bool) -> Bool {
+        guard active != target else {
+            visible = true
+            canvasShown = target
+            return false
+        }
+        if reduced { visible = false }
+        return true
+    }
+
+    func apply(active target: Bool, reduced: Bool) {
+        active = target
+        visible = true
+        canvasShown = reduced && target
+    }
+
+    func revealCanvas() { canvasShown = active }
 }
 
 public enum AssistantRail {

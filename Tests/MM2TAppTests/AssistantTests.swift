@@ -1,5 +1,5 @@
 import Foundation
-import MM2TCore
+@testable import MM2TCore
 import Testing
 @testable import MM2TApp
 
@@ -134,6 +134,115 @@ import Testing
         #expect(fits && !exceeds)
         #expect(context.text == first.text)
         #expect(context.sources == first.sources)
+    }
+
+    @Test func answerFailureAddsAnHonestFailedActivity() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting(title: "Budget")
+        try await world.app.searchIndex.rebuild(from: [meeting])
+        let llm = FakeLLM()
+        llm.planJSON.set(plan(queries: ["Budget"]))
+        llm.answerChunks.set(["Partial"])
+        llm.failsStream.set(true)
+        let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
+            voiceprints: world.app.voiceprints), build: { .ready(llm) })
+        model.send("Question")
+        #expect(await eventually { !model.isRunning })
+        #expect(model.turns.last?.answer.text == "Partial")
+        #expect(model.turns.last?.steps.first?.state == .done)
+        #expect(model.turns.last?.steps.first { $0.kind == .search }?.state == .done)
+        #expect(model.turns.last?.steps.first { $0.kind == .read }?.state == .done)
+        #expect(model.turns.last?.steps.last?.kind == .answer)
+        guard case .failed = model.turns.last?.steps.last?.state else { Issue.record("Missing failed answer activity"); return }
+    }
+
+    @Test func paletteHandoffStopsCurrentTurnAndSendsImmediately() async throws {
+        let world = try World()
+        let llm = FakeLLM()
+        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.answerChunks.set(["First partial"])
+        llm.lateAfterCancellation.set(["Obsolete answer"])
+        llm.holdsStream.set(true)
+        let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
+            voiceprints: world.app.voiceprints), build: { .ready(llm) })
+        model.send("First")
+        #expect(await eventually { model.turns.last?.answer.text == "First partial" })
+        llm.holdsStream.set(false)
+        llm.answerChunks.set(["Second answer"])
+        model.handoff("Second")
+        #expect(model.turns.count == 2)
+        #expect(model.turns.first?.state == .stopped)
+        #expect(model.turns.first?.answer.text == "First partial")
+        #expect(model.turns.last?.question == "Second")
+        #expect(await eventually { model.turns.last?.state == .finished })
+        #expect(model.turns.last?.answer.text == "Second answer")
+        #expect(await eventually { llm.streamCancelled.get })
+        #expect(model.turns.first?.answer.text == "First partial")
+        #expect(model.turns.last?.answer.text == "Second answer")
+    }
+
+    @Test func reversingInterruptedReducedMotionRestoresVisibleLayout() {
+        let layout = AssistantLayoutState()
+        let entering = layout.begin(active: true, reduced: true)
+        #expect(entering && !layout.visible && !layout.active)
+        let reversingBeforeApply = layout.begin(active: false, reduced: true)
+        #expect(!reversingBeforeApply)
+        #expect(layout.visible && !layout.active && !layout.canvasShown)
+        _ = layout.begin(active: true, reduced: true)
+        layout.apply(active: true, reduced: true)
+        #expect(layout.visible && layout.active && layout.canvasShown)
+        _ = layout.begin(active: false, reduced: true)
+        #expect(!layout.visible)
+        _ = layout.begin(active: true, reduced: true)
+        #expect(layout.visible && layout.active && layout.canvasShown)
+        _ = layout.begin(active: false, reduced: false)
+        layout.apply(active: false, reduced: false)
+        layout.revealCanvas()
+        #expect(layout.visible && !layout.active && !layout.canvasShown)
+    }
+
+    @Test func cancelledLayoutTasksCannotOverwriteTheReversedLayout() async throws {
+        let layout = AssistantLayoutState()
+        let entry = Task { await layout.transition(active: true, reduced: true) }
+        #expect(await eventually { !layout.visible })
+        entry.cancel()
+        await layout.transition(active: false, reduced: true)
+        await entry.value
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(layout.visible && !layout.active && !layout.canvasShown)
+        await layout.transition(active: true, reduced: true)
+        let exit = Task { await layout.transition(active: false, reduced: true) }
+        #expect(await eventually { !layout.visible })
+        exit.cancel()
+        await layout.transition(active: true, reduced: true)
+        await exit.value
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(layout.visible && layout.active && layout.canvasShown)
+    }
+
+    @Test func contextRestoresMentionedPersonFromOriginalCleanedText() async throws {
+        let world = try World()
+        var meeting = try await world.recordedMeeting(title: "Assignment")
+        let person = try await world.app.voiceprints.addPerson(name: "Alex")
+        #expect(meeting.speakers.count >= 2)
+        meeting.speakers[1].person = person
+        let utterance = try #require(meeting.utterances.first)
+        meeting.outputs.summary = nil
+        meeting.outputs.cleaned = CleanedTranscript(paragraphs: [
+            .init(speaker: utterance.speaker, text: "請 \(SpeakerMention.token(meeting.speakers[1].id)) 完成報價指派", sources: [utterance.id]),
+            .init(speaker: utterance.speaker, text: "報價指派完成後交由另一位窗口複核", sources: [utterance.id]),
+        ])
+        try await world.library.save(meeting)
+        try await world.app.searchIndex.rebuild(from: [meeting])
+        let hits = try await world.app.searchIndex.search(.init(text: "報價指派"))
+        #expect(hits.first?.hits.first?.snippet.contains("Alex") == false)
+        let llm = FakeLLM()
+        llm.planJSON.set(plan(queries: ["報價指派"]))
+        let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
+        for await _ in engine.events(question: "誰負責？", previous: [], provider: llm) {}
+        #expect(llm.answerInputs.get.first?.contains("請 Alex 完成報價指派") == true)
+        #expect(llm.answerInputs.get.first?.contains("報價指派完成後交由另一位窗口複核") == true)
+        #expect(llm.answerInputs.get.first?.contains("{{speaker:") == false)
     }
 
     @Test func markdownBatchesRailAndScroll() async throws {

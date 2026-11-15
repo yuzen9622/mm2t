@@ -113,6 +113,8 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let answerInputs = Box<[String]>([])
     let streamCancelled = Box(false)
     let holdsStream = Box(false)
+    let failsStream = Box(false)
+    let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
         try await record("plan")
@@ -124,9 +126,13 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
             let task = Task {
                 for text in answerChunks.get { continuation.yield(text) }
                 if holdsStream.get {
-                    do { try await Task.sleep(for: .seconds(60)) } catch { streamCancelled.set(true) }
+                    do { try await Task.sleep(for: .seconds(60)) } catch {
+                        for text in lateAfterCancellation.get { continuation.yield(text) }
+                        streamCancelled.set(true)
+                    }
                 }
-                continuation.finish()
+                if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
+                else { continuation.finish() }
             }
             continuation.onTermination = { _ in task.cancel() }
         }

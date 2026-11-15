@@ -7,9 +7,7 @@ struct MeetingListView: View {
     let open: (MeetingID) -> Void
     @State private var pendingDelete: MeetingRow?
     @State private var assistant: AssistantModel
-    @State private var layoutActive = false
-    @State private var layoutVisible = true
-    @State private var canvasShown = false
+    @State private var layout = AssistantLayoutState()
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     init(app: AppController, open: @escaping (MeetingID) -> Void) {
@@ -34,57 +32,46 @@ struct MeetingListView: View {
                 .disabled(app.capture.state != .idle)
             }
             GeometryReader { geometry in
-                let rail = layoutActive && geometry.size.width >= 760
+                let rail = layout.active && geometry.size.width >= 760
                 let canvasWidth = geometry.size.width - (rail ? 304 : 0)
                 ZStack(alignment: .trailing) {
-                    if layoutActive {
+                    if layout.active {
                         AssistantCanvas(model: assistant)
                             .frame(width: canvasWidth)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .opacity(canvasShown ? 1 : 0)
-                            .offset(y: reduce || canvasShown ? 0 : 16)
-                            .motion(Motion.page, value: canvasShown)
+                            .opacity(layout.canvasShown ? 1 : 0)
+                            .offset(y: reduce || layout.canvasShown ? 0 : 16)
+                            .motion(Motion.page, value: layout.canvasShown)
                             .entrance(from: .bottom, distance: 16)
                     }
-                    meetingList(compact: layoutActive)
-                        .frame(width: layoutActive ? 280 : geometry.size.width)
-                        .opacity(layoutActive && !rail ? 0 : 1)
-                        .allowsHitTesting(!layoutActive || rail)
-                        .accessibilityHidden(layoutActive && !rail)
+                    meetingList(compact: layout.active)
+                        .frame(width: layout.active ? 280 : geometry.size.width)
+                        .opacity(layout.active && !rail ? 0 : 1)
+                        .allowsHitTesting(!layout.active || rail)
+                        .accessibilityHidden(layout.active && !rail)
                 }
                 .overlay(alignment: .bottomLeading) {
                     AssistantComposer(model: assistant)
                         .frame(maxWidth: 720)
                         .padding(.horizontal, 24)
-                        .frame(width: layoutActive ? canvasWidth : geometry.size.width)
+                        .frame(width: layout.active ? canvasWidth : geometry.size.width)
                         .padding(.bottom, 20)
                 }
-                .motion(Motion.page, value: layoutActive)
+                .motion(Motion.page, value: layout.active)
                 .motion(Motion.page, value: rail)
                 .transaction { if reduce { $0.animation = nil } }
-                .opacity(layoutVisible ? 1 : 0)
-                .motion(.easeOut(duration: 0.12), value: layoutVisible)
+                .opacity(layout.visible ? 1 : 0)
+                .motion(.easeOut(duration: 0.12), value: layout.visible)
             }
         }
         .task(id: assistant.isActive) {
-            guard layoutActive != assistant.isActive else { return }
-            if reduce {
-                layoutVisible = false
-                do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
-            }
-            layoutActive = assistant.isActive
-            canvasShown = false
-            if reduce { canvasShown = true; layoutVisible = true }
-            else if layoutActive {
-                do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
-                canvasShown = true
-            }
+            await layout.transition(active: assistant.isActive, reduced: reduce)
         }
         .task(id: app.queue.revision) { await model.reload() }
         .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
-            if let question = MainNavigation.shared.assistantQuestion, !assistant.isRunning {
+            if let question = MainNavigation.shared.assistantQuestion {
                 MainNavigation.shared.assistantQuestion = nil
-                assistant.send(question)
+                assistant.handoff(question)
             }
         }
         .onDisappear { assistant.stop() }
