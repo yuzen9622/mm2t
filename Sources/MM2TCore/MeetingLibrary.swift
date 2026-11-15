@@ -23,6 +23,30 @@ public enum LibraryError: Error, Equatable {
 public actor MeetingLibrary {
     public let root: URL
     private let files = FileManager.default
+    private var observer: (@Sendable (MeetingID) -> Void)?
+
+    public struct IndexRecord: Sendable {
+        public let meeting: Meeting
+        public let modified: Date
+    }
+
+    public func observe(_ observer: @escaping @Sendable (MeetingID) -> Void) {
+        self.observer = observer
+    }
+
+    public func indexRecords() throws -> [IndexRecord] {
+        try list().map { try indexRecord($0) }
+    }
+
+    public func indexRecord(_ id: MeetingID) throws -> IndexRecord? {
+        guard files.fileExists(atPath: documentURL(id).path) else { return nil }
+        return try indexRecord(meeting(id))
+    }
+
+    private func indexRecord(_ meeting: Meeting) throws -> IndexRecord {
+        let values = try documentURL(meeting.id).resourceValues(forKeys: [.contentModificationDateKey])
+        return IndexRecord(meeting: meeting, modified: values.contentModificationDate ?? .distantPast)
+    }
 
     public init(root: URL) {
         self.root = root
@@ -63,6 +87,7 @@ public actor MeetingLibrary {
 
     public func save(_ meeting: Meeting) throws {
         try JSONFile.write(meeting, to: documentURL(meeting.id))
+        observer?(meeting.id)
     }
 
     public func audioURL(_ meeting: Meeting, track: Track) -> URL {
@@ -95,6 +120,7 @@ public actor MeetingLibrary {
     public func delete(_ id: MeetingID) throws {
         guard files.fileExists(atPath: documentURL(id).path) else { throw LibraryError.unknownMeeting(id) }
         try files.removeItem(at: directory(id))
+        observer?(id)
     }
 
     private func directory(_ id: MeetingID) -> URL { root.appending(path: id.description) }

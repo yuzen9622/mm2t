@@ -15,6 +15,7 @@ public struct AppPaths: Sendable {
     public var meetings: URL { root.appending(path: "Meetings") }
     public var recordings: URL { root.appending(path: "Recordings") }
     public var voiceprints: URL { root.appending(path: "voiceprints.json") }
+    public var searchIndex: URL { root.appending(path: "search.sqlite") }
     /// Same place as `DiarizationModels.applicationSupport` for the default root.
     public var models: URL { root.appending(path: "Models") }
 
@@ -36,6 +37,8 @@ public final class AppController {
     public let paths: AppPaths
     public let settings: SettingsStore
     public let library: MeetingLibrary
+    public let searchIndex: MeetingIndex
+    private let searchSync: SearchIndexSync
     public let voiceprints: VoiceprintStore
     public let queue: ProcessingQueue
     public let capture: CaptureController
@@ -98,6 +101,9 @@ public final class AppController {
             makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
         self.settings = settings
         self.library = library
+        let searchIndex = MeetingIndex(fileURL: paths.searchIndex)
+        self.searchIndex = searchIndex
+        searchSync = SearchIndexSync(library: library, index: searchIndex, voiceprints: voiceprints)
         self.voiceprints = voiceprints
         self.pipelineSetup = pipelineSetup
         self.queue = queue
@@ -232,6 +238,7 @@ public final class AppController {
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
+        await searchSync.start()
         let scanner = RecordingRecoveryScanner(recordingsDirectory: paths.recordings, library: library)
         let outcome = await scanner.recoverAll()
         recoveryFailures = outcome.failures
