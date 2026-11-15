@@ -22,7 +22,7 @@
 
 0. 確認 tag 指向的 commit 在 `release` 分支上，且 CHANGELOG.md 有這個版本的內容。
 1. 以 tag 的版本號設定 `CFBundleShortVersionString` 與 `CFBundleVersion`（兩者都是 `X.Y.Z`），用 Release 組態封存（archive）App。
-2. 以 Developer ID Application 憑證匯出並簽章 App。
+2. 以 Developer ID Application 憑證匯出並簽章 App 與桌面 widget（`mm2tWidget.appex`），並檢查兩者的簽章都帶有同一個 app group（`<Team ID>.dev.mm2t`），widget 才讀得到 App 寫出的會議資料。
 3. 把 App 送去公證，完成後 staple。
 4. 用 `.github/scripts/build_dmg.sh` 建立 `mm2t-X.Y.Z.dmg`，再簽章、公證、staple。DMG 是固定大小的安裝視窗：左邊 App、右邊「應用程式」捷徑、背景有「拖入 Applications 以安裝」的提示，磁碟區圖示取自 App 圖示。APFS、lzfse 壓縮。
 5. 下載上一個 Release 的 `appcast.xml`，加入新版本的項目與 EdDSA 簽章，並把 CHANGELOG.md 該版本的區段嵌入項目作為版本說明。
@@ -33,13 +33,15 @@
 還沒設定 `MACOS_CERTIFICATE_P12_BASE64` secret 時，workflow 的「Choose signed or unsigned mode」步驟會切到未簽章模式，改做：
 
 1. 用 Release 組態封存 App，以 ad-hoc 簽章（`CODE_SIGN_IDENTITY=-`）。因為 ad-hoc 簽章沒有 Team ID，hardened runtime 的 library validation 會拒絕載入 Sparkle 與 llama 等 framework，所以 workflow 會加上 `com.apple.security.cs.disable-library-validation` entitlement，再用 `codesign --force --sign -` 重新簽 App 本身（framework 保留 Xcode 給的 ad-hoc 簽章）。
-2. 建立同樣格式的 `mm2t-X.Y.Z.dmg`，不簽章、不公證。
-3. 跳過 Sparkle 公鑰檢查與 appcast，Release 只上傳 DMG。
-4. 在 CHANGELOG 版本說明前面，加上未簽章 App 的安裝說明（按右鍵 **打開**、**系統設定 > 隱私權與安全性 > 仍要打開**，或 `xattr -dr com.apple.quarantine /Applications/mm2t.app`）。
+2. 從 App 中移除桌面 widget，並拿掉 app group entitlement。app group 只有帶 Team ID 的簽章才能使用，ad-hoc 簽章的 widget 裝得起來但永遠是空的。
+3. 建立同樣格式的 `mm2t-X.Y.Z.dmg`，不簽章、不公證。
+4. 跳過 Sparkle 公鑰檢查與 appcast，Release 只上傳 DMG。
+5. 在 CHANGELOG 版本說明前面，加上未簽章 App 的安裝說明（按右鍵 **打開**、**系統設定 > 隱私權與安全性 > 仍要打開**，或 `xattr -dr com.apple.quarantine /Applications/mm2t.app`）。
 
 未簽章版本的限制：
 
 - 使用者第一次打開時會看到 Gatekeeper 警告，必須依版本說明手動允許。
+- 沒有桌面 widget。
 - 沒有 appcast，`SUPublicEDKey` 也還是佔位字串，App 內不會出現 **檢查更新⋯**，使用者要自己回 Releases 下載新版。
 - ad-hoc 簽章的身分每個版本都不同，更新後 macOS 可能重新詢問麥克風、系統音訊錄製等權限，鑰匙圈中的 API 金鑰也可能要求重新允許存取。
 
