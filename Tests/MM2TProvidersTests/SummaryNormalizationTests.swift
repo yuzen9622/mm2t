@@ -136,13 +136,30 @@ import Testing
         #expect(input.contains("10.5") && input.contains("10:30") && input.contains("會議結束"))
     }
 
-    private func waitUntil(_ condition: () async -> Bool) async -> Bool {
-        let end = ContinuousClock.now.advanced(by: .seconds(2))
-        while ContinuousClock.now < end {
-            if await condition() { return true }
+    @Test func waitUntilChecksReadinessEvenAfterTheDeadline() async {
+        #expect(await waitUntil(timeout: .zero) { true })
+    }
+
+    @Test func waitUntilTimesOutWhenTheConditionRemainsFalse() async {
+        #expect(await waitUntil(timeout: .zero) { false } == false)
+    }
+
+    @Test func cleanupCanStartAfterRelease() async throws {
+        let generator = GatedCleanup(summary: final)
+        await generator.release()
+        await generator.release()
+        let result = try await generator.generate(system: "怎麼整理：", input: "", schema: .dict([]))
+        #expect(result == #"{"paragraphs":[]}"#)
+        #expect(await generator.cleanupStarted)
+    }
+
+    private func waitUntil(timeout: Duration = .seconds(2), _ condition: () async -> Bool) async -> Bool {
+        let end = ContinuousClock.now.advanced(by: timeout)
+        while !(await condition()) {
+            guard ContinuousClock.now < end else { return false }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        return false
+        return true
     }
 
     private actor GatedCleanup: StructuredGenerator {
@@ -151,15 +168,21 @@ import Testing
         var cleanupStarted = false
         var summaryInput: String?
         private var pending: CheckedContinuation<String, Never>?
+        private var released = false
         init(summary: String) { self.summary = summary }
         func generate(system: String, input: String, schema: JSON) async throws -> String {
             if system.contains("怎麼整理：") {
                 cleanupStarted = true
+                if released { return #"{"paragraphs":[]}"# }
                 return await withCheckedContinuation { pending = $0 }
             }
             summaryInput = input
             return summary
         }
-        func release() { pending?.resume(returning: #"{"paragraphs":[]}"#); pending = nil }
+        func release() {
+            released = true
+            pending?.resume(returning: #"{"paragraphs":[]}"#)
+            pending = nil
+        }
     }
 }
