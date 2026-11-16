@@ -19,6 +19,8 @@ public protocol RecordingSession: AnyObject, Sendable {
     func resume() async
     func markHighlight() async throws -> Highlight
     func stop() async throws -> Recording
+    /// Both tracks mixed to mono at the recording's rate as they are captured, for live captions.
+    func audioStream() async -> AsyncStream<[Float]>
 }
 
 public protocol Recorder: Sendable {
@@ -100,6 +102,9 @@ public final class LiveProviderCatalog: ProviderCatalog {
     }
     public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
+    }
+    public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
+        ElevenLabsRealtime(apiKey: apiKey)
     }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
     public func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {

@@ -91,6 +91,8 @@ public actor AudioRecorder {
     private var tapStartedAt = 0.0
     private var remoteSilentSince: Double?
     private var reportedSilence = false
+    /// The mixed audio for live captions, while someone listens.
+    private var liveAudio: (continuation: AsyncStream<[Float]>.Continuation, mix: LiveMix, id: UUID)?
 
     static let stallTimeout = 2.0
     static let silenceTimeout = 6.0
@@ -180,6 +182,44 @@ public actor AudioRecorder {
 
     public var state: RecordingTimeline.State { timeline.state }
 
+    /// Both tracks summed to mono at the file rate, as they are written: about every 50 ms, at most
+    /// 250 ms behind the track that is ahead. Paused time yields nothing. The files flush only once a
+    /// second, too slowly to tail for captions. One listener at a time; a second call replaces the first.
+    public func audioStream() -> AsyncStream<[Float]> {
+        liveAudio?.continuation.finish()
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self, bufferingPolicy: .bufferingNewest(100))
+        guard timeline.state != .stopped else {
+            continuation.finish()
+            return stream
+        }
+        mic.setTapping(true)
+        remote.setTapping(true)
+        let id = UUID()
+        let positions = [mic.writer.framesAppended, remote.writer.framesAppended]
+        liveAudio = (continuation, LiveMix(positions: positions, lag: configuration.sampleRate / 4), id)
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.endAudioStream(id) }
+        }
+        return stream
+    }
+
+    private func endAudioStream(_ id: UUID) {
+        guard liveAudio?.id == id else { return }
+        liveAudio = nil
+        mic.setTapping(false)
+        remote.setTapping(false)
+    }
+
+    private func publishLiveAudio() {
+        guard var live = liveAudio else { return }
+        for (index, pipeline) in [mic, remote].enumerated() {
+            if let written = pipeline.takeWritten() { live.mix.add(written.samples, track: index, at: written.start) }
+        }
+        let mixed = live.mix.take()
+        liveAudio = live
+        if !mixed.isEmpty { live.continuation.yield(mixed) }
+    }
+
     /// Recorded seconds so far, paused time excluded; what the capsule's clock shows.
     public var elapsed: TimeInterval { timeline.elapsed(at: HostTime.now) }
 
@@ -219,6 +259,8 @@ public actor AudioRecorder {
             throw RecorderError.fileSystem(error.localizedDescription)
         }
         manifest.duration = duration
+        liveAudio?.continuation.finish()
+        liveAudio = nil
         try writeManifest()
         continuation.finish()
         return manifest.recording(in: configuration.directory, duration: duration)
@@ -249,6 +291,7 @@ public actor AudioRecorder {
                 continuation.yield(.writeFailed(error.localizedDescription))
             }
         }
+        publishLiveAudio()
         watchForStalls(now: now)
         watchForSilence(remoteLevel, now: now)
     }

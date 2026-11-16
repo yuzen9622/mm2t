@@ -146,7 +146,7 @@ public final class AppController {
                     ? [current.cloudLLM == .gemini ? Credential.geminiAPIKey : .openAICompatibleAPIKey] : [])
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
-                    settings.settings == current && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
+                    settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let processing: LiveRecordingProcessor?
@@ -162,6 +162,16 @@ public final class AppController {
                     remote: directory.appending(path: RecordingManifest.remoteFile),
                     chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
+            },
+            makeCaptions: { captions in
+                // Opt-in, and only with an ElevenLabs key; otherwise nothing runs and no socket opens.
+                let current = settings.settings
+                guard current.liveCaptions, let key = try? credentials.read(.elevenLabsAPIKey), !key.isEmpty else { return nil }
+                let names = await voiceprints.spokenNames()
+                return CaptionStream(
+                    provider: catalog.streamingTranscription(apiKey: key),
+                    languageCode: current.transcriptionLanguage.code,
+                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
             },
             onRecorded: { id, live in
                 let prepared = live?.processing

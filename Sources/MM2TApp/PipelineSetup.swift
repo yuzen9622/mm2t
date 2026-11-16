@@ -43,6 +43,8 @@ public struct LocalSpeakerModels: Sendable {
 public protocol ProviderCatalog: Sendable {
     func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider
     func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider
+    /// Live captions while recording; display only.
+    func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider
     func llm(apiKey: Secret) -> any LLMProvider
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.

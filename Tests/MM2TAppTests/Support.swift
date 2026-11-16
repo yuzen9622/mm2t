@@ -102,6 +102,45 @@ struct FakeSTT: TranscriptionProvider {
     }
 }
 
+/// A scripted streaming speech service: each `open` hands out a session the test drives.
+final class FakeStreamingSTT: StreamingTranscriptionProvider, @unchecked Sendable {
+    let requests = Box<[StreamingTranscriptionRequest]>([])
+    let sessions = Box<[FakeStreamingSession]>([])
+    /// Thrown by the next opens, in order, before any succeeds.
+    let openFailures = Box<[TranscriptionError]>([])
+
+    func open(_ request: StreamingTranscriptionRequest) async throws -> any StreamingTranscriptionSession {
+        requests.update { $0.append(request) }
+        var failure: TranscriptionError?
+        openFailures.update { if !$0.isEmpty { failure = $0.removeFirst() } }
+        if let failure { throw failure }
+        let session = FakeStreamingSession()
+        sessions.update { $0.append(session) }
+        return session
+    }
+
+    var last: FakeStreamingSession? { sessions.get.last }
+}
+
+final class FakeStreamingSession: StreamingTranscriptionSession, @unchecked Sendable {
+    let events: AsyncThrowingStream<StreamingTranscriptEvent, Error>
+    private let continuation: AsyncThrowingStream<StreamingTranscriptEvent, Error>.Continuation
+    let sent = Box<[[Float]]>([])
+    let closed = Box(false)
+
+    init() { (events, continuation) = AsyncThrowingStream.makeStream() }
+
+    func send(_ samples: [Float]) async throws { sent.update { $0.append(samples) } }
+    func close() async {
+        closed.set(true)
+        continuation.finish()
+    }
+
+    func say(_ event: StreamingTranscriptEvent) { continuation.yield(event) }
+    func drop(_ error: Error = TranscriptionError.unreachable("connection lost")) { continuation.finish(throwing: error) }
+    var sentSeconds: Double { Double(sent.get.reduce(0) { $0 + $1.count }) / 16_000 }
+}
+
 func assistantDecision(_ action: String, query: String = "", people: [String] = [], from: String? = nil,
                        to: String? = nil, cursor: String? = nil, handles: [String] = [], status: String = "unmarked") -> String {
     let object: [String: Any] = ["reasoning": "查詢會議", "action": action, "query": query, "people": people,
@@ -260,6 +299,12 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return selfHosted
     }
 
+    let streaming = FakeStreamingSTT()
+    func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
+        keysUsed.update { $0.append("captions:" + apiKey.revealed) }
+        return streaming
+    }
+
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
         openAIEndpoints.update { $0.append("\(baseURL.absoluteString)|\(apiKey?.revealed ?? "-")|\(model)") }
         return llm
@@ -345,6 +390,8 @@ actor FakeSession: RecordingSession {
     private(set) var isPaused = false
     private var highlights: [Highlight] = []
     private var clock: TimeInterval = 0
+    private var audio: AsyncStream<[Float]>.Continuation?
+    private(set) var audioRequests = 0
 
     init(_ configuration: RecorderConfiguration) throws {
         self.configuration = configuration
@@ -355,6 +402,16 @@ actor FakeSession: RecordingSession {
     }
 
     nonisolated func send(_ event: RecorderEvent) { continuation.yield(event) }
+
+    func audioStream() -> AsyncStream<[Float]> {
+        audioRequests += 1
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        audio = continuation
+        return stream
+    }
+
+    /// Plays `seconds` of mixed audio into the caption stream, as the recorder would.
+    func speak(seconds: Double = 0.25) { audio?.yield([Float](repeating: 0.1, count: Int(16_000 * seconds))) }
 
     var elapsed: TimeInterval { clock }
     func advance(_ seconds: TimeInterval) { clock += seconds }
@@ -369,6 +426,7 @@ actor FakeSession: RecordingSession {
 
     func stop() throws -> Recording {
         continuation.finish()
+        audio?.finish()
         let directory = configuration.directory
         for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
             let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)

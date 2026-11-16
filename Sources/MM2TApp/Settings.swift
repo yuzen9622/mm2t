@@ -39,6 +39,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
     /// user turns this off.
     public var hidesFromScreenCapture = true
+    /// Live captions while recording, streamed to ElevenLabs; usable only with an ElevenLabs key.
+    /// Display only: the saved transcript still comes from the recording.
+    public var liveCaptions = false
 
     /// The global shortcut that starts a recording and stops it again.
     public var recordShortcut: Hotkey = .commandFn
@@ -67,6 +70,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
+        liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
@@ -77,6 +81,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
         case recordShortcut
         case detectionRules
+        case liveCaptions
+    }
+
+    /// These settings with the ones that only change what is shown while recording set aside, so
+    /// turning captions on mid-meeting does not count as a change to how the meeting is processed.
+    public var forProcessing: AppSettings {
+        var settings = self
+        settings.liveCaptions = false
+        return settings
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.

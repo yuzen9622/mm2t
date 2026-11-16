@@ -113,6 +113,8 @@ public final class CaptureController {
 
     public private(set) var state: CaptureState = .idle
     public let meters = RecordingMeters()
+    /// Live captions for the recording in progress; `.off` unless the user turned them on.
+    public let captions = LiveCaptions()
 
     @ObservationIgnored private let recorder: any Recorder
     @ObservationIgnored private let permissions: any PermissionsProviding
@@ -123,6 +125,9 @@ public final class CaptureController {
     @ObservationIgnored private let makeLive: @MainActor (URL) async -> LiveTranscriber?
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions) async -> CaptionStream?
+    @ObservationIgnored private var captionStream: CaptionStream?
+    @ObservationIgnored private var captionTask: Task<Void, Never>?
     @ObservationIgnored private var detected: DetectedMeeting?
     /// Declined calls by bundle ID, kept out of detection so they neither prompt again nor hide
     /// another meeting. `releasedAt` is when the app last let go of the mic; nil while it holds it.
@@ -146,12 +151,14 @@ public final class CaptureController {
         saveRules: @escaping @MainActor (DetectionRules) -> Void = { _ in },
         appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
+        makeCaptions: @escaping @MainActor (LiveCaptions) async -> CaptionStream? = { _ in nil },
         onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
     ) {
         self.rules = rules
         self.saveRules = saveRules
         self.appName = appName
         self.makeLive = makeLive
+        self.makeCaptions = makeCaptions
         self.endCountdown = endCountdown
         self.recorder = recorder
         self.permissions = permissions
@@ -320,6 +327,7 @@ public final class CaptureController {
                     if !Task.isCancelled { await live.advance() }
                 }
             }
+            startCaptions(session, sampleRate: configuration.sampleRate)
             eventTask = Task { [weak self] in
                 for await event in session.events {
                     await self?.apply(event, from: session)
@@ -330,6 +338,27 @@ public final class CaptureController {
         } catch {
             state = .failed(.recorder(.fileSystem(String(describing: error))))
         }
+    }
+
+    /// Captions run beside the recording and the batch pieces and never feed either; a caption
+    /// failure only shows in `captions.status`.
+    private func startCaptions(_ session: any RecordingSession, sampleRate: Int) {
+        captions.clear()
+        captionTask = Task { [weak self] in
+            guard let self, let stream = await self.makeCaptions(self.captions), !Task.isCancelled else { return }
+            self.captionStream = stream
+            await stream.start(audio: await session.audioStream(), sampleRate: sampleRate)
+            if case .paused = self.state { await stream.pause() }
+        }
+    }
+
+    private func stopCaptions() async {
+        captionTask?.cancel()
+        captionTask = nil
+        let stream = captionStream
+        captionStream = nil
+        await stream?.stop()
+        captions.clear()
     }
 
     private func apply(_ event: RecorderEvent, from session: any RecordingSession) async {
@@ -370,6 +399,7 @@ public final class CaptureController {
         guard case .recording(let target) = state, let session else { return }
         await session.pause()
         state = .paused(target)
+        await captionStream?.pause()
     }
 
     public func resume() async {
@@ -377,6 +407,7 @@ public final class CaptureController {
         await session.resume()
         meters.remoteSilentWhilePlaying = false
         state = .recording(target)
+        await captionStream?.resume()
     }
 
     public func markHighlight() async {
@@ -395,6 +426,7 @@ public final class CaptureController {
         eventTask = nil
         liveTask?.cancel()
         liveTask = nil
+        await stopCaptions()
         let live = self.live
         self.live = nil
         self.session = nil

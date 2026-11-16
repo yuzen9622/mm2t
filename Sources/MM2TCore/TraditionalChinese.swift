@@ -2,7 +2,7 @@ import Foundation
 
 /// Cloud speech services and language models may write Mandarin in Simplified characters; the app's
 /// reader is in Taiwan, so everything they return passes through here before it is stored.
-enum TraditionalChinese {
+public enum TraditionalChinese {
     /// Converts the words as one text so context picks the right character (后面 -> 後面, 皇后 stays),
     /// then cuts it back into the same words. The conversion is character for character; if it ever
     /// is not, each word is converted on its own instead.
@@ -16,7 +16,7 @@ enum TraditionalChinese {
         }
     }
 
-    static func convert(_ text: String) -> String {
+    public static func convert(_ text: String) -> String {
         text.applyingTransform(StringTransform("Hans-Hant"), reverse: false) ?? text
     }
 }
