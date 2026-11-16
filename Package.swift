@@ -29,11 +29,14 @@ let package = Package(
             dependencies: ["MM2TCore", .product(name: "FluidAudio", package: "FluidAudio")]),
         .target(
             name: "MM2TLocal",
-            dependencies: ["MM2TCore", "MM2TProviders", "llama", .product(name: "WhisperKit", package: "WhisperKit")]),
+            dependencies: ["MM2TCore", "MM2TProviders", "llama", "Bergamot", .product(name: "WhisperKit", package: "WhisperKit")]),
         .binaryTarget(
             name: "llama",
             url: "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-xcframework.zip",
             checksum: "22644a57aad53f4a0a440860607c6d2f1da9e683f78cf03266569c0030d2dbd7"),
+        // Mozilla's Bergamot translation engine behind a small C API, built by App/Tools/build-bergamot.sh.
+        // Local and git-ignored until the binary is hosted: a fresh clone runs that script first.
+        .binaryTarget(name: "Bergamot", path: "Vendor/Bergamot.xcframework"),
         .target(name: "MM2TWidgetData"),
         .target(name: "MM2TApp", dependencies: ["MM2TCore", "MM2TProviders", "MM2TSystem", "MM2TDiarization", "MM2TLocal", "MM2TWidgetData"]),
         .testTarget(name: "MM2TCoreTests", dependencies: ["MM2TCore"]),

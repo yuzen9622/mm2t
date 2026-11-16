@@ -21,3 +21,6 @@ generated_images/
 /App/Config/.google-oauth-*
 promo/
 /version-video/
+
+# Built locally by App/Tools/build-bergamot.sh; not hosted yet.
+/Vendor/Bergamot.xcframework/
