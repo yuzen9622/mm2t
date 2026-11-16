@@ -57,4 +57,10 @@ import WhisperKit
         #expect(try Grammar.gbnf(for: LLMPrompts.summarySchema(speakers)).contains("(string | null)"), "an owner may be absent")
         #expect(throws: Grammar.Unsupported.self) { try Grammar.gbnf(for: .dict([("type", .text("number"))])) }
     }
+
+    @Test func cappedArraysCannotRunPastTheirLimit() throws {
+        let capped = JSON.dict([("type", .text("array")), ("items", JSON.dict([("type", .text("string"))])), ("maxItems", .integer(3))])
+        #expect(try Grammar.gbnf(for: capped).contains("{0,2}"))
+        #expect(try Grammar.gbnf(for: LLMPrompts.summarySchema([.me])).contains("{0,\(LLMPrompts.maxSummarySources - 1)}"))
+    }
 }

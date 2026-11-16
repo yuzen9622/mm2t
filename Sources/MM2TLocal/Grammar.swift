@@ -47,7 +47,10 @@ enum Grammar {
             case .text("array")?:
                 guard let items = fields["items"] else { throw Unsupported(description: "array without items") }
                 let item = try rule(for: items)
-                return define(#""[" ws ("# + item + #" (ws "," ws "# + item + #")*)? ws "]""#)
+                // A capped array cannot run on until the output limit.
+                var more = "*"
+                if case .integer(let limit)? = fields["maxItems"], limit >= 1 { more = "{0,\(limit - 1)}" }
+                return define(#""[" ws ("# + item + #" (ws "," ws "# + item + #")"# + more + #")? ws "]""#)
             case .text("object")?:
                 guard case .dict(let properties)? = fields["properties"] else { throw Unsupported(description: "object without properties") }
                 var members: [String] = []
