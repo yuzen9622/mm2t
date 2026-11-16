@@ -87,60 +87,80 @@ import Testing
         #expect(harness.captions.awaitingTranslation.isEmpty)
     }
 
-    @Test func aPartialTranslationIsDroppedWhenThePartialChanges() async throws {
+    @Test func onlyTheSettledPartOfAPartialIsSentAndItsTranslationIsNeverBlanked() async throws {
         let harness = Harness()
-        harness.translator.holds.set(true)
-        harness.captions.receive(.partial("We meet"))
-        #expect(await eventually { harness.translator.held == ["We meet"] })
-        #expect(harness.captions.isPartialAwaitingTranslation)
+        harness.captions.receive(.partial("We meet on Monday"))
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(harness.texts.isEmpty, "no clause boundary yet and too few words")
         #expect(harness.captions.partialMainText.isEmpty)
 
-        harness.captions.receive(.partial("We meet on Monday"))
-        await harness.translator.release("We meet")
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(harness.captions.partialTranslation == nil, "never a translation of older words under newer ones")
-        #expect(harness.captions.isPartialAwaitingTranslation)
+        harness.captions.receive(.partial("We meet on Monday, at ten"))
+        #expect(await eventually { harness.captions.partialTranslation == "⟨We meet on Monday,⟩" })
+        #expect(harness.texts == ["We meet on Monday,"], "the unfinished clause stays out")
+
+        harness.clock.set(Date(timeIntervalSince1970: 1))
+        harness.translator.holds.set(true)
+        harness.captions.receive(.partial("We meet on Monday, at ten, in room"))
+        #expect(await eventually { harness.translator.held == ["We meet on Monday, at ten,"] })
+        harness.captions.receive(.partial("We meet on Monday, at ten, in room four"))
+        #expect(harness.captions.partialTranslation == "⟨We meet on Monday,⟩", "the shown one stays while the next is out")
+        #expect(harness.captions.partialMainText == "⟨We meet on Monday,⟩")
+
+        await harness.translator.release("We meet on Monday, at ten,")
+        #expect(await eventually { harness.captions.partialTranslation == "⟨We meet on Monday, at ten,⟩" })
+        #expect(harness.texts == ["We meet on Monday,", "We meet on Monday, at ten,"])
     }
 
-    @Test func aPartialTranslationIsDroppedWhenItsSegmentFinishes() async throws {
+    @Test func aFinishedSegmentKeepsItsPartialTranslationUntilItsOwnReplacesItInPlace() async throws {
+        let harness = Harness()
+        harness.captions.receive(.partial("See you tomorrow, then"))
+        #expect(await eventually { harness.captions.partialTranslation == "⟨See you tomorrow,⟩" })
+
+        harness.translator.holds.set(true)
+        harness.captions.receive(.final("See you tomorrow, then."))
+        let id = try #require(harness.captions.segments.first?.id)
+        #expect(harness.captions.partialTranslation == nil)
+        #expect(harness.captions.displaySegments.map(\.text) == ["⟨See you tomorrow,⟩"], "never hidden while it waits")
+        #expect(harness.captions.awaitingTranslation == [id])
+
+        #expect(await eventually { harness.translator.held == ["See you tomorrow, then."] })
+        await harness.translator.release("See you tomorrow, then.")
+        #expect(await eventually { harness.captions.displaySegments.map(\.text) == ["⟨See you tomorrow, then.⟩"] })
+        #expect(harness.captions.provisionalTranslations.isEmpty)
+    }
+
+    @Test func aPartialResultThatArrivesAfterItsSegmentSettledStandsInForIt() async throws {
         let harness = Harness()
         harness.translator.holds.set(true)
-        harness.captions.receive(.partial("See you"))
-        #expect(await eventually { harness.translator.held == ["See you"] })
-        harness.captions.receive(.final("See you tomorrow."))
-        #expect(harness.captions.partialTranslation == nil)
-        #expect(!harness.captions.isPartialAwaitingTranslation)
-        await harness.translator.release("See you")
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(harness.captions.partialTranslation == nil)
-        #expect(await eventually { harness.translator.held == ["See you tomorrow."] })
-        await harness.translator.release("See you tomorrow.")
-        #expect(await eventually { harness.captions.segments.first?.translation == "⟨See you tomorrow.⟩" })
+        harness.captions.receive(.partial("Wait, what"))
+        #expect(await eventually { harness.translator.held == ["Wait,"] })
+        harness.captions.receive(.final("Wait, what?"))
+        #expect(harness.captions.displaySegments.isEmpty, "nothing was shown for it yet")
+
+        await harness.translator.release("Wait,")
+        #expect(await eventually { harness.captions.displaySegments.map(\.text) == ["⟨Wait,⟩"] })
+        #expect(harness.captions.partialTranslation == nil, "it belongs to the settled segment, not the next partial")
+        #expect(await eventually { harness.translator.held == ["Wait, what?"] })
+        await harness.translator.release("Wait, what?")
+        #expect(await eventually { harness.captions.displaySegments.map(\.text) == ["⟨Wait, what?⟩"] })
     }
 
-    @Test func thePartialIsTranslatedAtMostEveryFourHundredMillisecondsAndOnlyWhenItChanged() async throws {
+    @Test func partialSendsAreAtLeastAQuarterSecondApart() async throws {
         let harness = Harness()
-        harness.captions.receive(.partial("The budget"))
-        #expect(await eventually { harness.captions.partialTranslation == "⟨The budget⟩" })
-        #expect(harness.texts == ["The budget"])
+        harness.captions.receive(.partial("One, two"))
+        #expect(await eventually { harness.captions.partialTranslation == "⟨One,⟩" })
 
         harness.clock.set(Date(timeIntervalSince1970: 0.1))
-        harness.captions.receive(.partial("The budget is"))
-        harness.captions.receive(.partial("The budget is final"))
+        harness.captions.receive(.partial("One, two, three"))
+        harness.captions.receive(.partial("One, two, three, four"))
         #expect(await eventually { harness.waits.get.count == 1 })
-        #expect(harness.waits.get == [.milliseconds(300)], "waits out the rest of the 400 ms")
-        #expect(harness.texts == ["The budget"])
+        #expect(harness.waits.get == [.milliseconds(150)], "waits out the rest of the 250 ms")
+        #expect(harness.texts == ["One,"])
 
-        harness.clock.set(Date(timeIntervalSince1970: 0.4))
+        harness.clock.set(Date(timeIntervalSince1970: 0.25))
         await harness.releaseWait()
-        #expect(await eventually { harness.captions.partialTranslation == "⟨The budget is final⟩" })
-        #expect(harness.texts == ["The budget", "The budget is final"], "only the newest words, once")
-
-        // A revision back to words already translated reuses that answer without a new call.
-        harness.clock.set(Date(timeIntervalSince1970: 1))
-        harness.captions.receive(.partial("The budget is fina"))
-        #expect(await eventually { harness.captions.partialTranslation == "⟨The budget is fina⟩" })
-        #expect(harness.texts.count == 3)
+        #expect(await eventually { harness.captions.partialTranslation == "⟨One, two, three,⟩" })
+        #expect(harness.texts == ["One,", "One, two, three,"], "only the newest settled part, once")
     }
 
     @Test func aFailureLeavesTheCaptionsAsTheyAreAndTheStatusUntouched() async throws {
@@ -168,20 +188,26 @@ import Testing
         #expect(harness.texts == ["Done."], "nothing is translated once the recording's captions are cleared")
     }
 
-    @Test func surfacesShowTranslationsAndTheOriginalLineOnlyAboveThem() async throws {
+    @Test func aFailedFinalTranslationKeepsWhatWasShown() async throws {
         let harness = Harness()
-        #expect(!harness.captions.newestIsTranslated)
-        harness.translator.holds.set(true)
-        harness.captions.receive(.final("Hello."))
-        #expect(harness.captions.displaySegments.isEmpty, "waits for its translation")
-        #expect(harness.captions.newestIsTranslated)
-        #expect(await eventually { harness.translator.held == ["Hello."] })
-        await harness.translator.release("Hello.")
-        #expect(await eventually { harness.captions.displaySegments.map(\.text) == ["⟨Hello.⟩"] })
+        harness.captions.receive(.partial("Budget first, then"))
+        #expect(await eventually { harness.captions.partialTranslation == "⟨Budget first,⟩" })
+        harness.translator.failing.set(["Budget first, then hiring."])
+        harness.captions.receive(.final("Budget first, then hiring."))
+        #expect(await eventually { harness.captions.awaitingTranslation.isEmpty && harness.texts.count == 2 })
+        let segment = harness.captions.segments[0]
+        #expect(harness.captions.shownTranslation(of: segment) == "⟨Budget first,⟩", "a translation once shown stays")
+        #expect(harness.captions.mainText(of: segment) == "⟨Budget first,⟩")
+    }
 
-        harness.captions.receive(.final("大家好。"))
-        #expect(harness.captions.displaySegments.map(\.text) == ["⟨Hello.⟩", "大家好。"])
-        #expect(!harness.captions.newestIsTranslated, "already Chinese: no original line")
+    @Test func aSegmentInTheTargetLanguageShowsAsItIs() async throws {
+        let harness = Harness()
+        harness.captions.receive(.partial("大家好，今天"))
+        #expect(harness.captions.partialMainText == "大家好，今天")
+        harness.captions.receive(.final("大家好，今天開始。"))
+        #expect(harness.captions.displaySegments.map(\.text) == ["大家好，今天開始。"])
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(harness.texts.isEmpty)
     }
 
     @Test func processingIgnoresTheTranslationSetting() throws {

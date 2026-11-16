@@ -113,7 +113,8 @@ struct LivePage: View {
     /// The paragraph's segments' translations, joined the way their originals are; nil when none
     /// was translated (already in the target language, or translation is off).
     private func translation(of paragraph: [LiveCaptions.Segment]) -> String? {
-        let parts = paragraph.compactMap(\.translation)
+        // A translation once shown stays: until a segment's own arrives, its interim one stands in.
+        let parts = paragraph.compactMap(captions.shownTranslation)
         guard !parts.isEmpty else { return nil }
         return parts.reduce("") { text, next in text + CaptionArrivals.joiner(text, next) + next }
     }

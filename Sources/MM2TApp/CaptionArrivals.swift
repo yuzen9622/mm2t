@@ -8,9 +8,10 @@ public struct CaptionRun: Equatable, Sendable {
     public let isPartial: Bool
 }
 
-/// Remembers when each character of the captions on screen arrived. A revised partial keeps the
-/// times of its unchanged beginning, so only the changed tail fades in again; a segment that
-/// settles keeps the times its words had as a partial.
+/// Remembers when each character of the captions on screen arrived. A revised partial, or a
+/// segment whose shown text is replaced (a translation arriving), keeps the times of its unchanged
+/// beginning, so only the changed tail fades in again; a segment that settles keeps the times its
+/// words had as a partial.
 public struct CaptionArrivals: Sendable {
     /// The most recent text worth keeping on a two-line bar; older segments are left out.
     public static let characterBudget = 240
@@ -21,6 +22,7 @@ public struct CaptionArrivals: Sendable {
     }
 
     private var segmentMarks: [Int: [Mark]] = [:]
+    private var segmentTexts: [Int: String] = [:]
     private var partialMarks: [Mark] = []
     private var partialText = ""
 
@@ -41,7 +43,16 @@ public struct CaptionArrivals: Sendable {
 
     /// Records arrivals for what is shown now and returns it as runs in reading order.
     public mutating func update(segments: [LiveCaptions.Segment], partial: String, now: Date) -> [CaptionRun] {
-        for segment in segments where segmentMarks[segment.id] == nil {
+        for segment in segments {
+            if let old = segmentTexts[segment.id], let marks = segmentMarks[segment.id] {
+                // Its shown text was replaced: only what differs arrives again.
+                if old != segment.text {
+                    segmentMarks[segment.id] = Self.marks(marks, keeping: Self.commonPrefix(old, segment.text),
+                                                          length: segment.text.count, now: now)
+                    segmentTexts[segment.id] = segment.text
+                }
+                continue
+            }
             // The segment that settles the partial inherits its times; any other is new.
             let shared = Self.commonPrefix(partialText, segment.text)
             if shared > 0 {
@@ -49,11 +60,13 @@ public struct CaptionArrivals: Sendable {
             } else {
                 segmentMarks[segment.id] = [Mark(offset: 0, date: now)]
             }
+            segmentTexts[segment.id] = segment.text
             partialText = ""
             partialMarks = []
         }
         let shown = Set(segments.map(\.id))
         segmentMarks = segmentMarks.filter { shown.contains($0.key) }
+        segmentTexts = segmentTexts.filter { shown.contains($0.key) }
 
         let shared = Self.commonPrefix(partialText, partial)
         partialMarks = partial.isEmpty ? [] : Self.marks(partialMarks, keeping: shared, length: partial.count, now: now)
@@ -94,7 +107,8 @@ public struct CaptionArrivals: Sendable {
         return runs
     }
 
-    static func commonPrefix(_ a: String, _ b: String) -> Int {
+    /// How many leading characters two texts share.
+    public static func commonPrefix(_ a: String, _ b: String) -> Int {
         zip(a, b).prefix { $0 == $1 }.count
     }
 

@@ -42,13 +42,14 @@ public final class LiveCaptions {
 
     /// The language captions are translated into for this recording; nil when translation is off.
     public private(set) var translationTarget: CaptionLanguage?
-    /// Segments whose translation has been asked for and has not come back. Until it does they
-    /// show no main text on the bar; a failed one goes back to showing its own words.
+    /// Segments whose final translation has been asked for and has not come back.
     public private(set) var awaitingTranslation: Set<Int> = []
-    /// The translation of exactly the current `partial`; nil the moment the partial changes.
+    /// The latest translation of the unfinished partial's settled part. It stays on screen while
+    /// the partial grows and is replaced only by a newer one; it is never blanked.
     public private(set) var partialTranslation: String?
-    /// The current partial needs a translation that has not arrived yet.
-    public private(set) var isPartialAwaitingTranslation = false
+    /// What a finished segment shows until its own translation arrives: the last translation of
+    /// it while it was still a partial. Kept after a failure, so a shown translation never goes away.
+    public private(set) var provisionalTranslations: [Int: String] = [:]
 
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var nextID = 0
@@ -82,16 +83,21 @@ public final class LiveCaptions {
     private func append(_ text: String, at time: Date) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let started = partialStarted ?? time
+        let carried = partialTranslation
         partial = ""
         partialStarted = nil
-        partialChanged()
+        partialTranslation = nil
+        translation?.partialFinished()
         guard !text.isEmpty else { return }
         let segment = Segment(id: nextID, text: text, started: started, ended: time)
         segments.append(segment)
+        if let carried, needsTranslation(text) { provisionalTranslations[segment.id] = carried }
         nextID += 1
         if segments.count > Self.limit {
             segments.removeFirst(segments.count - Self.limit)
-            awaitingTranslation.formIntersection(segments.map(\.id))
+            let kept = Set(segments.map(\.id))
+            awaitingTranslation.formIntersection(kept)
+            provisionalTranslations = provisionalTranslations.filter { kept.contains($0.key) }
         }
         translation?.finished(segment)
     }
@@ -121,7 +127,7 @@ public final class LiveCaptions {
         translationTarget = nil
         awaitingTranslation = []
         partialTranslation = nil
-        isPartialAwaitingTranslation = false
+        provisionalTranslations = [:]
     }
 
     // MARK: Translation
@@ -135,37 +141,41 @@ public final class LiveCaptions {
         translation = LiveTranslation(captions: self, translator: translator, target: target, now: now, sleep: sleep)
     }
 
-    /// What a surface shows as a segment's main text: its translation, its own words when no
-    /// translation is needed or one failed, or nothing while one is on its way.
+    /// The id the unfinished partial will have once it settles.
+    var partialID: Int { nextID }
+
+    /// The text needs translating: translation is on and it is in the other language.
+    func needsTranslation(_ text: String) -> Bool {
+        guard let target = translationTarget, let language = CaptionLanguage.of(text) else { return false }
+        return language != target
+    }
+
+    /// The translation a surface shows for a finished segment: its own, or until that arrives the
+    /// one it had as a partial.
+    public func shownTranslation(of segment: Segment) -> String? {
+        segment.translation ?? provisionalTranslations[segment.id]
+    }
+
+    /// A segment's main text: its translation, its own words when none is needed or one failed
+    /// before anything was shown, or nothing yet.
     public func mainText(of segment: Segment) -> String? {
-        if let translation = segment.translation { return translation }
+        if let shown = shownTranslation(of: segment) { return shown }
         return awaitingTranslation.contains(segment.id) ? nil : segment.text
     }
 
-    /// The same for the unfinished partial.
+    /// The same for the unfinished partial: its last translation, or its own words when it needs none.
     public var partialMainText: String {
-        partialTranslation ?? (isPartialAwaitingTranslation ? "" : partial)
+        partialTranslation ?? (needsTranslation(partial) ? "" : partial)
     }
 
-    /// Segments as a surface shows them as main text, leaving out those still being translated.
+    /// Segments as a surface shows them as main text, leaving out those with nothing to show yet.
     public var displaySegments: [Segment] {
         segments.compactMap { segment in
             mainText(of: segment).map { Segment(id: segment.id, text: $0, started: segment.started, ended: segment.ended) }
         }
     }
 
-    /// Whether the newest words on screen are a translation (or one on its way), so the bar shows
-    /// the original above them. A segment already in the target language shows no original line.
-    public var newestIsTranslated: Bool {
-        guard translationTarget != nil else { return false }
-        if !partial.isEmpty { return partialTranslation != nil || isPartialAwaitingTranslation }
-        guard let last = segments.last else { return false }
-        return last.translation != nil || awaitingTranslation.contains(last.id)
-    }
-
     private func partialChanged() {
-        partialTranslation = nil
-        isPartialAwaitingTranslation = translation?.needsTranslation(partial) ?? false
         translation?.partialChanged()
     }
 
@@ -173,18 +183,24 @@ public final class LiveCaptions {
         if segments.contains(where: { $0.id == id }) { awaitingTranslation.insert(id) }
     }
 
-    /// Attaches a result to its own segment by identity, whatever order results come back in.
+    /// Attaches a final result to its own segment by identity, whatever order results come back in.
+    /// A failure (nil) keeps whatever the segment already showed.
     func attach(_ text: String?, to id: Int) {
         awaitingTranslation.remove(id)
         guard let text, let index = segments.firstIndex(where: { $0.id == id }) else { return }
         segments[index].translation = text
+        provisionalTranslations[id] = nil
     }
 
-    /// Shown only while the partial is still exactly the text that was translated.
-    func attachPartial(_ text: String?, for source: String) {
-        guard source == partial, !partial.isEmpty else { return }
-        partialTranslation = text
-        isPartialAwaitingTranslation = false
+    /// A translation of part of the partial that will become segment `id`. It replaces the shown
+    /// one in one step; one arriving after its segment settled updates that segment's interim text.
+    func attachPartial(_ text: String, for id: Int) {
+        if id == nextID {
+            partialTranslation = text
+        } else if let segment = segments.first(where: { $0.id == id }), segment.translation == nil,
+                  needsTranslation(segment.text) {
+            provisionalTranslations[id] = text
+        }
     }
 
     /// The text the live page shows as paragraphs: consecutive segments less than `paragraphGap` apart join.

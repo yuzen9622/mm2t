@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import MM2TApp
 import SwiftUI
 
@@ -157,10 +158,8 @@ struct CaptionBarView: View {
     let captions: LiveCaptions
     let model: CaptionBarModel
     @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var arrivals = CaptionArrivals()
-    @State private var runs: [CaptionRun] = []
+    @State private var layout = CaptionLines()
     @State private var lineHeight: CGFloat = 24
-    @State private var textHeight: CGFloat = 24
     @State private var hovering = false
     @State private var quiet = false
     @State private var settling = false
@@ -186,13 +185,15 @@ struct CaptionBarView: View {
         .onChange(of: captions.segments, initial: true) { refresh() }
         .onChange(of: captions.partialMainText) { refresh() }
         .onChange(of: captions.awaitingTranslation) { refresh() }
+        .onChange(of: captions.provisionalTranslations) { refresh() }
+        .onChange(of: model.width) { refresh() }
         .task(id: captions.lastActivity) {
             quiet = false
             try? await Task.sleep(for: .seconds(8))
             if !Task.isCancelled, captions.lastActivity != nil { quiet = true }
         }
-        .task(id: runs.map(\.arrived).max()) {
-            guard let latest = runs.map(\.arrived).max(), Date().timeIntervalSince(latest) < Self.arrival else { return }
+        .task(id: latestArrival) {
+            guard let latest = latestArrival, Date().timeIntervalSince(latest) < Self.arrival else { return }
             settling = true
             try? await Task.sleep(for: .milliseconds(Int(Self.arrival * 1000) + 30))
             if !Task.isCancelled { settling = false }
@@ -237,7 +238,35 @@ struct CaptionBarView: View {
             }
     }
 
+    private var latestArrival: Date? {
+        layout.lines.flatMap(\.runs).map(\.arrived).max()
+    }
+
+    /// With translation on the bar keeps one height for the whole recording: a reserved line of
+    /// the newest original words above a two-line main area.
+    private var isTranslating: Bool { captions.translationTarget != nil }
+
     @ViewBuilder private var content: some View {
+        if isTranslating {
+            VStack(alignment: .leading, spacing: 4) {
+                // The words as spoken, at once, cut at the start so the newest stay visible.
+                Text(verbatim: original.isEmpty ? " " : original)
+                    .font(Self.originalFont)
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .shadow(color: Palette.shadow, radius: 2, y: 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.updatesFrequently)
+                main(fixed: true)
+            }
+        } else {
+            main(fixed: false)
+        }
+    }
+
+    @ViewBuilder private func main(fixed: Bool) -> some View {
+        let twoLines = 2 * lineHeight + Self.lineSpacing
         if case .unavailable(let reason) = captions.status {
             Text(verbatim: reason)
                 .font(.system(size: 13, design: .rounded))
@@ -245,8 +274,9 @@ struct CaptionBarView: View {
                 .opacity(0.7)
                 .lineLimit(2)
                 .shadow(color: Palette.shadow, radius: 2, y: 1)
-                .frame(maxWidth: .infinity, minHeight: lineHeight, alignment: .leading)
-        } else if runs.isEmpty && !captions.newestIsTranslated {
+                .frame(maxWidth: .infinity, minHeight: fixed ? twoLines : lineHeight, maxHeight: fixed ? twoLines : nil,
+                       alignment: .topLeading)
+        } else if layout.lines.isEmpty {
             // Waiting for the first words: three still dots.
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { _ in Circle().frame(width: 5, height: 5) }
@@ -254,28 +284,14 @@ struct CaptionBarView: View {
             .foregroundStyle(Palette.text)
             .opacity(0.4)
             .frame(maxWidth: .infinity, minHeight: lineHeight, maxHeight: lineHeight, alignment: .leading)
+            .frame(height: fixed ? twoLines : lineHeight, alignment: .top)
             .accessibilityLabel("Listening")
         } else {
-            VStack(alignment: .leading, spacing: 4) {
-                if captions.newestIsTranslated {
-                    // The words as spoken, one line, cut at the start so the newest stay visible.
-                    Text(verbatim: original)
-                        .font(Self.originalFont)
-                        .foregroundStyle(Palette.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .shadow(color: Palette.shadow, radius: 2, y: 1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .transition(.opacity)
-                        .accessibilityAddTraits(.updatesFrequently)
-                }
-                captionText
-            }
-            .motion(Motion.reveal, value: captions.newestIsTranslated)
+            captionLines(fixed: fixed)
         }
     }
 
-    /// The recent original words behind the translated main text.
+    /// The original words behind the main text: the newest segments and the partial, untranslated.
     private var original: String {
         var text = ""
         for segment in CaptionArrivals.recent(captions.segments) {
@@ -285,31 +301,38 @@ struct CaptionBarView: View {
         return text
     }
 
-    /// Two lines at most, filling from the leading edge; the newest line is always the bottom one
-    /// and older lines leave upward.
-    private var captionText: some View {
-        let visible = min(max(textHeight, lineHeight), 2 * lineHeight + Self.lineSpacing)
+    /// Two lines at most, filling from the leading edge. When a third starts the oldest leaves
+    /// upward and the other moves up by one line; nothing else moves.
+    private func captionLines(fixed: Bool) -> some View {
+        let count = fixed ? CaptionLines.visibleLines : max(1, layout.lines.count)
+        let height = CGFloat(count) * lineHeight + CGFloat(count - 1) * Self.lineSpacing
         return TimelineView(.animation(minimumInterval: 1 / 30, paused: !settling)) { timeline in
-            styled(at: timeline.date)
-                .font(Self.font)
-                .lineSpacing(Self.lineSpacing)
-                .contentTransition(.identity)
-                .shadow(color: Palette.shadow, radius: 2, y: 1)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
+            VStack(alignment: .leading, spacing: Self.lineSpacing) {
+                ForEach(layout.lines, id: \.index) { line in
+                    styled(line.runs, at: timeline.date)
+                        .font(Self.font)
+                        .contentTransition(.identity)
+                        .shadow(color: Palette.shadow, radius: 2, y: 1)
+                        .fixedSize()
+                        .frame(height: lineHeight, alignment: .leading)
+                        .transition(.asymmetric(insertion: .identity,
+                                                removal: reduce ? .opacity : .move(edge: .top).combined(with: .opacity)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(height: visible, alignment: .bottom)
+        .frame(height: height, alignment: .top)
         .clipped()
         .opacity(quiet ? 0.35 : 1)
         .motion(Motion.reveal, value: quiet)
-        .motion(Motion.reveal, value: visible)
+        // Only the bar without translation grows from one line to two.
+        .motion(Motion.reveal, value: fixed ? 0 : count)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: runs.map(\.text).joined()))
+        .accessibilityLabel(Text(verbatim: layout.lines.map(\.text).joined()))
         .accessibilityAddTraits(.updatesFrequently)
     }
 
-    private func styled(at date: Date) -> some View {
+    private func styled(_ runs: [CaptionRun], at date: Date) -> some View {
         var result = Text(verbatim: "")
         for run in runs {
             let progress = min(1, max(0, date.timeIntervalSince(run.arrived) / Self.arrival))
@@ -331,11 +354,45 @@ struct CaptionBarView: View {
     }
 
     private func refresh() {
-        // With translation on, the main text is the translation; segments still being translated wait.
-        let next = arrivals.update(segments: CaptionArrivals.recent(captions.displaySegments),
-                                   partial: captions.partialMainText, now: Date())
-        // A new line pushes the older ones up by one line; under Reduce Motion it just appears.
-        withAnimation(reduce ? nil : Motion.select) { runs = next }
+        // With translation on, the main text is the translation (or the last one while the next is out).
+        var next = layout
+        let breaker = CaptionLineBreaker(width: model.width - 40)
+        next.update(segments: captions.displaySegments, partial: captions.partialMainText, now: Date(),
+                    breakLines: breaker.counts)
+        // A new line pushes the older one up by one line; under Reduce Motion it just appears.
+        withAnimation(reduce ? nil : Motion.select) { layout = next }
+    }
+}
+
+/// Where the bar's 18 pt rounded medium text wraps, so the bar can lay out whole lines itself.
+@MainActor
+struct CaptionLineBreaker {
+    let width: CGFloat
+
+    static let font: NSFont = {
+        let base = NSFont.systemFont(ofSize: 18, weight: .medium)
+        return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 18) } ?? base
+    }()
+
+    /// The number of characters on each line of `text`.
+    func counts(_ text: String) -> [Int] {
+        let attributed = NSAttributedString(string: text, attributes: [.font: Self.font])
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+        let length = attributed.length
+        var counts: [Int] = []
+        var start = 0
+        var index = text.startIndex
+        // A hair narrower than the bar, so SwiftUI never finds a line too long for it.
+        let room = Double(max(width - 2, 40))
+        while start < length {
+            let count = CTTypesetterSuggestLineBreak(typesetter, start, room)
+            guard count > 0 else { break }
+            let end = String.Index(utf16Offset: start + count, in: text)
+            counts.append(text[index..<end].count)
+            index = end
+            start += count
+        }
+        return counts
     }
 }
 

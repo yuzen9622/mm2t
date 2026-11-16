@@ -3,14 +3,14 @@ import MM2TCore
 import OSLog
 
 /// Translates one recording's captions on this Mac as they arrive. Finished segments are sent to
-/// the translator in the order they settle; the unfinished partial at most every 400 ms and only
-/// when its text changed. Results land on their own segment by identity, and a partial result
-/// only while the partial still reads exactly as it did. A failure leaves the captions untranslated
-/// and never touches their status. Nothing here is saved.
+/// the translator in the order they settle. Of the unfinished partial only its settled part is
+/// sent (`PartialTranslationPolicy`), at least 250 ms apart and one at a time; each result replaces
+/// the shown translation in one step and nothing is blanked while the next is on its way. Results
+/// land on their own segment by identity. A failure leaves the captions as they are and never
+/// touches their status. Nothing here is saved.
 @MainActor
 final class LiveTranslation {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Captions")
-    static let partialInterval: TimeInterval = 0.4
 
     private weak var captions: LiveCaptions?
     private let translator: any CaptionTranslator
@@ -20,11 +20,10 @@ final class LiveTranslation {
 
     private var work: [Int: Task<Void, Never>] = [:]
     private var nextWork = 0
-    /// The partial text last sent, when, and whether its answer is still out.
+    /// What was last sent for the current partial, and when anything was last sent for one.
     private var partialSent: String?
     private var partialSentAt: Date?
     private var partialInFlight = false
-    private var partialResult: String?
     private var partialWait: Task<Void, Never>?
     private var hasLoggedFailure = false
     private var isStopped = false
@@ -36,11 +35,6 @@ final class LiveTranslation {
         self.target = target
         self.now = now
         self.sleep = sleep
-    }
-
-    /// The text's own language, when it is a language and not already the target.
-    func needsTranslation(_ text: String) -> Bool {
-        source(of: text) != nil
     }
 
     private func source(of text: String) -> CaptionLanguage? {
@@ -57,13 +51,16 @@ final class LiveTranslation {
         }
     }
 
+    /// The partial settled into a segment: the next partial starts its own sends.
+    func partialFinished() {
+        partialSent = nil
+        partialWait?.cancel()
+        partialWait = nil
+    }
+
     func partialChanged() {
         guard !isStopped, let captions else { return }
-        guard needsTranslation(captions.partial) else {
-            partialWait?.cancel()
-            partialWait = nil
-            return
-        }
+        guard PartialTranslationPolicy.stablePart(of: captions.partial, lastSent: partialSent) != nil else { return }
         schedulePartial()
     }
 
@@ -76,7 +73,8 @@ final class LiveTranslation {
 
     private func schedulePartial() {
         guard !partialInFlight, partialWait == nil else { return }
-        let wait = partialSentAt.map { Self.partialInterval - now().timeIntervalSince($0) } ?? 0
+        let gap = PartialTranslationPolicy.minimumGap
+        let wait = partialSentAt.map { gap - now().timeIntervalSince($0) } ?? 0
         guard wait > 0 else { return sendPartial() }
         partialWait = Task { [weak self, sleep] in
             do { try await sleep(.milliseconds(Int((wait * 1000).rounded(.up)))) } catch { return }
@@ -87,14 +85,10 @@ final class LiveTranslation {
     }
 
     private func sendPartial() {
-        guard !isStopped, let captions else { return }
-        let text = captions.partial
-        guard let source = source(of: text) else { return }
-        guard text != partialSent else {
-            // Revised back to words already translated.
-            captions.attachPartial(partialResult, for: text)
-            return
-        }
+        guard !isStopped, let captions,
+              let text = PartialTranslationPolicy.stablePart(of: captions.partial, lastSent: partialSent),
+              let source = source(of: text) else { return }
+        let id = captions.partialID
         partialSent = text
         partialSentAt = now()
         partialInFlight = true
@@ -102,10 +96,9 @@ final class LiveTranslation {
             let result = await self?.translated(text, from: source)
             guard let self else { return }
             self.partialInFlight = false
-            self.partialResult = result
-            self.captions?.attachPartial(result, for: text)
-            // Words that arrived while this one was out get their turn.
-            if let partial = self.captions?.partial, partial != text { self.partialChanged() }
+            if let result { self.captions?.attachPartial(result, for: id) }
+            // Words that settled while this one was out get their turn.
+            self.partialChanged()
         }
     }
 
