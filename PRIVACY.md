@@ -104,6 +104,12 @@ LLM 位置設為雲端時使用。端點：`https://generativelanguage.googleapi
 
 轉錄位置與 LLM 位置都設為本機時，會議處理不經過網路。
 
+### 即時字幕翻譯（預設關閉，在 Mac 上執行）
+
+在設定中為即時字幕選擇「翻譯字幕」語言（繁體中文或 English）時使用。翻譯以 Mozilla 的 Bergamot 引擎在你的 Mac 上執行，字幕文字不會為了翻譯送到任何服務。翻譯結果只在錄音期間顯示，不寫入磁碟，停止錄音後即清除。
+
+第一次開啟時，本 App 會從 Mozilla 的 Google Cloud Storage（`storage.googleapis.com`）下載英翻繁中與繁中翻英兩組翻譯模型，約 74 MB，存放在 `Models/translation`。這個請求不含任何會議資料。
+
 ### 軟體更新（Sparkle 與 GitHub）
 
 本 App 用 Sparkle 檢查更新。你同意自動檢查後，本 App 大約每天向 GitHub 下載一次更新清單（`appcast.xml`），有新版時再從 GitHub Releases 下載 DMG。這些請求會讓 GitHub 看到你的 IP 位址與本 App 的版本。本 App 沒有開啟 Sparkle 的系統資訊回報功能。

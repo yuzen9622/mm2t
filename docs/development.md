@@ -8,10 +8,15 @@
 
 - macOS 14.2 以上
 - Xcode 26 以上（Swift 6.2 工具鏈）
+- Python 3（只用來在 `.build` 裡安裝建置翻譯引擎用的 CMake 與 Ninja）
 
 ```bash
 git clone https://github.com/yuzen9622/mm2t.git
 cd mm2t
+
+# 先建置即時字幕翻譯引擎（Bergamot）到 Vendor/Bergamot.xcframework，它還沒有對外發布，
+# 沒有它 Swift package 無法解析。全部工作在 .build/bergamot 內進行。
+App/Tools/build-bergamot.sh
 
 # 執行 Swift package 的測試
 swift test
