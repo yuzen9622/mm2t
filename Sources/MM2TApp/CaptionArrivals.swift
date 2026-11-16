@@ -99,7 +99,7 @@ public struct CaptionArrivals: Sendable {
     }
 
     /// Chinese and Japanese run on without spaces; anything else gets one between segments.
-    static func joiner(_ previous: String, _ next: String) -> String {
+    public static func joiner(_ previous: String, _ next: String) -> String {
         guard let last = previous.last, let first = next.first else { return "" }
         return isWide(last) || isWide(first) ? "" : " "
     }

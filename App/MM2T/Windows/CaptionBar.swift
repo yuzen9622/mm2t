@@ -63,7 +63,7 @@ final class CaptionBarController {
     /// reason has not yet had its four seconds.
     private var wantsShown: Bool {
         let captions = app.capture.captions
-        guard app.capture.state.isCapturing, !captions.isBarHidden else { return false }
+        guard app.capture.state.isCapturing, !captions.isBarHidden, !MainNavigation.shared.liveFrontmost else { return false }
         switch captions.status {
         case .off: return false
         case .unavailable: return reasonUntil.map { Date() < $0 } ?? false
@@ -214,6 +214,7 @@ struct CaptionBarView: View {
             .overlay(alignment: .trailing) {
                 if hovering {
                     HStack(spacing: 6) {
+                        GlassControl("Open Live Page", icon: "maximize") { MainNavigation.shared.openLive() }
                         GlassControl("Hide Captions", icon: "x", action: model.hide)
                     }
                     .padding(.trailing, 12)

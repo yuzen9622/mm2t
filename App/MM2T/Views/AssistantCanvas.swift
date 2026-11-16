@@ -20,7 +20,7 @@ struct AssistantCanvas: View {
             .frame(maxWidth: 680, alignment: .leading)
             .padding(.horizontal, 32).padding(.top, 24).padding(.bottom, 180)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AssistantScrollObserver(model: model))
+            .background(FollowScrollObserver(follow: Binding(get: { model.scroll }, set: { model.scroll = $0 })))
         }
         .onDisappear { model.pageDisappeared() }
         .onChange(of: model.turns.last?.state) {
@@ -270,21 +270,23 @@ private struct AssistantMeetingChips: View {
     }
 }
 
-private struct AssistantScrollObserver: NSViewRepresentable {
-    let model: AssistantModel
+/// Keeps the enclosing scroll view pinned to its end while `follow` follows, and tells `follow`
+/// when the user scrolls away or back. Placed as the scrolled content's background.
+struct FollowScrollObserver: NSViewRepresentable {
+    let follow: Binding<AssistantFollowScroll>
     func makeNSView(context: Context) -> ScrollProbe {
         let view = ScrollProbe()
-        view.model = model
+        view.follow = follow
         return view
     }
     func updateNSView(_ view: ScrollProbe, context: Context) {
-        view.model = model
+        view.follow = follow
         view.scheduleRestore()
     }
 }
 
-private final class ScrollProbe: NSView {
-    weak var model: AssistantModel?
+final class ScrollProbe: NSView {
+    var follow: Binding<AssistantFollowScroll>?
     private weak var observedScroll: NSScrollView?
     private var lastHeight: CGFloat = 0
     private var lastViewport: CGFloat = 0
@@ -320,13 +322,13 @@ private final class ScrollProbe: NSView {
         }
     }
     private func restore() {
-        guard !restoring, let scroll = observedScroll, let model else { return }
+        guard !restoring, let scroll = observedScroll, let follow else { return }
         restoring = true
         defer { restoring = false }
         scroll.layoutSubtreeIfNeeded()
         let height = scroll.documentView?.frame.height ?? 0
         let viewport = scroll.contentView.bounds.height
-        let y = model.scroll.restoredOffset(contentHeight: height, viewportHeight: viewport)
+        let y = follow.wrappedValue.restoredOffset(contentHeight: height, viewportHeight: viewport)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         lastHeight = height
@@ -344,7 +346,7 @@ private final class ScrollProbe: NSView {
             return
         }
         if y != lastY {
-            model?.scroll.userScrolled(offset: y, bottomDistance: height - scroll.contentView.bounds.maxY)
+            follow?.wrappedValue.userScrolled(offset: y, bottomDistance: height - scroll.contentView.bounds.maxY)
         }
         lastY = y
     }

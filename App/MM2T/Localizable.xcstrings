@@ -1,6 +1,14 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Open Live Page": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開啟即時頁面" } } } },
+    "Live captions are a preview. The saved transcript is produced after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕僅供預覽，儲存的逐字稿會在會議結束後產生。" } } } },
+    "Listening…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中…" } } } },
+    "Captions appear here as people speak.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "有人說話時，字幕會出現在這裡。" } } } },
+    "Live captions are off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕已關閉" } } } },
+    "Open Settings": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開啟設定" } } } },
+    "Collapse to Capsule": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "收合到膠囊" } } } },
+    "Jump to Live": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "跳到最新" } } } },
     "Hide Captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "隱藏字幕" } } } },
     "Show Captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "顯示字幕" } } } },
     "Reconnecting": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "重新連線中" } } } },

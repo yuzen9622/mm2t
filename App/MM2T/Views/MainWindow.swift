@@ -49,10 +49,21 @@ final class MainNavigation {
     var searchOpen = false
     var assistantQuestion: String?
     var settingsSection = SettingsSection.general
+    /// The live page covers the window's content while a recording runs; closing it returns to
+    /// the page underneath.
+    var liveOpen = false
+    /// The live page is showing in the key window, so the caption bar steps aside.
+    var liveFrontmost = false
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
     func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
         request = Request(section: section, meeting: meeting, utterance: utterance)
+        WindowOpener.open(WindowID.main)
+    }
+
+    /// Opens the main window on the recording in progress.
+    func openLive() {
+        liveOpen = true
         WindowOpener.open(WindowID.main)
     }
 }
@@ -106,7 +117,14 @@ struct MainWindow: View {
                     content
                         .frame(width: column)
                         .frame(maxHeight: .infinity)
-                        .overlay(alignment: .topLeading) { title }
+                        .overlay(alignment: .topLeading) { title.opacity(showsLive ? 0 : 1) }
+                        .overlay {
+                            if showsLive {
+                                LivePage(app: app, collapse: { navigation.liveOpen = false })
+                                    .entrance(from: .bottom, distance: 12)
+                            }
+                        }
+                        .motion(Motion.page, value: showsLive)
                         .frame(maxWidth: .infinity)
                 }
                 .background(Palette.window)
@@ -144,12 +162,18 @@ struct MainWindow: View {
             assistant.handoff(question)
             show(.meetings)
         }
+        .onChange(of: app.capture.state.isCapturing) { _, capturing in
+            if !capturing { navigation.liveOpen = false }
+        }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
             show(request.section, meeting: request.meeting, utterance: request.utterance)
             MainNavigation.shared.request = nil
         }
     }
+
+    /// The live page shows only while a recording runs.
+    private var showsLive: Bool { MainNavigation.shared.liveOpen && app.capture.state.isCapturing }
 
     /// A floating panel on the window's ground, set apart by tone and a soft shadow, never by a line.
     private var sidebar: some View {
@@ -165,7 +189,7 @@ struct MainWindow: View {
             .padding(.horizontal, 6)
             .padding(.bottom, 18)
 
-            RecordButton(capture: app.capture)
+            RecordButton(capture: app.capture, openLive: { MainNavigation.shared.openLive() })
                 .padding(.bottom, 18)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -247,6 +271,7 @@ struct MainWindow: View {
             MainNavigation.shared.settingsOpen = true
             return
         }
+        MainNavigation.shared.liveOpen = false
         if meeting != nil {
             MainNavigation.shared.settingsOpen = false
             vocabularyEditor = nil
@@ -431,14 +456,16 @@ struct EmptyState: View {
 }
 
 /// Starts a recording from anywhere in the main window; while one runs it says so instead.
+/// While one runs it opens the live page.
 private struct RecordButton: View {
     let capture: CaptureController
+    let openLive: () -> Void
     @State private var hovering = false
 
     var body: some View {
         let idle = capture.state == .idle
         Button {
-            Task { await capture.startNow(title: String(localized: "Recording")) }
+            if capture.state.isCapturing { openLive() } else { Task { await capture.startNow(title: String(localized: "Recording")) } }
         } label: {
             HStack(spacing: 8) {
                 if idle {
@@ -457,7 +484,7 @@ private struct RecordButton: View {
             .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(Pressable())
-        .disabled(!idle)
+        .disabled(!idle && !capture.state.isCapturing)
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
     }
