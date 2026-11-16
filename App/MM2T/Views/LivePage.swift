@@ -74,7 +74,16 @@ struct LivePage: View {
         return FadingScrollView(ground: Palette.window) {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(paragraphs.enumerated()), id: \.element.first?.id) { index, paragraph in
-                    paragraphText(paragraph, partial: index == paragraphs.count - 1 ? captions.partial : "")
+                    VStack(alignment: .leading, spacing: 4) {
+                        paragraphText(paragraph, partial: index == paragraphs.count - 1 ? captions.partial : "")
+                        if let translation = translation(of: paragraph) {
+                            Text(verbatim: translation)
+                                .foregroundStyle(Palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(.opacity.animation(.easeOut(duration: 0.18)))
+                        }
+                    }
                 }
                 if paragraphs.isEmpty, !captions.partial.isEmpty {
                     paragraphText([], partial: captions.partial)
@@ -99,6 +108,14 @@ struct LivePage: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: follow.follows)
+    }
+
+    /// The paragraph's segments' translations, joined the way their originals are; nil when none
+    /// was translated (already in the target language, or translation is off).
+    private func translation(of paragraph: [LiveCaptions.Segment]) -> String? {
+        let parts = paragraph.compactMap(\.translation)
+        guard !parts.isEmpty else { return nil }
+        return parts.reduce("") { text, next in text + CaptionArrivals.joiner(text, next) + next }
     }
 
     private func paragraphText(_ paragraph: [LiveCaptions.Segment], partial: String) -> some View {

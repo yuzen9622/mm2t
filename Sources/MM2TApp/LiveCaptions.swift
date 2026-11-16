@@ -147,6 +147,22 @@ public final class LiveCaptions {
         partialTranslation ?? (isPartialAwaitingTranslation ? "" : partial)
     }
 
+    /// Segments as a surface shows them as main text, leaving out those still being translated.
+    public var displaySegments: [Segment] {
+        segments.compactMap { segment in
+            mainText(of: segment).map { Segment(id: segment.id, text: $0, started: segment.started, ended: segment.ended) }
+        }
+    }
+
+    /// Whether the newest words on screen are a translation (or one on its way), so the bar shows
+    /// the original above them. A segment already in the target language shows no original line.
+    public var newestIsTranslated: Bool {
+        guard translationTarget != nil else { return false }
+        if !partial.isEmpty { return partialTranslation != nil || isPartialAwaitingTranslation }
+        guard let last = segments.last else { return false }
+        return last.translation != nil || awaitingTranslation.contains(last.id)
+    }
+
     private func partialChanged() {
         partialTranslation = nil
         isPartialAwaitingTranslation = translation?.needsTranslation(partial) ?? false

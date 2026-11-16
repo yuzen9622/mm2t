@@ -14,8 +14,8 @@ final class CaptionBarController {
     /// Transparent room around the bar for its shadow (sides and bottom) and its tooltips (top).
     static let margin: CGFloat = 40
     static let topRoom: CGFloat = 48
-    /// More than two lines of captions with their padding.
-    static let barRoom: CGFloat = 96
+    /// More than two lines of captions with their padding, and the original line above a translation.
+    static let barRoom: CGFloat = 120
     static let width: CGFloat = 640
     static let minimumWidth: CGFloat = 420
     /// The bar's bottom edge sits this far above the bottom of the screen's visible frame.
@@ -166,6 +166,7 @@ struct CaptionBarView: View {
     @State private var settling = false
 
     static let font = Font.system(size: 18, weight: .medium, design: .rounded)
+    static let originalFont = Font.system(size: 13, weight: .regular, design: .rounded)
     static let lineSpacing: CGFloat = 4
     /// New characters reach full opacity, and lose their blur, over this long.
     static let arrival: TimeInterval = 0.18
@@ -183,7 +184,8 @@ struct CaptionBarView: View {
         .animation(reduce ? .easeOut(duration: 0.12) : model.shown ? Motion.reveal : .easeOut(duration: 0.15), value: model.shown)
         .tipLayer()
         .onChange(of: captions.segments, initial: true) { refresh() }
-        .onChange(of: captions.partial) { refresh() }
+        .onChange(of: captions.partialMainText) { refresh() }
+        .onChange(of: captions.awaitingTranslation) { refresh() }
         .task(id: captions.lastActivity) {
             quiet = false
             try? await Task.sleep(for: .seconds(8))
@@ -244,7 +246,7 @@ struct CaptionBarView: View {
                 .lineLimit(2)
                 .shadow(color: Palette.shadow, radius: 2, y: 1)
                 .frame(maxWidth: .infinity, minHeight: lineHeight, alignment: .leading)
-        } else if runs.isEmpty {
+        } else if runs.isEmpty && !captions.newestIsTranslated {
             // Waiting for the first words: three still dots.
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { _ in Circle().frame(width: 5, height: 5) }
@@ -254,8 +256,33 @@ struct CaptionBarView: View {
             .frame(maxWidth: .infinity, minHeight: lineHeight, maxHeight: lineHeight, alignment: .leading)
             .accessibilityLabel("Listening")
         } else {
-            captionText
+            VStack(alignment: .leading, spacing: 4) {
+                if captions.newestIsTranslated {
+                    // The words as spoken, one line, cut at the start so the newest stay visible.
+                    Text(verbatim: original)
+                        .font(Self.originalFont)
+                        .foregroundStyle(Palette.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .shadow(color: Palette.shadow, radius: 2, y: 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                captionText
+            }
+            .motion(Motion.reveal, value: captions.newestIsTranslated)
         }
+    }
+
+    /// The recent original words behind the translated main text.
+    private var original: String {
+        var text = ""
+        for segment in CaptionArrivals.recent(captions.segments) {
+            text += CaptionArrivals.joiner(text, segment.text) + segment.text
+        }
+        if !captions.partial.isEmpty { text += CaptionArrivals.joiner(text, captions.partial) + captions.partial }
+        return text
     }
 
     /// Two lines at most, filling from the leading edge; the newest line is always the bottom one
@@ -304,7 +331,9 @@ struct CaptionBarView: View {
     }
 
     private func refresh() {
-        let next = arrivals.update(segments: CaptionArrivals.recent(captions.segments), partial: captions.partial, now: Date())
+        // With translation on, the main text is the translation; segments still being translated wait.
+        let next = arrivals.update(segments: CaptionArrivals.recent(captions.displaySegments),
+                                   partial: captions.partialMainText, now: Date())
         // A new line pushes the older ones up by one line; under Reduce Motion it just appears.
         withAnimation(reduce ? nil : Motion.select) { runs = next }
     }

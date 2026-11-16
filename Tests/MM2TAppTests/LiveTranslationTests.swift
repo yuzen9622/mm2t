@@ -168,6 +168,22 @@ import Testing
         #expect(harness.texts == ["Done."], "nothing is translated once the recording's captions are cleared")
     }
 
+    @Test func surfacesShowTranslationsAndTheOriginalLineOnlyAboveThem() async throws {
+        let harness = Harness()
+        #expect(!harness.captions.newestIsTranslated)
+        harness.translator.holds.set(true)
+        harness.captions.receive(.final("Hello."))
+        #expect(harness.captions.displaySegments.isEmpty, "waits for its translation")
+        #expect(harness.captions.newestIsTranslated)
+        #expect(await eventually { harness.translator.held == ["Hello."] })
+        await harness.translator.release("Hello.")
+        #expect(await eventually { harness.captions.displaySegments.map(\.text) == ["⟨Hello.⟩"] })
+
+        harness.captions.receive(.final("大家好。"))
+        #expect(harness.captions.displaySegments.map(\.text) == ["⟨Hello.⟩", "大家好。"])
+        #expect(!harness.captions.newestIsTranslated, "already Chinese: no original line")
+    }
+
     @Test func processingIgnoresTheTranslationSetting() throws {
         var settings = AppSettings()
         let before = settings.forProcessing
