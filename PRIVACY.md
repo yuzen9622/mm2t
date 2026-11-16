@@ -49,6 +49,20 @@ API 金鑰與自架伺服器權杖存放在 macOS 鑰匙圈。
 
 ElevenLabs 如何保存與使用這些資料，依 [ElevenLabs 隱私權政策](https://elevenlabs.io/privacy-policy) 與你和 ElevenLabs 之間的條款而定。
 
+### ElevenLabs 即時字幕（預設關閉）
+
+只有在設定中開啟「即時字幕」且已儲存 ElevenLabs 金鑰時使用，關閉時不會建立這條連線。端點：`wss://api.elevenlabs.io/v1/speech-to-text/realtime`，模型 `scribe_v2_realtime`，以 WebSocket 持續連線。
+
+錄音進行中，本 App 會把「我」與「遠端」兩條音軌混成一條單聲道 16 kHz 音訊，約每 0.1 到 0.25 秒送出一段，直到暫停或停止錄音。每次連線包含：
+
+- 錄音期間混合後的音訊。暫停錄音時會關閉連線，不送出暫停期間的音訊；連線中斷期間的音訊會直接捨棄，不會補送。
+- 會議語言設定（自動偵測時不送）。
+- 詞彙提示（`keyterms`）：聲紋資料庫中所有人的姓名，加上你的自訂詞彙，最多 50 個、每個最多 20 字元。
+- 重新連線時，上一句字幕的最後至多 50 個字元，作為辨識的前文。
+- 你的 ElevenLabs API 金鑰（放在請求標頭）。
+
+即時字幕只在錄音期間顯示，不寫入磁碟，停止錄音後即清除；會議紀錄仍由錄音檔在會後轉錄產生。ElevenLabs 依串流的音訊時間計費，與會後轉錄分開計算，因此開啟即時字幕會增加用量費用。
+
 ### Google Gemini（雲端 LLM）
 
 LLM 位置設為雲端時使用。端點：`https://generativelanguage.googleapis.com/v1beta/models/`。

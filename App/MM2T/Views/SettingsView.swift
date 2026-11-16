@@ -47,7 +47,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// One setting the search can find. A new setting is a case here, a place in its group's `rows`,
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
-    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription
+    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions
     case diarizationOrder, diarizationModel
     case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
@@ -65,6 +65,7 @@ enum SettingsRow: Hashable {
         case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local)]
+        case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
         case .diarizationOrder: [String(localized: "Try first")] + DiarizationSource.allCases.map(Copy.diarization)
         case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
@@ -103,7 +104,8 @@ struct SettingsGroup: Identifiable {
         [
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Assistant memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
-                          rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription]),
+                          rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
+                                 .liveCaptions]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationOrder, .diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
@@ -326,6 +328,8 @@ struct SettingsRowView: View {
             if store.settings.transcriptionOrder.contains(.local) {
                 OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
             }
+        case .liveCaptions:
+            LiveCaptionsRow(store: store, key: app.setup.field(.elevenLabsAPIKey))
         case .diarizationOrder:
             HStack {
                 Text("Try first")
@@ -679,6 +683,31 @@ struct IssueRow: View {
         HStack(spacing: 8) {
             Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
             Text(Copy.issue(issue))
+        }
+    }
+}
+
+/// Captions need a stored ElevenLabs key; without one the switch is off and cannot be turned on.
+private struct LiveCaptionsRow: View {
+    let store: SettingsStore
+    let key: CredentialField
+
+    private var hasKey: Bool {
+        switch key.state {
+        case .empty, .storageFailed: false
+        default: true
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Live captions", isOn: Binding(
+                get: { hasKey && store.settings.liveCaptions },
+                set: { store.settings.liveCaptions = $0 }))
+                .disabled(!hasKey)
+            Text(hasKey ? "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved."
+                        : "Add an ElevenLabs key to use live captions.")
+                .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

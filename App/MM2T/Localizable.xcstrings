@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Live captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕" } } } },
+    "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "錄音時顯示正在說的話。音訊會串流到 ElevenLabs，字幕不會儲存。" } } } },
+    "Add an ElevenLabs key to use live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "加入 ElevenLabs 金鑰即可使用即時字幕。" } } } },
     "%lld assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 項交辦" } } } },
     "Assistant memory": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "助理記憶" } } } },
     "Checked assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "查詢交辦事項" } } } },
