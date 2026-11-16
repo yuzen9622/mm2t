@@ -23,6 +23,7 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     var limits: Limits
     let timeout: TimeInterval
     private let responseCache = StructuredResponseCache()
+    private let rejectedFields = RejectedFields()
     private var summaryUpdates: SummaryCheckpointStore?
     private var digestUpdates: DigestCheckpointStore?
     private var cleanedCheckpoints: CleanedCheckpointStore?
@@ -111,7 +112,7 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
                 let body = Self.object([
                     ("model", JSON.text(model).serialized()),
                     ("messages", JSON.list([Self.message("user", "ping")]).serialized()),
-                    ("max_tokens", "1"),
+                    ("max_completion_tokens", "1"),
                 ])
                 response = try await session.send(completionRequest(body, timeout: 30), for: .openAICompatible)
             }
@@ -151,36 +152,72 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     }
 
     private func send(system: String, input: String, format: String) async throws -> HTTPResponse {
-        var fields: [(String, String)] = [
-            ("model", JSON.text(model).serialized()),
-            ("messages", JSON.list([Self.message("system", system), Self.message("user", input)]).serialized()),
-            ("response_format", format),
-            ("temperature", "0.2"),
-            ("stream", "false"),
-            // Bound runaway generation, including hidden reasoning. Truncation is already
-            // handled by LLMTasks, which splits cleaned-transcript chunks when possible.
-            ("max_tokens", "8192"),
-        ]
-        // llama.cpp uses a separate thinking budget; effort alone may be ignored by
-        // the template. Keep the total cap larger so the final answer has room.
-        fields.append(("reasoning_effort", #""low""#))
-        fields.append(("reasoning_budget_tokens", "512"))
+        var fields = chatFields(system: system, input: input, format: format)
         var response = try await session.send(
             completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
         // Optional extensions are not universal. Remove only explicitly rejected fields,
         // at most once each; never retry authentication, rate limits or server failures.
-        for _ in 0..<2 {
-            let rejected = fields.filter { Self.rejectsReasoningParameter($0.0, response) }.map(\.0)
-            guard !rejected.isEmpty else { return response }
-            fields.removeAll { rejected.contains($0.0) }
+        for _ in 0..<3 {
+            guard let accepted = withoutRejectedFields(fields, response) else { return response }
+            fields = accepted
             response = try await session.send(
                 completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
         }
         return response
     }
 
-    private static func rejectsReasoningParameter(_ name: String, _ response: HTTPResponse) -> Bool {
-        guard ["reasoning_effort", "reasoning_budget_tokens"].contains(name),
+    /// One request shape for structured and streamed text, so hosted OpenAI and local servers get the
+    /// same negotiation. `format` nil streams plain text.
+    private func chatFields(system: String, input: String, format: String?) -> [(String, String)] {
+        var fields: [(String, String)] = [
+            ("model", JSON.text(model).serialized()),
+            ("messages", JSON.list([Self.message("system", system), Self.message("user", input)]).serialized()),
+        ]
+        if let format { fields.append(("response_format", format)) }
+        fields += [
+            ("temperature", "0.2"),
+            ("stream", format == nil ? "true" : "false"),
+            // Bound runaway generation, including hidden reasoning. Truncation is already
+            // handled by LLMTasks, which splits cleaned-transcript chunks when possible.
+            // OpenAI's reasoning models reject the older `max_tokens`.
+            ("max_completion_tokens", "8192"),
+            // llama.cpp uses a separate thinking budget; effort alone may be ignored by
+            // the template. Keep the total cap larger so the final answer has room.
+            ("reasoning_effort", #""low""#),
+            ("reasoning_budget_tokens", "512"),
+        ]
+        let rejected = rejectedFields.names
+        return fields.filter { !rejected.contains($0.0) }
+    }
+
+    /// The fields left after removing every optional field this failure explicitly rejects, or nil
+    /// when the failure is not such a rejection. Rejections are remembered, so later requests to the
+    /// same server skip the extra round trips.
+    private func withoutRejectedFields(_ fields: [(String, String)], _ response: HTTPResponse) -> [(String, String)]? {
+        let rejected = fields.filter { Self.rejectsOptionalParameter($0.0, response) }.map(\.0)
+        guard !rejected.isEmpty else { return nil }
+        rejectedFields.insert(rejected)
+        return fields.filter { !rejected.contains($0.0) }
+    }
+
+    /// Opens the event stream, negotiating optional fields exactly like `send`.
+    func openStream(system: String, input: String) async throws -> URLSession.AsyncBytes {
+        var fields = chatFields(system: system, input: input, format: nil)
+        for attempt in 0...3 {
+            let (bytes, status) = try await TextStreaming.connect(
+                completionRequest(Self.object(fields), timeout: timeout), session: session, service: .openAICompatible)
+            if status == 200 { return bytes }
+            let failure = HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))
+            guard attempt < 3, let accepted = withoutRejectedFields(fields, failure) else {
+                throw ProviderError(.openAICompatible, Self.failure(failure))
+            }
+            fields = accepted
+        }
+        throw ProviderError(.openAICompatible, .serviceError)
+    }
+
+    private static func rejectsOptionalParameter(_ name: String, _ response: HTTPResponse) -> Bool {
+        guard ["reasoning_effort", "reasoning_budget_tokens", "temperature"].contains(name),
               response.status == 400 || response.status == 422 else { return false }
         let error = String(decoding: response.body, as: UTF8.self).lowercased()
         return error.contains(name) &&
@@ -254,4 +291,12 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     static func failure(_ response: HTTPResponse) -> ProviderError.Kind {
         response.status == 404 ? .rejectedInput : response.commonFailure
     }
+}
+
+/// Optional request fields one server has explicitly rejected, shared by copies of a provider.
+private final class RejectedFields: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rejected: Set<String> = []
+    var names: Set<String> { lock.withLock { rejected } }
+    func insert(_ names: [String]) { lock.withLock { rejected.formUnion(names) } }
 }

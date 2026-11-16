@@ -19,7 +19,7 @@ extension URLSession {
         }
     }
 
-    private static func isConnectionFailure(_ error: URLError) -> Bool {
+    static func isConnectionFailure(_ error: URLError) -> Bool {
         switch error.code {
         case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
              .dnsLookupFailed, .timedOut, .internationalRoamingOff, .dataNotAllowed,

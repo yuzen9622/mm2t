@@ -40,6 +40,35 @@ import Testing
         #expect(body?["response_format"] == nil)
     }
 
+    @Test func openAIStreamingUsesCurrentTokenLimitAndDropsRejectedOptionalFields() async throws {
+        let wire = openAI
+        let server = StubServer { request in
+            if request.json["max_tokens"] != nil {
+                return .status(400, #"{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model."}}"#)
+            }
+            for field in ["reasoning_budget_tokens", "temperature"] where request.json[field] != nil {
+                return .status(400, "{\"error\":{\"message\":\"Unrecognized request argument supplied: \(field)\"}}")
+            }
+            return .status(200, wire)
+        }
+        let provider = OpenAICompatibleLLM(baseURL: URL(string: "https://example.test/v1")!, apiKey: nil, model: "test", session: server.session)
+        var text = ""
+        for try await delta in provider.streamText(system: "System", input: "Question") { text += delta }
+        #expect(text == "你好世界")
+        #expect(server.requests.count == 3)
+        #expect(server.requests.allSatisfy { $0.json["max_completion_tokens"] as? Int == 8192 && $0.json["stream"] as? Bool == true })
+        #expect(server.requests.last?.json["reasoning_effort"] as? String == "low")
+    }
+
+    @Test func openAIStreamingReportsTheServersFailure() async throws {
+        let server = StubServer(status: 401, body: #"{"error":{"message":"Incorrect API key provided"}}"#)
+        let provider = OpenAICompatibleLLM(baseURL: URL(string: "https://example.test/v1")!, apiKey: "bad", model: "test", session: server.session)
+        await #expect(throws: ProviderError(.openAICompatible, .invalidCredential)) {
+            for try await _ in provider.streamText(system: "", input: "") {}
+        }
+        #expect(server.requests.count == 1)
+    }
+
     @Test func rejectsBlockedAndTruncatedChunks() throws {
         #expect(throws: (any Error).self) {
             try TextStreaming.decode(#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#, format: .gemini)

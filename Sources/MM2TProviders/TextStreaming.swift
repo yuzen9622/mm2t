@@ -63,18 +63,39 @@ enum TextStreaming {
         }
     }
 
-    static func stream(_ request: URLRequest, session: URLSession, format: Format) -> AsyncThrowingStream<String, Error> {
+    /// Starts the request. Connection failures map like `URLSession.send`; any HTTP status is returned.
+    static func connect(_ request: URLRequest, session: URLSession, service: Service) async throws -> (URLSession.AsyncBytes, Int) {
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else { throw ProviderError(service, .malformedResponse) }
+            return (bytes, http.statusCode)
+        } catch let error as URLError {
+            if error.code == .cancelled { throw CancellationError() }
+            throw ProviderError(service, URLSession.isConnectionFailure(error) ? .unreachable : .serviceError)
+        }
+    }
+
+    /// An error response's body, bounded, so its message can be classified.
+    static func errorBody(_ bytes: URLSession.AsyncBytes) async -> Data {
+        var body = Data()
+        do {
+            for try await byte in bytes {
+                body.append(byte)
+                if body.count >= 65_536 { break }
+            }
+        } catch {}
+        bytes.task.cancel()
+        return body
+    }
+
+    /// `open` returns the body of a 200 response, or throws the provider's failure.
+    static func stream(format: Format, open: @escaping @Sendable () async throws -> URLSession.AsyncBytes) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let (bytes, response) = try await session.bytes(for: request)
+                    let bytes = try await open()
                     defer { bytes.task.cancel() }
                     try await withTaskCancellationHandler {
-                        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-                        let service: Service = format == .gemini ? .gemini : .openAICompatible
-                        guard http.statusCode == 200 else {
-                            throw ProviderError(service, HTTPResponse(status: http.statusCode, body: Data()).commonFailure)
-                        }
                         var parser = SSEParser()
                         for try await byte in bytes {
                             try Task.checkCancellation()
@@ -106,21 +127,18 @@ extension GeminiLLM {
             ("systemInstruction", .dict([("parts", .list([.dict([("text", .text(system))])]))])),
             ("contents", .list([.dict([("role", .text("user")), ("parts", .list([.dict([("text", .text(input))])]))])])),
         ]).serialized().utf8)
-        return TextStreaming.stream(request, session: session, format: .gemini)
+        return TextStreaming.stream(format: .gemini) { [session, request] in
+            let (bytes, status) = try await TextStreaming.connect(request, session: session, service: .gemini)
+            guard status == 200 else {
+                throw ProviderError(.gemini, GeminiLLM.failure(HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))))
+            }
+            return bytes
+        }
     }
 }
 
 extension OpenAICompatibleLLM {
     public func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
-        var request = URLRequest(url: baseURL.appending(path: "chat/completions"), timeoutInterval: timeout)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let apiKey { request.setValue("Bearer \(apiKey.revealed)", forHTTPHeaderField: "Authorization") }
-        let messages = JSON.list([
-            .dict([("role", .text("system")), ("content", .text(system))]),
-            .dict([("role", .text("user")), ("content", .text(input))]),
-        ])
-        request.httpBody = Data("{\"model\":\(JSON.text(model).serialized()),\"messages\":\(messages.serialized()),\"stream\":true,\"max_tokens\":4096}".utf8)
-        return TextStreaming.stream(request, session: session, format: .openAI)
+        TextStreaming.stream(format: .openAI) { [self] in try await openStream(system: system, input: input) }
     }
 }
