@@ -53,6 +53,8 @@ public final class AppController {
     public let assistantPreferences: AssistantPreferences
     public let reminders: RemindersSync
     public let enrollment: VoiceEnrollmentModel
+    /// First-run setup's screens; reopened at its first incomplete screen each time the window opens.
+    public let onboarding: OnboardingFlow
     /// Nil when this copy cannot share data with the desktop widget (an ad-hoc build has no team).
     public let widget: WidgetPublisher?
 
@@ -229,6 +231,7 @@ public final class AppController {
                 let segment = Diarization.Segment(cluster: voice, range: TimeRange(start: 0, end: duration))
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
+        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;

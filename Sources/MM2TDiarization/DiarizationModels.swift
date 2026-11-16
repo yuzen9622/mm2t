@@ -24,6 +24,10 @@ public struct DiarizationModels: Sendable {
 
     public var isDownloaded: Bool { nemotronIsComplete && weSpeakerIsComplete }
 
+    /// Both models' files as installed (2026-11-16: Nemotron-3 199,162,417 bytes, WeSpeaker
+    /// 21,787,007). Hugging Face serves them uncompressed, so this is also what a download fetches.
+    public var downloadBytes: Int64 { 220_949_424 }
+
     /// Fetches whichever model is missing from Hugging Face. `progress` receives 0...1.
     /// Throws `DiarizationModelError.downloadFailed`; partial files resume on the next call.
     public func download(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {

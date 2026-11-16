@@ -65,6 +65,8 @@ public struct LivePermissions: PermissionsProviding {
 
 public protocol ModelInstalling: Sendable {
     var isDownloaded: Bool { get }
+    /// What a download from nothing fetches, for the setup screen's total.
+    var downloadBytes: Int64 { get }
     func download(progress: @escaping @Sendable (Double) -> Void) async throws
 }
 
@@ -77,6 +79,8 @@ extension TranslationModels: ModelInstalling {
 }
 
 extension ModelSnapshot: ModelInstalling {
+    public var downloadBytes: Int64 { approximateBytes }
+
     public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
         try await download(configuration: .default, progress: progress)
     }

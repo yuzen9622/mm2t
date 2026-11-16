@@ -129,6 +129,9 @@ public final class SetupModel {
     public let suitability: OfflineSuitability
     public private(set) var issues: [SetupIssue] = []
     public let fields: [CredentialField]
+    /// What the speaker model and the translation models each download from nothing.
+    public var speakerModelBytes: Int64 { installer.downloadBytes }
+    public var translationModelBytes: Int64 { translationInstaller.downloadBytes }
 
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let installer: any ModelInstalling

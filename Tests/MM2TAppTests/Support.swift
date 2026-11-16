@@ -369,11 +369,21 @@ final class FakePermissions: PermissionsProviding, @unchecked Sendable {
 }
 
 final class FakeInstaller: ModelInstalling, @unchecked Sendable {
+    struct Failed: Error {}
     let downloaded: Box<Bool>
-    init(_ downloaded: Box<Bool>) { self.downloaded = downloaded }
+    let downloadBytes: Int64
+    /// When set, a download stops half way until the gate opens; true lets it finish, false fails it.
+    let hold = Box<Gate<Bool>?>(nil)
+    let downloads = Box(0)
+    init(_ downloaded: Box<Bool>, bytes: Int64 = 100_000_000) {
+        self.downloaded = downloaded
+        downloadBytes = bytes
+    }
     var isDownloaded: Bool { downloaded.get }
     func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        downloads.update { $0 += 1 }
         progress(0.5)
+        if let gate = hold.get, !(await gate.wait()) { throw Failed() }
         downloaded.set(true)
         progress(1)
     }
@@ -531,6 +541,8 @@ struct World {
     let recorder = FakeRecorder()
     let permissions = FakePermissions()
     let validator = FakeValidator()
+    let speakerInstaller: FakeInstaller
+    let translationInstaller: FakeInstaller
     let defaults: UserDefaults
     let now: Box<Date>
     let app: AppController
@@ -546,11 +558,13 @@ struct World {
         }
         let now = Box(Date(timeIntervalSince1970: 1_800_000_000))
         self.now = now
+        speakerInstaller = FakeInstaller(catalog.modelsDownloaded, bytes: 220_000_000)
+        translationInstaller = FakeInstaller(catalog.translationDownloaded, bytes: 75_000_000)
         app = try AppController(
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
-            recorder: recorder, permissions: permissions, installer: FakeInstaller(catalog.modelsDownloaded),
-            offlineInstallers: catalog.offlineDownloaded.mapValues(FakeInstaller.init),
-            translationInstaller: FakeInstaller(catalog.translationDownloaded),
+            recorder: recorder, permissions: permissions, installer: speakerInstaller,
+            offlineInstallers: catalog.offlineDownloaded.mapValues { FakeInstaller($0) },
+            translationInstaller: translationInstaller,
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }
 
