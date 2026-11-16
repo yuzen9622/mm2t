@@ -89,11 +89,14 @@ struct FakeSTT: TranscriptionProvider {
     enum Behavior: Sendable { case words, unreachable, failed }
     let behavior: Box<Behavior>
     let calls = Box<[(file: String, hints: [String])]>([])
+    /// Whether each call asked for speaker labels.
+    let labelRequests = Box<[Bool]>([])
 
     init(_ behavior: Behavior = .words) { self.behavior = Box(behavior) }
 
     func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         calls.update { $0.append((audio.lastPathComponent, hints)) }
+        labelRequests.update { $0.append(labelSpeakers) }
         switch behavior.get {
         case .unreachable: throw TranscriptionError.unreachable("connection refused")
         case .failed: throw TranscriptionError.failed("invalid API key")

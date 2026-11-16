@@ -137,13 +137,6 @@ enum Copy {
         }
     }
 
-    static func diarization(_ source: DiarizationSource) -> String {
-        switch source {
-        case .local: String(localized: "On-device model")
-        case .transcription: String(localized: "Speaker labels from transcription")
-        }
-    }
-
     static func permissionState(_ state: PermissionState) -> String {
         switch state {
         case .granted: String(localized: "Allowed")

@@ -48,7 +48,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
     case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions, captionTranslation
-    case diarizationOrder, diarizationModel
+    case diarizationModel
     case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
     case hideFromCapture
@@ -67,7 +67,6 @@ enum SettingsRow: Hashable {
         case .localTranscription: [Copy.source(.local)]
         case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
         case .captionTranslation: [String(localized: "Translate captions"), "繁體中文", "English"]
-        case .diarizationOrder: [String(localized: "Try first")] + DiarizationSource.allCases.map(Copy.diarization)
         case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
@@ -108,7 +107,7 @@ struct SettingsGroup: Identifiable {
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
                                  .liveCaptions, .captionTranslation]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
-                          rows: [.diarizationOrder, .diarizationModel]),
+                          rows: [.diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
                           rows: [.summaryBackend, .geminiKey, .localSummaries]),
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
@@ -333,16 +332,6 @@ struct SettingsRowView: View {
             LiveCaptionsRow(store: store, key: app.setup.field(.elevenLabsAPIKey))
         case .captionTranslation:
             CaptionTranslationRow(app: app, key: app.setup.field(.elevenLabsAPIKey))
-        case .diarizationOrder:
-            HStack {
-                Text("Try first")
-                Spacer()
-                Segmented(options: DiarizationSource.allCases, selection: Binding(
-                    get: { store.settings.diarizationOrder.first ?? .local },
-                    set: { first in store.settings.diarizationOrder = [first] + DiarizationSource.allCases.filter { $0 != first } })) {
-                    Copy.diarization($0)
-                }
-            }
         case .diarizationModel:
             ModelDownloadView(setup: app.setup)
         case .summaryBackend:

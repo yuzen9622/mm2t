@@ -58,7 +58,21 @@ import Testing
 
         world.catalog.modelsDownloaded.set(false)
         #expect(try issues { _ in } == [.diarizationModelsMissing])
-        #expect(try issues { $0.diarizationOrder = [.transcription] }.isEmpty, "STT labels need no local model")
+        #expect(try issues { $0.transcriptionOrder = [.cloud] } == [.diarizationModelsMissing],
+                "speakers are always told apart on this Mac, whatever the transcription service")
+    }
+
+    @Test func speakersAreToldApartOnThisMacEvenWhenOldSettingsPreferredTheServicesLabels() async throws {
+        let world = try World()
+        let old = Data(#"{"transcriptionOrder":["cloud"],"diarizationOrder":["transcription","local"]}"#.utf8)
+        world.defaults.set(old, forKey: SettingsStore.key)
+        world.app.settings.settings = SettingsStore(defaults: world.defaults).settings
+
+        let meeting = try await world.recordedMeeting()
+        #expect(meeting.status == .completed)
+        #expect(meeting.attribution?.source == .local)
+        #expect(!world.catalog.cloud.labelRequests.get.isEmpty)
+        #expect(!world.catalog.cloud.labelRequests.get.contains(true), "the service is never asked for speaker labels")
     }
 
     @Test func transcriptionFollowsTheConfiguredOrderAndFallsThroughWhenSelfHostedIsDown() async throws {

@@ -130,11 +130,9 @@ public final class AppController {
             saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
                 // Only with hosted speech recognition and the on-device speaker model: an on-device
-                // speech model would compete with the meeting for the machine, and pieces carry no
-                // speaker labels for the fallback separation to use.
+                // speech model would compete with the meeting for the machine.
                 let current = settings.settings
-                guard current.diarizationOrder.first == .local,
-                      case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
+                guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
                       let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
                 let pipeline: MeetingProcessingPipeline
                 if current.llmLocation == .cloud, let gemini = configured.llm as? GeminiLLM {

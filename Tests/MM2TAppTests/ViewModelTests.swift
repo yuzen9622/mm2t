@@ -341,7 +341,8 @@ import Testing
         defaults.set(Data(#"{"vocabulary":["舊"]}"#.utf8), forKey: SettingsStore.key)
         let migrated = SettingsStore(defaults: defaults).settings
         #expect(migrated.vocabulary == ["舊"])
-        #expect(migrated.transcriptionOrder == [.cloud] && migrated.diarizationOrder == [.local, .transcription])
+        #expect(migrated.transcriptionOrder == [.cloud])
+        #expect(AppSettings.diarizationOrder == [.local])
         #expect(migrated.hidesFromScreenCapture)
 
         #expect(AppSettings.selfHostedURL(from: "gpu:8000") == nil)

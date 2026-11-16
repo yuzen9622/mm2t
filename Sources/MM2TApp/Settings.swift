@@ -33,6 +33,10 @@ public enum CaptionTranslation: String, Codable, Sendable, CaseIterable {
 
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
+    /// Speakers are always told apart on this Mac. Settings saved by an older build may still hold a
+    /// `diarizationOrder` that preferred the transcription service's speaker labels; it is ignored.
+    public static let diarizationOrder: [DiarizationSource] = [.local]
+
     /// Tried in order; each one listed must be configured. The chain falls through only when a
     /// source is unreachable, as `TranscriptionChain` defines.
     public var transcriptionOrder: [TranscriptionSource] = [.cloud]
@@ -43,7 +47,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public private(set) var learnedVocabulary: [String] = []
     /// Learned terms the user deleted, so they are not learned again.
     public private(set) var dismissedVocabulary: [String] = []
-    public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
     public var cloudLLM: CloudLLM = .gemini
     /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
@@ -82,7 +85,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? defaults.vocabulary
         learnedVocabulary = try c.decodeIfPresent([String].self, forKey: .learnedVocabulary) ?? []
         dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
-        diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
         cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
         openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
@@ -99,7 +101,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
-        case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
+        case llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
         case recordShortcut
         case detectionRules

@@ -117,13 +117,13 @@ public struct PipelineSetup: Sendable {
         }
 
         let models = catalog.localSpeakerModels()
-        if settings.diarizationOrder.contains(.local), models == nil { issues.append(.diarizationModelsMissing) }
+        if models == nil { issues.append(.diarizationModelsMissing) }
 
         guard issues.isEmpty, let llm else { return .needsSetup(issues) }
         return .ready(MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
             diarizer: models?.diarizer, embedder: models?.embedder,
-            diarizationOrder: settings.diarizationOrder,
+            diarizationOrder: AppSettings.diarizationOrder,
             transcription: TranscriptionChain(routes), llm: llm,
             thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
             runsConcurrently: settings.llmLocation == .cloud,

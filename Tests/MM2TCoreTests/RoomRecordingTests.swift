@@ -26,6 +26,16 @@ import Testing
         #expect(world.cloud.calls.get.map(\.labelSpeakers) == [true, false])
     }
 
+    @Test func withOnlyLocalSeparationNoTrackIsAskedForSpeakerLabels() async throws {
+        let world = try await World(diarizationOrder: [.local])
+        world.cloud.roomOnly.update { $0 = true }
+        let meeting = try await world.processed()
+        #expect(world.cloud.calls.get.map(\.labelSpeakers) == [false, false])
+        #expect(meeting.separatedTrack == .me, "the on-device model still tells the room's voices apart")
+        #expect(meeting.speakers.map(\.label) == ["A", "B", "C"])
+        #expect(meeting.attribution?.source == .local)
+    }
+
     @Test func theSummaryNamesTheMeetingUnlessTheUserAlreadyDid() async throws {
         let world = try await World()
         world.llm.title.update { $0 = "软件检讨" }

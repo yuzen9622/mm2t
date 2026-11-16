@@ -244,16 +244,18 @@ public struct MeetingProcessingPipeline: Sendable {
             let heardURL = cleaned?.audio ?? micURL
             let remote: TrackTranscript
             var me: TrackTranscript
+            // Speaker labels serve only the separation that falls back on them.
+            let labels = diarizationOrder.contains(.transcription)
             if transcribesConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
-                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
-                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: true)
+                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
+                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels)
                 (remote, me) = try await (remoteTask, meTask)
             } else {
-                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
+                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
                 // A silent remote track means the meeting happened in the room, so the mic holds every
                 // voice and is the track whose speakers need telling apart.
-                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: remote.words.isEmpty)
+                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels && remote.words.isEmpty)
             }
             if let echo = cleaned?.echo { me = me.dropping(echo) }
             meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)

@@ -1848,16 +1848,6 @@
         }
       }
     },
-    "On-device model": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本機模型"
-          }
-        }
-      }
-    },
     "One term at a time": {
       "localizations": {
         "zh-Hant": {
@@ -2588,16 +2578,6 @@
         }
       }
     },
-    "Speaker labels from transcription": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "轉錄服務的說話者標記"
-          }
-        }
-      }
-    },
     "Speaker separation": {
       "localizations": {
         "zh-Hant": {
@@ -3064,16 +3044,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "轉錄"
-          }
-        }
-      }
-    },
-    "Try first": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "優先使用"
           }
         }
       }
