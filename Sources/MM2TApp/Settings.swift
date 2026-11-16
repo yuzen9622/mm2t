@@ -42,6 +42,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Live captions while recording, streamed to ElevenLabs; usable only with an ElevenLabs key.
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
+    /// Where the user dragged the caption bar, by screen (its display number as text): the bar's
+    /// offset from its default place, in points.
+    public var captionBarOffsets: [String: CaptionBarOffset] = [:]
 
     /// The global shortcut that starts a recording and stops it again.
     public var recordShortcut: Hotkey = .commandFn
@@ -71,6 +74,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
+        captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
@@ -81,7 +85,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
         case recordShortcut
         case detectionRules
-        case liveCaptions
+        case liveCaptions, captionBarOffsets
     }
 
     /// These settings with the ones that only change what is shown while recording set aside, so
@@ -89,6 +93,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var forProcessing: AppSettings {
         var settings = self
         settings.liveCaptions = false
+        settings.captionBarOffsets = [:]
         return settings
     }
 
@@ -161,6 +166,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private static func same(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
+    }
+}
+
+/// How far the caption bar was dragged from its default place on one screen, in points.
+public struct CaptionBarOffset: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
     }
 }
 

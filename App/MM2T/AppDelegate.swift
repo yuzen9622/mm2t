@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let app: AppController?
     let startupError: String?
     private var floating: FloatingPanelController?
+    private var captionBar: CaptionBarController?
 
     override init() {
         do {
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
         floating = FloatingPanelController(app: app)
+        captionBar = CaptionBarController(app: app)
         var fixture = false
         #if DEBUG
         fixture = AssistantScenarioRunner.fixtureRoot != nil

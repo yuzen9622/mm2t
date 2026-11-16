@@ -504,6 +504,8 @@ struct RecordingCapsule: View {
             isPaused: isPaused, level: level, elapsed: capture.meters.elapsed,
             remoteSilent: capture.meters.remoteSilentWhilePlaying, showsHighlight: hovering || isPaused,
             hasHighlights: capture.meters.highlightCount > 0,
+            captionsShown: capture.captions.isActive ? !capture.captions.isBarHidden : nil,
+            toggleCaptions: { capture.captions.isBarHidden.toggle() },
             toggle: { Task { if isPaused { await capture.resume() } else { await capture.pause() } } },
             highlight: { Task { await capture.markHighlight() } },
             finish: { Task { await capture.stop() } })
@@ -528,6 +530,9 @@ struct CapsuleBar: View {
     let remoteSilent: Bool
     let showsHighlight: Bool
     let hasHighlights: Bool
+    /// Whether the caption bar shows; nil when captions are off, which hides its button.
+    var captionsShown: Bool?
+    var toggleCaptions: () -> Void = {}
     let toggle: () -> Void
     let highlight: () -> Void
     let finish: () -> Void
@@ -560,8 +565,13 @@ struct CapsuleBar: View {
                 CircleButton("Highlight", icon: hasHighlights ? "star-filled" : "star", action: highlight)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
+            if let captionsShown {
+                CircleButton(captionsShown ? "Hide Captions" : "Show Captions", icon: "badge-cc", action: toggleCaptions)
+                    .transition(.opacity)
+            }
             CircleButton("Finish", icon: "check", kind: .primary, action: finish)
         }
+        .motion(Motion.reveal, value: captionsShown == nil)
         .motion(Motion.select, value: showsHighlight)
         .motion(Motion.reveal, value: isPaused)
         .motion(Motion.reveal, value: remoteSilent)

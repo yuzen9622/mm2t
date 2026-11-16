@@ -1,6 +1,10 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Hide Captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "隱藏字幕" } } } },
+    "Show Captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "顯示字幕" } } } },
+    "Reconnecting": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "重新連線中" } } } },
+    "Listening": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中" } } } },
     "Live captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕" } } } },
     "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "錄音時顯示正在說的話。音訊會串流到 ElevenLabs，字幕不會儲存。" } } } },
     "Add an ElevenLabs key to use live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "加入 ElevenLabs 金鑰即可使用即時字幕。" } } } },

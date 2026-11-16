@@ -60,6 +60,50 @@ import Testing
         #expect(captions.paragraphs.map { $0.map(\.text) } == [["一", "二"], ["三"]])
     }
 
+    // MARK: What the bar fades in
+
+    private func segment(_ id: Int, _ text: String) -> LiveCaptions.Segment {
+        LiveCaptions.Segment(id: id, text: text, started: .distantPast, ended: .distantPast)
+    }
+
+    @Test func aRevisedPartialFadesInOnlyItsChangedTail() {
+        var arrivals = CaptionArrivals()
+        let t0 = Date(timeIntervalSince1970: 0), t1 = t0.addingTimeInterval(1), t2 = t0.addingTimeInterval(2)
+        #expect(arrivals.update(segments: [], partial: "We meet", now: t0)
+            == [CaptionRun(text: "We meet", arrived: t0, isPartial: true)])
+        #expect(arrivals.update(segments: [], partial: "We meet on Monday", now: t1)
+            == [CaptionRun(text: "We meet", arrived: t0, isPartial: true), CaptionRun(text: " on Monday", arrived: t1, isPartial: true)])
+        // A revision keeps only the unchanged beginning's time.
+        #expect(arrivals.update(segments: [], partial: "We met", now: t2)
+            == [CaptionRun(text: "We me", arrived: t0, isPartial: true), CaptionRun(text: "t", arrived: t2, isPartial: true)])
+    }
+
+    @Test func aSettledSegmentKeepsItsTimesAndCJKJoinsWithoutSpaces() {
+        var arrivals = CaptionArrivals()
+        let t0 = Date(timeIntervalSince1970: 0), t1 = t0.addingTimeInterval(1), t2 = t0.addingTimeInterval(2)
+        _ = arrivals.update(segments: [], partial: "大家好", now: t0)
+        #expect(arrivals.update(segments: [segment(0, "大家好。")], partial: "", now: t1)
+            == [CaptionRun(text: "大家好", arrived: t0, isPartial: false), CaptionRun(text: "。", arrived: t1, isPartial: false)])
+        #expect(arrivals.update(segments: [segment(0, "大家好。")], partial: "今天", now: t2).last
+            == CaptionRun(text: "今天", arrived: t2, isPartial: true))
+        var latin = CaptionArrivals()
+        #expect(latin.update(segments: [segment(0, "Hello.")], partial: "Next", now: t0).map(\.text) == ["Hello.", " Next"])
+    }
+
+    @Test func theBarKeepsOnlyRecentSegments() {
+        let segments = (0..<10).map { segment($0, String(repeating: "字", count: 100)) }
+        #expect(CaptionArrivals.recent(segments).map(\.id) == [8, 9])
+        #expect(CaptionArrivals.recent([segment(0, String(repeating: "字", count: 500))]).count == 1)
+    }
+
+    @Test func barOffsetsSurviveASettingsRoundTrip() throws {
+        var settings = AppSettings()
+        settings.captionBarOffsets["69733382"] = CaptionBarOffset(x: -120, y: 48)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.captionBarOffsets == settings.captionBarOffsets)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8)).liveCaptions == false)
+    }
+
     // MARK: The stream
 
     /// A stream wired to a fake service, with backoff waits the test releases by hand.
@@ -245,6 +289,7 @@ import Testing
         var settings = AppSettings()
         let before = settings.forProcessing
         settings.liveCaptions = true
+        settings.captionBarOffsets["1"] = CaptionBarOffset(x: 40, y: -12)
         #expect(settings.forProcessing == before)
     }
 }

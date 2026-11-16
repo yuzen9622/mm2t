@@ -160,20 +160,22 @@ private struct AssistantLegacyText: NSViewRepresentable {
     }
 }
 
-private struct CitationRegion: Equatable, Identifiable {
+struct CitationRegion: Equatable, Identifiable {
     let citation: String
     let rect: CGRect
     var id: String { "\(citation)-\(rect.minX)-\(rect.minY)" }
 }
 
+/// How far a streamed run has settled (its blur) and, in an answer, the citation it is.
+/// The caption bar draws its arriving words with the same attribute and renderer.
 @available(macOS 15, *)
-private struct AssistantTextAttribute: TextAttribute {
+struct AssistantTextAttribute: TextAttribute {
     let blur: Double
     let citation: String?
 }
 
 @available(macOS 15, *)
-private struct AssistantTextRenderer: TextRenderer {
+struct AssistantTextRenderer: TextRenderer {
     @Binding var regions: [CitationRegion]
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
         var found: [CitationRegion] = []
