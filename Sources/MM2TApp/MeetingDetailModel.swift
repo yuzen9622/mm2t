@@ -171,7 +171,10 @@ public final class MeetingDetailModel {
     }
 
     public func toggleDone(_ row: SourcedRow) {
-        if let id = todoID(row) { todos?.toggle(id) }
+        guard let id = todoID(row), let index = Int(row.id.dropFirst("action-".count)),
+              let items = meeting?.outputs.summary?.actionItems, items.indices.contains(index) else { return }
+        todos?.toggle(id, anchor: AssistantTaskRef.fingerprint(items[index]))
+        if let error = todos?.storageError { errorMessage = error }
     }
 
     public func isInReminders(_ row: SourcedRow) -> Bool {

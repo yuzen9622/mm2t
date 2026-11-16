@@ -20,6 +20,7 @@ enum AppLinks {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
+    case assistant
     case permissions
     case about
 
@@ -28,6 +29,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
+        case .assistant: String(localized: "Assistant memory")
         case .permissions: String(localized: "Permissions")
         case .about: String(localized: "About")
         }
@@ -35,7 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .general: "adjustments-horizontal"
+        case .general, .assistant: "adjustments-horizontal"
         case .permissions: "shield-check"
         case .about: "info-circle"
         }
@@ -48,7 +50,7 @@ enum SettingsRow: Hashable {
     case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription
     case diarizationOrder, diarizationModel
     case summaryBackend, geminiKey, localSummaries
-    case appLanguage
+    case appLanguage, assistantMemory
     case hideFromCapture
     case recordShortcut
     case promptApps, promptSites
@@ -65,10 +67,11 @@ enum SettingsRow: Hashable {
         case .localTranscription: [Copy.source(.local)]
         case .diarizationOrder: [String(localized: "Try first")] + DiarizationSource.allCases.map(Copy.diarization)
         case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
-        case .summaryBackend: [String(localized: "Summary model"), "Gemini", String(localized: "Self-hosted (OpenAI-compatible)"),
+        case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
         case .geminiKey: [Copy.credentialName(.geminiAPIKey)]
         case .localSummaries: [String(localized: "Generate on this Mac")]
+        case .assistantMemory: [String(localized: "Assistant memory"), String(localized: "Conversation history"), String(localized: "Preference")]
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
         case .recordShortcut: [String(localized: "Start or stop recording")]
@@ -98,6 +101,7 @@ struct SettingsGroup: Identifiable {
 
     static var all: [SettingsGroup] {
         [
+            SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Assistant memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
@@ -292,6 +296,8 @@ struct SettingsRowView: View {
     @ViewBuilder private var controls: some View {
         @Bindable var store = app.settings
         switch row {
+        case .assistantMemory:
+            AssistantMemorySettings(preferences: app.assistantPreferences, conversations: app.assistantConversations)
         case .transcriptionLanguage:
             HStack {
                 Text("Meeting language")
@@ -335,12 +341,12 @@ struct SettingsRowView: View {
         case .summaryBackend:
             if store.settings.llmLocation == .cloud {
                 HStack {
-                    Text("Summary model")
+                    Text("Large language model")
                     Spacer()
                     Segmented(options: CloudLLM.allCases, selection: $store.settings.cloudLLM) { backend in
                         switch backend {
                         case .gemini: "Gemini"
-                        case .openAICompatible: String(localized: "Self-hosted (OpenAI-compatible)")
+                        case .openAICompatible: String(localized: "OpenAI-compatible")
                         }
                     }
                 }

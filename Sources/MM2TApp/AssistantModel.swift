@@ -1,10 +1,11 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
-public struct AssistantStep: Identifiable {
-    public enum Kind { case plan, search, read, answer }
-    public enum State: Equatable { case running, done, failed(String), stopped }
+public struct AssistantStep: Identifiable, Codable, Sendable {
+    public enum Kind: String, Codable, Sendable { case plan, search, read, tasks, answer }
+    public enum State: Codable, Equatable, Sendable { case running, done, failed(String), stopped }
     public let id: UUID
     public let kind: Kind
     public var arguments = AssistantArguments()
@@ -14,9 +15,13 @@ public struct AssistantStep: Identifiable {
     public var state: State = .running
 }
 
-public struct AssistantTurn: Identifiable {
-    public enum State: Equatable { case running, finished, stopped, failed(String), needsSetup }
-    public let id = UUID()
+public struct AssistantTurn: Identifiable, Codable, Sendable {
+    public enum State: Codable, Equatable, Sendable { case running, finished, stopped, failed(String), needsSetup }
+    public var id = UUID()
+    public var createdAt = Date()
+    public var memoryRevision: UUID?
+    public var memoryProposal: String?
+    public var memoryManagement = false
     public let question: String
     public var steps: [AssistantStep] = []
     public var answer = AssistantBatcher()
@@ -40,6 +45,14 @@ public struct AssistantTurn: Identifiable {
 @MainActor @Observable
 public final class AssistantModel {
     public private(set) var turns: [AssistantTurn] = []
+    public private(set) var ledger = AssistantLedger()
+    public private(set) var conversationID = UUID()
+    public private(set) var storageError: String?
+    public let conversations: AssistantConversations?
+    public let preferences: AssistantPreferences?
+    @ObservationIgnored private let owner = UUID()
+    @ObservationIgnored private var lastCheckpoint = Date.distantPast
+    @ObservationIgnored private var attached = true
     public var isActive = false
     public var draft = ""
     public var scroll = AssistantFollowScroll()
@@ -51,11 +64,86 @@ public final class AssistantModel {
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var flushTask: Task<Void, Never>?
 
-    public init(engine: AssistantEngine, build: @escaping () throws -> LLMBuild) {
+    public init(engine: AssistantEngine, conversations: AssistantConversations? = nil,
+                preferences: AssistantPreferences? = nil, build: @escaping () throws -> LLMBuild) {
         self.engine = engine
         self.build = build
+        self.conversations = conversations
+        self.preferences = preferences
+        if let conversations {
+            do { restore(try conversations.open(conversations.availableRecent(), owner: owner)) }
+            catch { storageError = String(describing: error) }
+        }
+        observePreferences()
     }
-    deinit { task?.cancel(); flushTask?.cancel() }
+    deinit {
+        task?.cancel(); flushTask?.cancel()
+        let store = conversations, lease = owner
+        Task { @MainActor in store?.release(owner: lease) }
+    }
+
+    private var record: AssistantConversation {
+        var value = AssistantConversation()
+        value.id = conversationID; value.turns = turns; value.ledger = ledger
+        return value
+    }
+
+    @discardableResult public func save() -> Bool {
+        guard let conversations, attached, !turns.isEmpty else { return true }
+        do { try conversations.save(record, owner: owner); storageError = nil; lastCheckpoint = Date(); return true }
+        catch { storageError = String(describing: error); return false }
+    }
+
+    public func newConversation() { openConversation(nil) }
+
+    public func openConversation(_ id: UUID?) {
+        stop()
+        guard save() else { return }
+        do {
+            let next = try conversations?.open(id, owner: owner) ?? AssistantConversation()
+            if conversationID != next.id { conversations?.release(conversationID, owner: owner) }
+            restore(next)
+            attached = true
+            isActive = true
+            draft = ""; scroll = .init(); shownContent = .init()
+            shownContent.settleAnswers(turns)
+        } catch { storageError = String(describing: error) }
+    }
+
+    private func restore(_ record: AssistantConversation) {
+        conversationID = record.id; turns = record.turns; ledger = record.ledger
+        storageError = conversations?.isUnsaved(record.id) == true ? "Unsaved conversation recovered in memory. Retry saving before closing." : nil
+        isActive = !turns.isEmpty
+        shownContent.settleAnswers(turns)
+    }
+
+    public func confirmPreference(turn id: UUID, text: String) {
+        guard !isRunning, let index = turns.firstIndex(where: { $0.id == id }), turns[index].memoryProposal != nil else { return }
+        do {
+            try preferences?.put(text: text, sourceTurn: id)
+            turns[index].memoryProposal = nil
+            save()
+        } catch { storageError = String(describing: error) }
+    }
+
+    public func dismissPreference(turn id: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].memoryProposal = nil; save()
+    }
+
+    private func observePreferences() {
+        withObservationTracking { _ = preferences?.revision } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.isRunning, self.turns.last?.memoryRevision != self.preferences?.revision { self.stop() }
+                for index in self.turns.indices where self.turns[index].memoryRevision != self.preferences?.revision {
+                    self.turns[index].memoryProposal = nil
+                }
+                self.save()
+                self.observePreferences()
+            }
+        }
+    }
 
     public static func showsPlaceholder(draft: String, hasMarkedText: Bool) -> Bool {
         draft.isEmpty && !hasMarkedText
@@ -67,20 +155,46 @@ public final class AssistantModel {
         draft = ""
         isActive = true
         scroll.sent()
-        let previous = turns.map(\.question)
-        turns.append(AssistantTurn(question: question))
+        if !attached {
+            let saved = conversations?.records.contains { $0.id == conversationID } == true
+            openConversation(saved ? conversationID : nil)
+            guard attached else { return }
+        }
+        let revision = preferences?.revision
+        let history = record.history(memoryRevision: revision)
+        turns.append(AssistantTurn(memoryRevision: revision, question: question))
         let position = turns.count - 1
+        let turnID = turns[position].id
+        save()
         do {
-            guard case .ready(let provider) = try build() else { turns[position].state = .needsSetup; return }
-            let events = engine.events(question: question, previous: previous, provider: provider)
+            guard case .ready(let provider) = try build() else { turns[position].state = .needsSetup; save(); return }
+            let shouldPropose = preferences?.enabled == true && preferences?.error == nil && question.count <= 3_000
+            let preferenceContext = preferences?.context(for: question) ?? ""
+            let currentLedger = ledger
             task = Task { [weak self] in
+                if shouldPropose {
+                    let proposal = try? await assistantTimeout(seconds: 30) {
+                        try await AssistantGeneration.memoryProposal(provider: provider, question: question)
+                    }
+                    guard !Task.isCancelled, let self, self.preferences?.revision == revision,
+                          self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
+                    if let proposal {
+                        self.turns[position].memoryProposal = proposal
+                        self.turns[position].memoryManagement = true
+                        self.save()
+                    }
+                }
+                guard !Task.isCancelled, let self else { return }
+                let events = self.engine.events(question: question, provider: provider, history: history,
+                    preferences: preferenceContext, ledger: currentLedger)
                 for await event in events {
-                    guard !Task.isCancelled, let self, self.turns.indices.contains(position),
+                    guard !Task.isCancelled, self.turns.indices.contains(position),
+                          self.turns[position].id == turnID, self.preferences?.revision == revision,
                           self.turns[position].state == .running else { break }
                     self.receive(event, at: position)
                 }
             }
-        } catch { turns[position].state = .failed(String(describing: error)) }
+        } catch { turns[position].state = .failed(String(describing: error)); save() }
     }
 
     public func handoff(_ question: String) {
@@ -99,6 +213,7 @@ public final class AssistantModel {
         for index in turns[last].steps.indices where turns[last].steps[index].state == .running {
             turns[last].steps[index].state = .stopped
         }
+        save()
     }
 
     public func pageDisappeared() {
@@ -107,7 +222,10 @@ public final class AssistantModel {
 
     public func close() {
         stop()
-        turns = []
+        guard save() else { return }
+        conversations?.release(conversationID, owner: owner)
+        attached = false
+        if conversations == nil { turns = []; ledger = .init() }
         isActive = false
         draft = ""
         scroll = AssistantFollowScroll()
@@ -117,6 +235,13 @@ public final class AssistantModel {
     public func retry() {
         guard !isRunning, let last = turns.popLast() else { return }
         send(last.question)
+    }
+
+    public func sourceIsAvailable(_ source: AssistantSource) async -> Bool {
+        guard let meeting = try? await engine.library.meeting(source.meeting) else { return false }
+        if let task = source.task, task.resolve(in: meeting) == nil { return false }
+        if let utterance = source.utterance, meeting.utterance(utterance) == nil { return false }
+        return true
     }
 
     public func toggleActivity(_ id: UUID) {
@@ -129,17 +254,21 @@ public final class AssistantModel {
         case .planStarted:
             turns[index].steps.append(.init(id: UUID(), kind: .plan))
         case .planFinished(let reasoning, let duration):
-            guard let step = turns[index].steps.firstIndex(where: { $0.kind == .plan }) else { return }
+            guard let step = turns[index].steps.lastIndex(where: { $0.kind == .plan && $0.state == .running }) else { return }
             turns[index].steps[step].reasoning = reasoning
             turns[index].steps[step].duration = duration
             turns[index].steps[step].state = .done
         case .toolStarted(let id, let kind, let arguments):
-            turns[index].steps.append(.init(id: id, kind: kind == .search ? .search : .read, arguments: arguments))
+            let stepKind: AssistantStep.Kind = switch kind { case .search: .search; case .read: .read; case .tasks: .tasks }
+            turns[index].steps.append(.init(id: id, kind: stepKind, arguments: arguments))
         case .toolFinished(let id, let result):
             guard let step = turns[index].steps.firstIndex(where: { $0.id == id }) else { return }
             turns[index].steps[step].result = result
             turns[index].steps[step].state = .done
-            turns[index].sources += result.sources
+            for source in result.sources {
+                if let existing = turns[index].sources.firstIndex(where: { $0.id == source.id }) { turns[index].sources[existing] = source }
+                else { turns[index].sources.append(source) }
+            }
         case .answerDelta(let delta):
             turns[index].answer.append(delta)
             if flushTask == nil {
@@ -151,6 +280,7 @@ public final class AssistantModel {
                     self.flushTask = nil
                 }
             }
+        case .ledger(let value): ledger = value
         case .finished(let sources):
             finish(at: index)
             turns[index].sources = sources
@@ -165,6 +295,7 @@ public final class AssistantModel {
                 turns[index].steps.append(.init(id: UUID(), kind: .answer, state: .failed(reason)))
             }
         }
+        if turns[index].state != .running || Date().timeIntervalSince(lastCheckpoint) >= 1 { save() }
     }
 
     private func finish(at index: Int) {

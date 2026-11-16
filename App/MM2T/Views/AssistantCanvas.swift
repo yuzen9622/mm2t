@@ -10,6 +10,7 @@ struct AssistantCanvas: View {
     var body: some View {
         FadingScrollView(ground: Palette.window) {
             VStack(alignment: .leading, spacing: 40) {
+                AssistantToolbar(model: model)
                 ForEach(model.turns) { turn in
                     AssistantTurnView(model: model, turn: turn, isLast: turn.id == model.turns.last?.id,
                         toggle: { model.toggleActivity(turn.id) }, retry: { model.retry() },
@@ -45,6 +46,7 @@ private struct AssistantTurnView: View {
     let retry: () -> Void
     let setUp: () -> Void
     @State private var questionHover = false
+    @State private var unavailableSource = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -58,8 +60,11 @@ private struct AssistantTurnView: View {
             } else {
                 activity.padding(.top, 14)
                 if !turn.answer.text.isEmpty {
-                    AssistantAnswer(turn: turn, settledOffset: model.shownContent.settledAnswerOffset(for: turn.id))
+                    AssistantAnswer(turn: turn, settledOffset: model.shownContent.settledAnswerOffset(for: turn.id), openSource: openSource)
                         .padding(.top, 16)
+                }
+                if turn.memoryProposal != nil {
+                    AssistantPreferenceProposal(model: model, turn: turn).padding(.top, 16)
                 }
                 if turn.state == .finished && !turn.citedSources.isEmpty { sources.padding(.top, 20) }
                 if turn.state == .stopped { Text("Stopped").font(Typo.caption).foregroundStyle(Palette.muted).padding(.top, 12) }
@@ -81,6 +86,15 @@ private struct AssistantTurnView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .motion(Motion.reveal, value: turn.activityExpanded)
         .motion(Motion.reveal, value: turn.state)
+        .alert("Source changed or removed", isPresented: $unavailableSource) { Button("OK", role: .cancel) {} }
+    }
+
+    private func openSource(_ source: AssistantSource) {
+        Task {
+            if await model.sourceIsAvailable(source) {
+                MainNavigation.shared.open(.meetings, meeting: source.meeting, utterance: source.utterance)
+            } else { unavailableSource = true }
+        }
     }
 
     private var activity: some View {
@@ -105,7 +119,7 @@ private struct AssistantTurnView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sources").font(Typo.captionStrong).foregroundStyle(Palette.muted)
             ForEach(Array(turn.citedSources.enumerated()), id: \.element.id) { index, source in
-                Button { MainNavigation.shared.open(.meetings, meeting: source.meeting, utterance: source.utterance) } label: {
+                Button { openSource(source) } label: {
                     HStack(alignment: .top, spacing: 10) {
                         Text(verbatim: "\(index + 1)").font(Typo.captionStrong).foregroundStyle(Palette.secondary)
                             .padding(.horizontal, 4).frame(height: 18).background(Palette.tonal, in: RoundedRectangle(cornerRadius: 5))

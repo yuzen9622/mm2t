@@ -1,6 +1,25 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 項交辦" } } } },
+    "Assistant memory": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "助理記憶" } } } },
+    "Checked assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "查詢交辦事項" } } } },
+    "Conversation history": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "對話紀錄" } } } },
+    "Conversations stay on this Mac until you delete them. Relevant preferences, recent conversation context and meeting excerpts are sent to your selected cloud model. Local models process them on this Mac. Iterative searches may make several model requests.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "對話保存在這台 Mac，直到你主動刪除。使用雲端模型時，相關偏好、近期對話及會議摘錄會送至你選擇的模型；本機模型則在這台 Mac 處理。反覆檢索可能增加模型請求次數。" } } } },
+    "Delete conversation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "刪除對話" } } } },
+    "Delete this conversation?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要刪除這段對話嗎？" } } } },
+    "Delete this preference?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要刪除這項偏好嗎？" } } } },
+    "It will no longer be used in future requests. Earlier messages may still show it in conversation history.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "後續請求將不再使用這項偏好。對話紀錄中的舊訊息仍可能顯示原文。" } } } },
+    "New conversation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "新對話" } } } },
+    "No saved preferences": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "尚未保存偏好" } } } },
+    "Only saved after confirmation. Relevant preferences and conversation context are sent to your selected model when you ask a question.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "確認後才會保存。提問時，相關偏好與對話內容會送至你選擇的模型。" } } } },
+    "Preference": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "偏好內容" } } } },
+    "Project or topic (optional)": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "專案或主題（選填）" } } } },
+    "Remember this preference?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要記住這項偏好嗎？" } } } },
+    "Some conversations could not be loaded. Their files have been preserved.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "部分對話無法載入，原始檔案已保留。" } } } },
+    "Source changed or removed": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "來源已變更或移除" } } } },
+    "This removes the saved conversation from this Mac. Meeting records and preferences are kept.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "這會刪除這台 Mac 上保存的對話，會議紀錄與偏好仍會保留。" } } } },
+    "Use saved preferences": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用已保存的偏好" } } } },
     "Answer": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "回答" } } } },
     "%lld meetings": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 場會議" } } } },
     "Ask AI: “%@”": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "詢問 AI：「%@」" } } } },
@@ -783,12 +802,12 @@
         }
       }
     },
-    "Couldn't rewrite. Check the summary model in Settings.": {
+    "Couldn't rewrite. Check the large language model in Settings.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "無法改寫。請到設定檢查摘要模型。"
+            "value": "無法改寫。請到設定檢查大語言模型。"
           }
         }
       }
@@ -923,12 +942,12 @@
         }
       }
     },
-    "Download the on-device summary model.": {
+    "Download the on-device large language model.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "下載本機摘要模型。"
+            "value": "下載本機大語言模型。"
           }
         }
       }
@@ -1043,12 +1062,12 @@
         }
       }
     },
-    "Enter the summary server URL and model name, or switch back to Gemini.": {
+    "Enter the large language model's server URL and model name, or switch back to Gemini.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請輸入摘要伺服器網址與模型名稱，或改回使用 Gemini。"
+            "value": "請輸入大語言模型的伺服器網址與模型名稱，或改回使用 Gemini。"
           }
         }
       }
@@ -2383,12 +2402,12 @@
         }
       }
     },
-    "Self-hosted (OpenAI-compatible)": {
+    "OpenAI-compatible": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "自架（OpenAI 相容）"
+            "value": "OpenAI 相容"
           }
         }
       }
@@ -2723,12 +2742,12 @@
         }
       }
     },
-    "Summary model": {
+    "Large language model": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "摘要模型"
+            "value": "大語言模型"
           }
         }
       }
@@ -3413,22 +3432,22 @@
         }
       }
     },
-    "summary server API key": {
+    "large language model API key": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "摘要伺服器 API 金鑰"
+            "value": "大語言模型 API 金鑰"
           }
         }
       }
     },
-    "the on-device summary model": {
+    "the on-device large language model": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "本機語言模型"
+            "value": "本機大語言模型"
           }
         }
       }
@@ -3453,12 +3472,12 @@
         }
       }
     },
-    "the self-hosted summary model": {
+    "the OpenAI-compatible large language model": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "自架摘要模型"
+            "value": "OpenAI 相容大語言模型"
           }
         }
       }
@@ -3473,12 +3492,12 @@
         }
       }
     },
-    "the summary server API key": {
+    "the large language model API key": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "摘要伺服器 API 金鑰"
+            "value": "大語言模型 API 金鑰"
           }
         }
       }

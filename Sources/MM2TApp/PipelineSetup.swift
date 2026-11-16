@@ -8,7 +8,7 @@ import MM2TSystem
 public enum SetupIssue: Hashable, Sendable {
     case missingCredential(Credential)
     case missingSelfHostedURL
-    /// The OpenAI-compatible summary server needs a base URL and a model name.
+    /// The OpenAI-compatible large language model server needs a base URL and a model name.
     case missingLLMEndpoint
     case noTranscriptionSource
     case diarizationModelsMissing

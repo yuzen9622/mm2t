@@ -5,6 +5,7 @@ import SwiftUI
 struct AssistantAnswer: View {
     let turn: AssistantTurn
     let settledOffset: Int
+    let openSource: (AssistantSource) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var regions: [CitationRegion] = []
     @State private var hovering: String?
@@ -97,7 +98,7 @@ struct AssistantAnswer: View {
         return result
     }
     private func open(_ source: AssistantSource) {
-        MainNavigation.shared.open(.meetings, meeting: source.meeting, utterance: source.utterance)
+        openSource(source)
     }
 }
 

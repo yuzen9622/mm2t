@@ -16,6 +16,8 @@ public struct AppPaths: Sendable {
     public var recordings: URL { root.appending(path: "Recordings") }
     public var voiceprints: URL { root.appending(path: "voiceprints.json") }
     public var searchIndex: URL { root.appending(path: "search.sqlite") }
+    public var assistantConversations: URL { root.appending(path: "Assistant/Conversations") }
+    public var assistantPreferences: URL { root.appending(path: "Assistant/preferences.json") }
     /// Same place as `DiarizationModels.applicationSupport` for the default root.
     public var models: URL { root.appending(path: "Models") }
 
@@ -47,6 +49,8 @@ public final class AppController {
     public let people: VoiceprintsModel
     public let dashboard: DashboardModel
     public let todoStatus: TodoStatus
+    public let assistantConversations: AssistantConversations
+    public let assistantPreferences: AssistantPreferences
     public let reminders: RemindersSync
     public let enrollment: VoiceEnrollmentModel
     /// Nil when this copy cannot share data with the desktop widget (an ad-hoc build has no team).
@@ -71,7 +75,9 @@ public final class AppController {
     }
 
     public func makeAssistant() -> AssistantModel {
-        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints),
+        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints,
+                                               todos: { [todoStatus] in await todoStatus.snapshot }),
+                       conversations: assistantConversations, preferences: assistantPreferences,
                        build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
     }
 
@@ -96,6 +102,8 @@ public final class AppController {
         recordingTitle: String = "Recording"
     ) throws {
         self.paths = paths
+        assistantConversations = AssistantConversations(directory: paths.assistantConversations)
+        assistantPreferences = AssistantPreferences(file: paths.assistantPreferences)
         self.recordingTitle = recordingTitle
         let settings = SettingsStore(defaults: defaults)
         let library = MeetingLibrary(root: paths.meetings)
@@ -213,7 +221,8 @@ public final class AppController {
     public static func live(
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
         signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil, recordingTitle: String = "Recording",
-        recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions()
+        recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions(),
+        shareWidget: Bool = true
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
@@ -237,7 +246,7 @@ public final class AppController {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
             },
-            widgetFile: WidgetLink.snapshotFile(),
+            widgetFile: shareWidget ? WidgetLink.snapshotFile() : nil,
             recordingTitle: recordingTitle)
     }
 

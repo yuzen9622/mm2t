@@ -13,9 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
-            app = try AppController.live(defaults: .standard, credentials: Self.credentials, signedInPage: signedIn,
-                                         recordingTitle: String(localized: "Recording"),
-                                         recorder: LiveRecorder(), permissions: LivePermissions())
+            var defaults = UserDefaults.standard
+            var fixture = false
+            #if DEBUG
+            if let isolated = try AssistantScenarioRunner.fixtureDefaults() { defaults = isolated; fixture = true }
+            #endif
+            app = try AppController.live(defaults: defaults, credentials: Self.credentials, signedInPage: signedIn,
+                                         calendars: fixture ? [] : nil, recordingTitle: String(localized: "Recording"),
+                                         recorder: LiveRecorder(), permissions: LivePermissions(), shareWidget: !fixture)
             startupError = nil
         } catch {
             app = nil
@@ -36,9 +41,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         WindowSharing.install(settings: app?.settings)
         guard let app else { return }
+        #if DEBUG
+        if AssistantScenarioRunner.requested {
+            Task { await AssistantScenarioRunner.run(app) }
+            return
+        }
+        #endif
         floating = FloatingPanelController(app: app)
-        Updates.start()
-        Task { await app.launch() }
+        var fixture = false
+        #if DEBUG
+        fixture = AssistantScenarioRunner.fixtureRoot != nil
+        #endif
+        if !fixture { Updates.start() }
+        Task { await app.launch(watchMeetings: !fixture) }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
         WindowOpener.open(WindowID.main)
         // Setup comes first: the main window shows nothing else until it is finished.

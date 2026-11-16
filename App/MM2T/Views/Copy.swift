@@ -71,11 +71,11 @@ enum Copy {
         switch issue {
         case .missingCredential(let credential): String(localized: "Enter your \(credentialName(credential)).")
         case .missingSelfHostedURL: String(localized: "Enter the self-hosted server URL, or turn that source off.")
-        case .missingLLMEndpoint: String(localized: "Enter the summary server URL and model name, or switch back to Gemini.")
+        case .missingLLMEndpoint: String(localized: "Enter the large language model's server URL and model name, or switch back to Gemini.")
         case .noTranscriptionSource: String(localized: "Turn on at least one transcription source.")
         case .diarizationModelsMissing: String(localized: "Download the speaker separation model.")
         case .offlineModelMissing(.transcription): String(localized: "Download the on-device transcription model.")
-        case .offlineModelMissing(.llm): String(localized: "Download the on-device summary model.")
+        case .offlineModelMissing(.llm): String(localized: "Download the on-device large language model.")
         }
     }
 
@@ -84,7 +84,7 @@ enum Copy {
         case .elevenLabsAPIKey: String(localized: "ElevenLabs API key")
         case .geminiAPIKey: String(localized: "Gemini API key")
         case .selfHostedToken: String(localized: "self-hosted server token")
-        case .openAICompatibleAPIKey: String(localized: "summary server API key")
+        case .openAICompatibleAPIKey: String(localized: "large language model API key")
         case .googleCalendarRefreshToken: String(localized: "Google Calendar sign-in")
         case .microsoftCalendarRefreshToken: String(localized: "Outlook sign-in")
         }

@@ -8,6 +8,7 @@ extension Copy {
             step.state == .running ? String(localized: "Thinking") : String(localized: "Thought for \(Int(step.duration.rounded()))s")
         case .search: String(localized: "Searched")
         case .read: String(localized: "Read")
+        case .tasks: String(localized: "Checked assignments")
         case .answer: String(localized: "Answer")
         }
     }
@@ -20,6 +21,7 @@ extension Copy {
             return "“\(args.query)”" + (filters.isEmpty ? "" : " · \(filters)") +
                 (step.result.map { " · " + String(localized: "\($0.count) meetings") } ?? "")
         case .read: return String(localized: "\(step.result?.count ?? step.arguments.meetings.count) meetings")
+        case .tasks: return String(localized: "\(step.result?.count ?? 0) assignments")
         }
     }
     static func assistantActivity(_ turn: AssistantTurn) -> String {

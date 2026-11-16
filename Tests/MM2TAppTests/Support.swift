@@ -102,13 +102,23 @@ struct FakeSTT: TranscriptionProvider {
     }
 }
 
+func assistantDecision(_ action: String, query: String = "", people: [String] = [], from: String? = nil,
+                       to: String? = nil, cursor: String? = nil, handles: [String] = [], status: String = "unmarked") -> String {
+    let object: [String: Any] = ["reasoning": "查詢會議", "action": action, "query": query, "people": people,
+        "owner": "me", "status": status, "sort": "due", "dateFrom": from as Any? ?? NSNull(),
+        "dateTo": to as Any? ?? NSNull(), "dueFrom": NSNull(), "dueTo": NSNull(), "cursor": cursor as Any? ?? NSNull(), "handles": handles]
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+}
+
 struct FakeLLMError: Error, CustomStringConvertible {
     var description: String { "Gemini 暫時無法服務" }
 }
 
 /// Echoes the transcript back in each output shape, naming speakers only by token.
 struct FakeLLM: LLMProvider, StructuredGenerator {
-    let planJSON = Box(#"{"reasoning":"Look up the meetings.","queries":["預算"],"people":[],"dateFrom":null,"dateTo":null,"needsMeetings":true}"#)
+    let decisions = Box([assistantDecision("search_meetings", query: "預算"), assistantDecision("read_meeting"), assistantDecision("answer")])
+    let generationInputs = Box<[String]>([])
+    let memoryJSON = Box(#"{"preference":null}"#)
     let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
     let resumedAnswerChunks = Box<[String]>([])
     let answerInputs = Box<[String]>([])
@@ -118,8 +128,12 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
+        if system.hasPrefix("Memory intent:") { return memoryJSON.get }
+        generationInputs.update { $0.append(input) }
         try await record("plan")
-        return planJSON.get
+        var result = assistantDecision("answer")
+        decisions.update { if !$0.isEmpty { result = $0.removeFirst() } }
+        return result
     }
     func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
         answerInputs.update { $0.append(input) }

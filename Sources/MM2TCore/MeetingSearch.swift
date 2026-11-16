@@ -24,6 +24,14 @@ public struct MeetingHits: Sendable, Equatable, Identifiable {
     public var hits: [Hit]
     public var totalHits: Int
 
+    package init(id: MeetingID, title: String, startedAt: Date, hits: [Hit], totalHits: Int) {
+        self.id = id
+        self.title = title
+        self.startedAt = startedAt
+        self.hits = hits
+        self.totalHits = totalHits
+    }
+
     public struct Hit: Sendable, Equatable {
         public enum Kind: String, Sendable {
             case title, utterance, cleaned, headline, decision, discussion, action
@@ -35,7 +43,7 @@ public struct MeetingHits: Sendable, Equatable, Identifiable {
         public var time: TimeInterval?
         public var speaker: PersonID?
 
-        init(kind: Kind, text: String, terms: [String], utterance: UtteranceID?, time: TimeInterval?, speaker: PersonID?) {
+        package init(kind: Kind, text: String, terms: [String], utterance: UtteranceID?, time: TimeInterval?, speaker: PersonID?) {
             self.kind = kind
             self.utterance = utterance
             self.time = time

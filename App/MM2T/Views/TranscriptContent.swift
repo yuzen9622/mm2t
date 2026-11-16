@@ -203,7 +203,7 @@ struct TextCorrection: View {
         .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         .overlay(alignment: .bottomLeading) {
             if rewriteFailed {
-                Text("Couldn't rewrite. Check the summary model in Settings.").font(Typo.caption).foregroundStyle(Palette.danger)
+                Text("Couldn't rewrite. Check the large language model in Settings.").font(Typo.caption).foregroundStyle(Palette.danger)
                     .offset(y: 18)
             }
         }

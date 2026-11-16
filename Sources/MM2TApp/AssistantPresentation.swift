@@ -58,12 +58,12 @@ public enum AssistantMarkdown {
     }
 }
 
-public struct AssistantBatch: Sendable, Equatable {
+public struct AssistantBatch: Codable, Sendable, Equatable {
     public let endOffset: Int
     public let arrived: Date
 }
 
-public struct AssistantBatcher {
+public struct AssistantBatcher: Codable, Sendable {
     public private(set) var text = ""
     public private(set) var batches: [AssistantBatch] = []
     private var pending = ""

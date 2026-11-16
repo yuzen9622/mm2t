@@ -52,7 +52,7 @@ public final class ProcessingQueue {
         self.makeLLM = makeLLM
     }
 
-    /// Rewrites a passage with the configured summary model, outside any job: it changes nothing
+    /// Rewrites a passage with the configured large language model, outside any job: it changes nothing
     /// until the user saves the result.
     public func rewrite(_ text: String, instruction: String) async throws -> String {
         guard case .ready(let pipeline) = try makePipeline() else { throw RewriteUnsupported() }

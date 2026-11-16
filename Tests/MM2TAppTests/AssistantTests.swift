@@ -25,7 +25,7 @@ import Testing
         let meeting = try await world.recordedMeeting(title: "預算")
         try await world.app.searchIndex.rebuild(from: [meeting])
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: ["大家好"]))
+        llm.decisions.set(plan(queries: ["大家好"]))
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         var order: [String] = []
         var sources: [AssistantSource] = []
@@ -37,10 +37,11 @@ import Testing
             case .toolFinished: order.append("toolDone")
             case .answerDelta: order.append("delta")
             case .finished(let found): sources = found; order.append("finished")
+            case .ledger: break
             case .failed(let reason): Issue.record("\(reason)")
             }
         }
-        #expect(order == ["plan", "planned", "search", "toolDone", "read", "toolDone", "delta", "finished"])
+        #expect(order == ["plan", "planned", "search", "toolDone", "plan", "planned", "read", "toolDone", "plan", "planned", "delta", "finished"])
         #expect(sources.map(\.id) == ["m1", "m1.u1"])
         #expect(sources.allSatisfy { $0.meeting == meeting.id })
         #expect(sources.last?.utterance == meeting.utterances.first?.id)
@@ -55,27 +56,27 @@ import Testing
         try await world.app.searchIndex.rebuild(from: [meeting], user: user.id)
         let llm = FakeLLM()
         let day = AssistantEngine.day(meeting.metadata.startedAt)
-        llm.planJSON.set(plan(queries: [], people: ["Alex"], from: day, to: day))
+        llm.decisions.set(plan(queries: [], people: ["Alex"], from: day, to: day))
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         var counts: [Int] = []
         for await event in engine.events(question: "Alex today", previous: [], provider: llm) {
             if case .toolFinished(_, let result) = event { counts.append(result.count) }
         }
         #expect(counts == [1, 1])
-        llm.planJSON.set(plan(queries: [], people: ["Alex"], from: "2000-01-01", to: "2000-01-01"))
+        llm.decisions.set(plan(queries: [], people: ["Alex"], from: "2000-01-01", to: "2000-01-01"))
         counts = []
         for await event in engine.events(question: "Alex then", previous: [], provider: llm) {
             if case .toolFinished(_, let result) = event { counts.append(result.count) }
         }
-        #expect(counts == [0])
+        #expect(counts == [0, 0])
         let other = try await world.app.voiceprints.addPerson(name: "Other")
         #expect(await world.app.voiceprints.names()[other] == "Other")
-        llm.planJSON.set(plan(queries: [], people: ["Other"]))
+        llm.decisions.set(plan(queries: [], people: ["Other"]))
         counts = []
         for await event in engine.events(question: "Other", previous: [], provider: llm) {
             if case .toolFinished(_, let result) = event { counts.append(result.count) }
         }
-        #expect(counts == [0])
+        #expect(counts == [0, 0])
     }
 
     @Test func capBudgetAndNoLookup() async throws {
@@ -83,7 +84,7 @@ import Testing
         for number in 0..<10 { _ = try await world.recordedMeeting(title: "Budget \(number)") }
         try await world.app.searchIndex.rebuild(from: world.library.list())
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: ["Budget"]))
+        llm.decisions.set(plan(queries: ["Budget"]))
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         var readCount = 0
         for await event in engine.events(question: "Budget", previous: [], provider: llm) {
@@ -92,8 +93,8 @@ import Testing
         #expect(readCount == 8)
         let tiny = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints, contextBudget: 1)
         for await _ in tiny.events(question: "Budget", previous: [], provider: llm) {}
-        #expect(llm.answerInputs.get.last?.hasSuffix("material):\n") == true)
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        #expect(llm.answerInputs.get.last?.components(separatedBy: "material):\n").last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
+        llm.decisions.set(plan(queries: [], lookup: false))
         var tools = 0
         for await event in engine.events(question: "Hello", previous: [], provider: llm) {
             if case .toolStarted = event { tools += 1 }
@@ -105,7 +106,7 @@ import Testing
     @Test func stopSetupAndRetry() async throws {
         let world = try World()
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.decisions.set(plan(queries: [], lookup: false))
         llm.answerChunks.set(["Partial ", "answer"])
         llm.holdsStream.set(true)
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
@@ -157,7 +158,7 @@ import Testing
         let meeting = try await world.recordedMeeting(title: "Budget")
         try await world.app.searchIndex.rebuild(from: [meeting])
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: ["Budget"]))
+        llm.decisions.set(plan(queries: ["Budget"]))
         llm.answerChunks.set(["Partial"])
         llm.failsStream.set(true)
         let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
@@ -175,7 +176,7 @@ import Testing
     @Test func paletteHandoffFromMeetingStopsCurrentTurnAndSendsToSameModel() async throws {
         let world = try World()
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.decisions.set(plan(queries: [], lookup: false))
         llm.answerChunks.set(["First partial"])
         llm.lateAfterCancellation.set(["Obsolete answer"])
         llm.holdsStream.set(true)
@@ -259,7 +260,7 @@ import Testing
         let hits = try await world.app.searchIndex.search(.init(text: "報價指派"))
         #expect(hits.first?.hits.first?.snippet.contains("Alex") == false)
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: ["報價指派"]))
+        llm.decisions.set(plan(queries: ["報價指派"]))
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         for await _ in engine.events(question: "誰負責？", previous: [], provider: llm) {}
         #expect(llm.answerInputs.get.first?.contains("請 Alex 完成報價指派") == true)
@@ -306,7 +307,7 @@ import Testing
         let world = try World()
         let llm = FakeLLM()
         let gate = Gate<Bool>()
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.decisions.set(plan(queries: [], lookup: false))
         llm.answerChunks.set(["Before leaving"])
         llm.resumedAnswerChunks.set([" and after leaving"])
         llm.holds.set(["answer": gate])
@@ -360,7 +361,7 @@ import Testing
     @Test func shownContentSurvivesPageAndModeChangesUntilWindowCloses() async throws {
         let world = try World()
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.decisions.set(plan(queries: [], lookup: false))
         llm.answerChunks.set(["Answer"])
         let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
             voiceprints: world.app.voiceprints), build: { .ready(llm) })
@@ -397,7 +398,7 @@ import Testing
     @Test func windowCloseCancelsRunningAnswerAndReopensEmpty() async throws {
         let world = try World()
         let llm = FakeLLM()
-        llm.planJSON.set(plan(queries: [], lookup: false))
+        llm.decisions.set(plan(queries: [], lookup: false))
         llm.answerChunks.set(["Partial"])
         llm.holdsStream.set(true)
         let model = AssistantModel(engine: .init(library: world.library, index: world.app.searchIndex,
@@ -417,9 +418,9 @@ import Testing
         #expect(model.turns.last?.answer.text == "New window")
     }
 
-    private func plan(queries: [String], people: [String] = [], from: String? = nil, to: String? = nil, lookup: Bool = true) -> String {
-        let object: [String: Any] = ["reasoning": "Look up meetings", "queries": queries, "people": people,
-            "dateFrom": from as Any? ?? NSNull(), "dateTo": to as Any? ?? NSNull(), "needsMeetings": lookup]
-        return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    private func plan(queries: [String], people: [String] = [], from: String? = nil, to: String? = nil, lookup: Bool = true) -> [String] {
+        guard lookup else { return [assistantDecision("answer")] }
+        return (queries.isEmpty ? [""] : queries).map { assistantDecision("search_meetings", query: $0, people: people, from: from, to: to) }
+            + [assistantDecision("read_meeting"), assistantDecision("answer")]
     }
 }

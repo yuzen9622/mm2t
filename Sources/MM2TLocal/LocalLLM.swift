@@ -42,7 +42,8 @@ public struct LocalLLMModel: Sendable {
 /// The four LLM tasks on an on-device model through llama.cpp, with every answer constrained to
 /// the task's JSON schema. Loads the model on first use and frees it with the last reference,
 /// so it holds memory only while a meeting is being processed.
-public struct LocalLLM: LLMProvider, StructuredGenerator {
+public struct LocalLLM: LLMProvider, StructuredGenerator, AssistantInputLimiting {
+    package var assistantInputLimit: Int { max(0, Int(model.contextTokens) * 3 / 4 - 4_096) }
     let model: LocalLLMModel
     let engine: LlamaEngine
 

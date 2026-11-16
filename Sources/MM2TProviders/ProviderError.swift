@@ -15,9 +15,9 @@ public enum Service: String, Sendable, CaseIterable {
         case .elevenLabs: "ElevenLabs"
         case .selfHosted: String(localized: "the self-hosted transcription server", bundle: .main)
         case .gemini: "Gemini"
-        case .openAICompatible: String(localized: "the self-hosted summary model", bundle: .main)
+        case .openAICompatible: String(localized: "the OpenAI-compatible large language model", bundle: .main)
         case .localTranscription: String(localized: "the on-device transcription model", bundle: .main)
-        case .localLLM: String(localized: "the on-device summary model", bundle: .main)
+        case .localLLM: String(localized: "the on-device large language model", bundle: .main)
         }
     }
 
@@ -26,7 +26,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .elevenLabs: "ElevenLabs API Key"
         case .selfHosted: String(localized: "the self-hosted server token", bundle: .main)
         case .gemini: "Gemini API Key"
-        case .openAICompatible: String(localized: "the summary server API key", bundle: .main)
+        case .openAICompatible: String(localized: "the large language model API key", bundle: .main)
         case .localTranscription, .localLLM: displayName
         }
     }
