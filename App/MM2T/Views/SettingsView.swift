@@ -457,7 +457,7 @@ private struct LinkRow: View {
 }
 
 /// The self-hosted server's address, saved as the user types so the token check beside it always sees it.
-private struct ServerURLField: View {
+struct ServerURLField: View {
     let store: SettingsStore
     @State private var text = ""
 
@@ -479,7 +479,7 @@ private struct ServerURLField: View {
 }
 
 /// Where an OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp) answers, and which model to ask.
-private struct LLMServerFields: View {
+struct LLMServerFields: View {
     let store: SettingsStore
     let key: CredentialField
     @State private var url = ""

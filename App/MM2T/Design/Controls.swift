@@ -17,19 +17,22 @@ struct PillButton: View {
     let title: LocalizedStringKey
     var icon: String?
     var kind = Kind.ghost
+    var minWidth: CGFloat?
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
 
-    init(_ title: LocalizedStringKey, icon: String? = nil, kind: Kind = .ghost, action: @escaping () -> Void) {
+    init(_ title: LocalizedStringKey, icon: String? = nil, kind: Kind = .ghost, minWidth: CGFloat? = nil,
+         action: @escaping () -> Void) {
         self.title = title
         self.icon = icon
         self.kind = kind
+        self.minWidth = minWidth
         self.action = action
     }
 
     var body: some View {
-        Button(action: action) { PillLabel(title: title, icon: icon, kind: kind, hovering: hovering) }
+        Button(action: action) { PillLabel(title: title, icon: icon, kind: kind, hovering: hovering, minWidth: minWidth) }
             .buttonStyle(Pressable())
             .opacity(enabled ? 1 : 0.4)
             .onHover { hovering = $0 }
@@ -43,6 +46,7 @@ struct PillLabel: View {
     var icon: String?
     var kind = PillButton.Kind.ghost
     var hovering = false
+    var minWidth: CGFloat?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -51,6 +55,7 @@ struct PillLabel: View {
         }
         .foregroundStyle(kind == .primary ? .white : kind == .danger ? Palette.danger : Palette.text)
         .padding(.horizontal, 14)
+        .frame(minWidth: minWidth)
         .frame(height: 30)
         .background(background, in: Capsule())
         .contentShape(Capsule())
@@ -224,6 +229,7 @@ struct SwitchStyle: ToggleStyle {
 
 struct ProgressLine: View {
     let fraction: Double
+    var animation = Motion.page
 
     var body: some View {
         GeometryReader { proxy in
@@ -233,7 +239,7 @@ struct ProgressLine: View {
                 }
         }
         .frame(height: 4)
-        .motion(Motion.page, value: fraction)
+        .motion(animation, value: fraction)
     }
 }
 

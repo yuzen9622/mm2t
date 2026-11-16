@@ -1,6 +1,42 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "How do you want to use mm2t?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你想怎麼使用 mm2t？" } } } },
+    "You can change this later in Settings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "之後可以在「設定」中更改。" } } } },
+    "Sign in": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "登入" } } } },
+    "Coming soon": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即將推出" } } } },
+    "Free plan, 250 minutes a month, processed after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "免費方案，每月 250 分鐘，會議結束後處理。" } } } },
+    "Use your own API keys": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用自己的 API 金鑰" } } } },
+    "ElevenLabs and Gemini, billed to your accounts.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "ElevenLabs 與 Gemini，費用由你的帳戶支付。" } } } },
+    "Connect to your own server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連線到自己的伺服器" } } } },
+    "Audio only travels between your machines.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "音訊只在你自己的機器之間傳送。" } } } },
+    "Let mm2t hear your meetings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 聽見你的會議。" } } } },
+    "Recordings stay on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "錄音會留在這台 Mac 上。" } } } },
+    "Download the models this Mac needs.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "下載這台 Mac 需要的模型。" } } } },
+    "Telling speakers apart and live translation both run on this Mac. About %lld MB in total. You can go on while they download.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "分辨說話者與即時翻譯都在這台 Mac 上執行，總共約 %lld MB。下載時可以先繼續。" } } } },
+    "Speakers and voiceprints": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "說話者與聲紋" } } } },
+    "Tells speakers apart and recognizes your voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "分辨不同的說話者，並認出你的聲音。" } } } },
+    "Translation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯" } } } },
+    "Translates live captions between Chinese and English.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在中文與英文之間翻譯即時字幕。" } } } },
+    "Downloaded": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已下載" } } } },
+    "Teach mm2t your voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 認識你的聲音。" } } } },
+    "Read this aloud at your normal speaking voice. The voiceprint stays on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "用平常說話的聲音唸出這段文字。聲紋會留在這台 Mac 上。" } } } },
+    "Waiting for the speaker model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在等待說話者模型… %lld%%" } } } },
+    "Connect your services.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的服務。" } } } },
+    "Connect your server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的伺服器" } } } },
+    "Keys are kept in this Mac's Keychain and only sent to their own service.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "金鑰保存在這台 Mac 的鑰匙圈中，只會傳送給各自的服務。" } } } },
+    "Tokens are kept in this Mac's Keychain and only sent to your servers.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "權杖保存在這台 Mac 的鑰匙圈中，只會傳送給你的伺服器。" } } } },
+    "Speech to text and live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "語音轉文字與即時字幕。" } } } },
+    "Cleans up transcripts, summaries and to-dos.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "整理逐字稿、摘要與待辦事項。" } } } },
+    "Transcription server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "轉錄伺服器" } } } },
+    "Turns your meeting audio into text.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "把會議音訊轉成文字。" } } } },
+    "Language model server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "語言模型伺服器" } } } },
+    "Continue": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "繼續" } } } },
+    "Start Using mm2t": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開始使用 mm2t" } } } },
+    "Finishing model downloads… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在完成模型下載… %lld%%" } } } },
+    "A model couldn't download. Go back to retry it.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "有模型無法下載，請返回重試。" } } } },
+    "Setup progress": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "設定進度" } } } },
+    "Step %lld of %lld": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "第 %1$lld 步，共 %2$lld 步" } } } },
     "Translate captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯字幕" } } } },
     "Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
     "Downloading translation model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在下載翻譯模型… %lld%%" } } } },
@@ -328,16 +364,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 項未完成"
-          }
-        }
-      }
-    },
-    "API keys": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "API 金鑰"
           }
         }
       }
@@ -2092,16 +2118,6 @@
         }
       }
     },
-    "Read this aloud at your normal speaking voice. mm2t keeps a voiceprint of it on this Mac, so a meeting recorded in the room shows which speaker is you.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請用平常說話的聲音唸出下面這段話。mm2t 會把你的聲紋存在這台 Mac 上，之後在現場錄音時，就能標出哪一位是你。"
-          }
-        }
-      }
-    },
     "Reads the meeting window's title to detect browser meetings.": {
       "localizations": {
         "zh-Hant": {
@@ -3248,16 +3264,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "你的發言占比"
-          }
-        }
-      }
-    },
-    "Your voice": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "你的聲音"
           }
         }
       }

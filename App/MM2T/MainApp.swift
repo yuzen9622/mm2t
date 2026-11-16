@@ -34,6 +34,8 @@ struct MainApp: App {
                 .windowSharingNone()
                 .regularActivationWhileOpen()
         }
+        // The step indicator sits 28 pt below the window's own top edge, on the same ground.
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
     }
 }

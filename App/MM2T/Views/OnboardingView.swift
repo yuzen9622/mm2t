@@ -1,84 +1,501 @@
 import MM2TApp
+import MM2TProviders
 import MM2TSystem
 import SwiftUI
 
-/// First-run setup (stories 12, 13, 56-58), also opened whenever a meeting waits on setup.
+/// First-run setup (stories 12, 13, 56-58), also opened whenever a meeting waits on setup: five
+/// screens, one thing each. Order, gating and re-entry live in `OnboardingFlow`.
 struct OnboardingView: View {
     let app: AppController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    /// False until the flow has reopened at its first incomplete screen, so opening never travels.
+    @State private var ready = false
+    /// The screen being left. It stays drawn, as the same view, while it fades out and the next arrives.
+    @State private var outgoing: Outgoing?
+    @State private var finishing = false
+
+    private struct Outgoing: Equatable {
+        let step: OnboardingStep
+        let forward: Bool
+        var gone = false
+    }
+
+    /// The indicator's top, the title's distance below it, and the buttons' distance from the bottom.
+    private static let indicatorTop: CGFloat = 28
+    private static let titleGap: CGFloat = 36
+    private static let footerBottom: CGFloat = 28
 
     var body: some View {
-        let setup = app.setup
-        VStack(spacing: 0) {
-            FadingScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Panel(title: "Permissions") {
-                        PermissionRows(setup: setup)
-                    }
-                    Panel(title: "Speaker separation") {
-                        ModelDownloadView(setup: setup)
-                    }
-                    Panel(title: "Your voice") {
-                        VoiceEnrollmentView(model: app.enrollment, modelReady: setup.models == .downloaded)
-                    }
-                    Panel(title: "API keys") {
-                        CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
-                        CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
-                    }
-                    if !setup.issues.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(setup.issues, id: \.self) { IssueRow(issue: $0) }
-                        }
-                        .padding(.leading, 4)
-                    }
+        let flow = app.onboarding
+        ZStack(alignment: .top) {
+            if ready {
+                ForEach(pages, id: \.self) { step in
+                    let leaving = outgoing?.step == step ? outgoing : nil
+                    StepPage(app: app, step: step, forward: leaving?.forward ?? flow.forward)
+                        .opacity(leaving?.gone == true ? 0 : 1)
+                        .offset(x: reduce || leaving?.gone != true ? 0 : leaving?.forward == true ? -16 : 16)
+                        .allowsHitTesting(leaving == nil)
+                        .accessibilityHidden(leaving != nil)
                 }
-                .padding(24)
-                .motion(Motion.reveal, value: setup.issues)
             }
-            HStack {
-                Spacer()
-                PillButton("Done", kind: .primary) {
-                    app.completeOnboarding()
-                    Task { await app.queue.retryAfterSetup() }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!setup.issues.isEmpty || !app.enrollment.hasVoice)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-            .background(Palette.window)
         }
+        .padding(.top, Self.indicatorTop + 6 + Self.titleGap)
+        .padding(.bottom, Self.footerBottom + 30 + 24)
+        .frame(width: 600, height: 580)
+        .opacity(finishing ? 0 : 1)
+        .overlay(alignment: .top) {
+            StepIndicator(current: flow.step).padding(.top, Self.indicatorTop)
+        }
+        .overlay(alignment: .bottom) { footer(flow).opacity(finishing ? 0 : 1) }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
+        // The window takes its size from this view; it stays this size on every screen.
+        .frame(width: 600, height: 580)
         .background(Palette.window)
-        // The window takes its size from this view. A scroll view offers no height of its own, so
-        // without a fixed one the window resizes forever.
-        .frame(width: 560, height: 640)
-        .onAppear { setup.refresh() }
-        .task { await app.enrollment.refresh() }
+        .onAppear { app.setup.refresh() }
+        // The last screen's fields write settings; what is still missing follows them.
+        .onChange(of: app.settings.settings) { app.setup.recheck() }
+        .task {
+            await app.enrollment.refresh()
+            flow.reopen()
+            ready = true
+            if flow.step == .models { startDownloads() }
+        }
+    }
+
+    /// The screen on its way out, if any, under the current one.
+    private var pages: [OnboardingStep] {
+        let current = app.onboarding.step
+        guard let leaving = outgoing?.step, leaving != current else { return [current] }
+        return [leaving, current]
+    }
+
+    // MARK: Footer
+
+    private func footer(_ flow: OnboardingFlow) -> some View {
+        let primaryKind: PillButton.Kind = flow.step == .voice && !flow.canContinue ? .ghost : .primary
+        return HStack(spacing: 10) {
+            if flow.canGoBack {
+                PillButton("Back", minWidth: 112) { travel(flow.back) }
+                    .transition(.opacity.animation(.easeOut(duration: 0.12)))
+            }
+            Group {
+                switch flow.primary {
+                case .continue: PillButton("Continue", kind: primaryKind, minWidth: 112, action: primary)
+                case .start: PillButton("Start Using mm2t", kind: primaryKind, minWidth: 112, action: primary)
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(!flow.canContinue)
+            .motion(Motion.touch, value: flow.canContinue)
+            .motion(Motion.touch, value: primaryKind == .primary)
+        }
+        .motion(Motion.select, value: flow.canGoBack)
+        .motion(Motion.select, value: flow.primary)
+        .padding(.bottom, Self.footerBottom)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) {
+            // Under the buttons, inside the bottom margin.
+            Group {
+                switch flow.note {
+                case .finishingDownloads(let fraction):
+                    Text("Finishing model downloads… \(Int(fraction * 100))%").monospacedDigit()
+                case .downloadFailed:
+                    Text("A model couldn't download. Go back to retry it.")
+                case nil:
+                    EmptyView()
+                }
+            }
+            .font(Typo.caption)
+            .foregroundStyle(Palette.secondary)
+            .lineLimit(1)
+            .padding(.bottom, 8)
+            .transition(.opacity)
+        }
+        .motion(Motion.reveal, value: flow.note == nil)
+    }
+
+    private func primary() {
+        let flow = app.onboarding
+        guard flow.canContinue else { return }
+        switch flow.primary {
+        case .continue: travel { flow.advance() }
+        case .start: finish()
+        }
+    }
+
+    /// The content fades out, then the window closes.
+    private func finish() {
+        app.completeOnboarding()
+        Task { await app.queue.retryAfterSetup() }
+        withAnimation(.easeOut(duration: 0.18)) { finishing = true } completion: { dismiss() }
+    }
+
+    // MARK: Travel
+
+    /// Moves the flow and sends the screen it left out: first marked as leaving at full opacity in
+    /// the same update the new screen arrives in, then faded and moved in the next one.
+    private func travel(_ move: () -> Void) {
+        let flow = app.onboarding
+        let old = flow.step
+        move()
+        guard flow.step != old else { return }
+        let leaving = Outgoing(step: old, forward: flow.forward)
+        outgoing = leaving
+        DispatchQueue.main.async {
+            guard outgoing == leaving else { return }
+            withAnimation(.easeOut(duration: reduce ? 0.12 : 0.14)) {
+                outgoing?.gone = true
+            } completion: {
+                if outgoing?.step == old { outgoing = nil }
+            }
+        }
+        if flow.step == .models { startDownloads() }
+    }
+
+    /// Runs past this view: the downloads carry on while the user moves through the other screens.
+    private func startDownloads() {
+        let flow = app.onboarding
+        Task { await flow.startDownloads() }
     }
 }
+
+// MARK: Step indicator
+
+/// Five marks, top centre. The current one is an orange capsule that travels between marks.
+private struct StepIndicator: View {
+    let current: OnboardingStep
+    @Namespace private var space
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(OnboardingStep.allCases, id: \.self) { step in
+                Capsule()
+                    .fill(step < current ? Palette.orange.opacity(0.45) : Palette.muted.opacity(0.5))
+                    .frame(width: step == current ? 18 : 6, height: 6)
+                    .matchedGeometryEffect(id: step, in: space, isSource: true)
+            }
+        }
+        .overlay {
+            Capsule()
+                .fill(Palette.orange)
+                .matchedGeometryEffect(id: current, in: space, isSource: false)
+        }
+        // Under Reduce Motion the capsule jumps.
+        .animation(reduce ? nil : Motion.select, value: current)
+        .accessibilityElement()
+        .accessibilityLabel("Setup progress")
+        .accessibilityValue(Text("Step \(current.rawValue + 1) of \(OnboardingStep.allCases.count)"))
+    }
+}
+
+// MARK: Arrival
+
+/// Whether a screen's parts have arrived, and from which side they come.
+struct Arrival: Equatable {
+    var shown: Bool
+    var forward: Bool
+}
+
+private struct ArrivalKey: EnvironmentKey {
+    static let defaultValue = Arrival(shown: true, forward: true)
+}
+
+extension EnvironmentValues {
+    var arrival: Arrival {
+        get { self[ArrivalKey.self] }
+        set { self[ArrivalKey.self] = newValue }
+    }
+}
+
+/// One part of a screen arriving: from 24 pt toward the side of travel, at opacity 0, 40 ms after
+/// the part before it. Reduce Motion makes it a plain fade, all parts together.
+private struct Arrives: ViewModifier {
+    let order: Int
+    @Environment(\.arrival) private var arrival
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(arrival.shown ? 1 : 0)
+            .offset(x: arrival.shown || reduce ? 0 : arrival.forward ? 24 : -24)
+            .animation(reduce ? .easeOut(duration: 0.12) : Motion.page.delay(min(Double(order) * 0.04, 0.24)),
+                       value: arrival.shown)
+    }
+}
+
+extension View {
+    /// `order` 0 is the title, 1 the sub, then each row.
+    fileprivate func arrives(_ order: Int) -> some View { modifier(Arrives(order: order)) }
+
+    /// A row of a setup screen: a card-toned rounded rectangle, no border.
+    fileprivate func setupRow() -> some View {
+        padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+    }
+}
+
+// MARK: Screens
+
+/// One screen: title, sub and rows, which arrive staggered when it first appears.
+private struct StepPage: View {
+    let app: AppController
+    let step: OnboardingStep
+    /// The direction of travel this screen arrived with.
+    let forward: Bool
+    @State private var shown = false
+
+    /// Room for a row's 24 pt travel without the scroll view clipping it.
+    private static let travel: CGFloat = 24
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Group {
+                switch step {
+                case .usage: Text("How do you want to use mm2t?")
+                case .permissions: Text("Let mm2t hear your meetings.")
+                case .models: Text("Download the models this Mac needs.")
+                case .voice: Text("Teach mm2t your voice.")
+                case .services:
+                    if app.onboarding.choice == .ownServer { Text("Connect your server") } else { Text("Connect your services.") }
+                }
+            }
+            .font(Typo.title)
+            .lineLimit(1)
+            .arrives(0)
+            .frame(width: 440)
+
+            Group {
+                switch step {
+                case .usage: Text("You can change this later in Settings.")
+                case .permissions: Text("Recordings stay on this Mac.")
+                case .models:
+                    Text("Telling speakers apart and live translation both run on this Mac. About \(Self.megabytes(app.onboarding.modelBytes)) MB in total. You can go on while they download.")
+                case .voice: Text("Read this aloud at your normal speaking voice. The voiceprint stays on this Mac.")
+                case .services:
+                    if app.onboarding.choice == .ownServer {
+                        Text("Tokens are kept in this Mac's Keychain and only sent to your servers.")
+                    } else {
+                        Text("Keys are kept in this Mac's Keychain and only sent to their own service.")
+                    }
+                }
+            }
+            .font(Typo.body)
+            .foregroundStyle(Palette.secondary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 6)
+            .arrives(1)
+            .frame(width: 440)
+
+            FadingScrollView(ground: Palette.window) {
+                VStack(alignment: .leading, spacing: 8) { rows }
+                    .frame(width: 440)
+                    .padding(.horizontal, Self.travel)
+                    .padding(.bottom, 4)
+            }
+            .padding(.top, 24)
+        }
+        .multilineTextAlignment(.center)
+        .frame(width: 440 + 2 * Self.travel)
+        .environment(\.arrival, Arrival(shown: shown, forward: forward))
+        .onAppear { shown = true }
+    }
+
+    @ViewBuilder private var rows: some View {
+        Group {
+            switch step {
+            case .usage: UsageRows(flow: app.onboarding)
+            case .permissions: PermissionRows(setup: app.setup, asSetupRows: true)
+            case .models: ModelRows(setup: app.setup)
+            case .voice: VoiceEnrollmentView(model: app.enrollment, models: app.setup.models)
+            case .services: ServiceRows(app: app)
+            }
+        }
+        .multilineTextAlignment(.leading)
+    }
+
+    /// Decimal megabytes, as Finder counts them.
+    static func megabytes(_ bytes: Int64) -> Int {
+        Int((Double(bytes) / 1_000_000).rounded())
+    }
+}
+
+// MARK: 1. Usage
+
+private struct UsageRows: View {
+    let flow: OnboardingFlow
+
+    var body: some View {
+        ChoiceRow(choice: .signIn, icon: "user", selected: false, title: "Sign in",
+                  detail: "Free plan, 250 minutes a month, processed after the meeting.", flow: flow)
+            .arrives(2)
+        ChoiceRow(choice: .ownKeys, icon: "key", selected: flow.choice == .ownKeys, title: "Use your own API keys",
+                  detail: "ElevenLabs and Gemini, billed to your accounts.", flow: flow)
+            .arrives(3)
+        ChoiceRow(choice: .ownServer, icon: "server", selected: flow.choice == .ownServer, title: "Connect to your own server",
+                  detail: "Audio only travels between your machines.", flow: flow)
+            .arrives(4)
+    }
+}
+
+private struct ChoiceRow: View {
+    let choice: UsageChoice
+    let icon: String
+    let selected: Bool
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let flow: OnboardingFlow
+    @State private var hovering = false
+
+    var body: some View {
+        Button { flow.select(choice) } label: {
+            HStack(spacing: 12) {
+                Icon(icon, size: 20).foregroundStyle(selected ? Palette.orange : Palette.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(title).font(Typo.bodyStrong).lineLimit(1)
+                        if !choice.isAvailable {
+                            Text("Coming soon")
+                                .font(Typo.caption)
+                                .foregroundStyle(Palette.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Palette.tonal, in: Capsule())
+                        }
+                    }
+                    Text(detail).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Icon("check", size: 16)
+                    .foregroundStyle(Palette.orange)
+                    .opacity(selected ? 1 : 0)
+            }
+            .setupRow()
+            .background {
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+                    .fill(hovering && choice.isAvailable ? Palette.hover : .clear)
+            }
+            .overlay {
+                // The selection ring: a state of this control, drawn inside its shape.
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+                    .strokeBorder(Palette.orange, lineWidth: selected ? 1.5 : 0)
+                    .opacity(selected ? 1 : 0)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        }
+        .buttonStyle(Pressable())
+        .focusEffectDisabled()
+        .disabled(!choice.isAvailable)
+        .opacity(choice.isAvailable ? 1 : 0.5)
+        .onHover { hovering = $0 && choice.isAvailable }
+        .motion(Motion.touch, value: hovering)
+        .motion(Motion.touch, value: selected)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// MARK: 3. Models
+
+private struct ModelRows: View {
+    let setup: SetupModel
+
+    var body: some View {
+        ModelRow(name: "Speakers and voiceprints", purpose: "Tells speakers apart and recognizes your voice.",
+                 state: setup.models, failure: nil) {
+            Task { await setup.downloadModels() }
+        }
+        .arrives(2)
+        ModelRow(name: "Translation", purpose: "Translates live captions between Chinese and English.",
+                 state: setup.translationModels, failure: "Couldn't download the translation model.") {
+            Task { await setup.downloadTranslationModels() }
+        }
+        .arrives(3)
+    }
+}
+
+/// A model's name, purpose and download: a progress line and a percentage that becomes a check.
+private struct ModelRow: View {
+    let name: LocalizedStringKey
+    let purpose: LocalizedStringKey
+    let state: ModelDownloadState
+    /// What a failure says; nil shows the download's own error.
+    let failure: LocalizedStringKey?
+    let retry: () -> Void
+
+    private var failed: String? {
+        if case .failed(let reason) = state { reason } else { nil }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(Typo.bodyStrong).lineLimit(1)
+                    Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                trailing
+            }
+            ProgressLine(fraction: OnboardingFlow.fraction(state), animation: .linear(duration: 0.2))
+            if let failed {
+                Group {
+                    if let failure { Text(failure) } else { Text(verbatim: failed) }
+                }
+                .font(Typo.caption)
+                .foregroundStyle(Palette.danger)
+                .lineLimit(3)
+                .transition(.opacity)
+            }
+        }
+        .setupRow()
+        .motion(Motion.reveal, value: state == .downloaded)
+        .motion(Motion.reveal, value: failed)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        switch state {
+        case .downloaded:
+            Icon("circle-check", size: 18).foregroundStyle(Palette.success)
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityElement()
+                .accessibilityLabel("Downloaded")
+        case .failed:
+            PillButton("Retry", icon: "refresh", action: retry)
+                .transition(.opacity)
+        case .downloading, .notDownloaded:
+            Text(OnboardingFlow.fraction(state), format: .percent.precision(.fractionLength(0)))
+                .font(Typo.caption)
+                .foregroundStyle(Palette.secondary)
+                .monospacedDigit()
+                .transition(.opacity)
+        }
+    }
+}
+
+// MARK: 4. Voice
 
 /// The passage the user reads once so mm2t knows their voice, and how the reading went.
 struct VoiceEnrollmentView: View {
     let model: VoiceEnrollmentModel
     /// The speaker model turns the reading into a voiceprint, so it has to be on disk first.
-    let modelReady: Bool
+    let models: ModelDownloadState
 
     static let passage = String(localized: "Today I am setting up my meeting notes. Whenever we meet in the same room, this is how the app will know which voice is mine.")
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Read this aloud at your normal speaking voice. mm2t keeps a voiceprint of it on this Mac, so a meeting recorded in the room shows which speaker is you.")
-                .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-            Text(verbatim: Self.passage)
-                .font(Typo.heading)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        Text(verbatim: Self.passage)
+            .font(Typo.heading)
+            .lineSpacing(5)
+            .fixedSize(horizontal: false, vertical: true)
+            .setupRow()
+            .arrives(2)
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 switch model.state {
                 case .recording:
@@ -90,23 +507,32 @@ struct VoiceEnrollmentView: View {
                     Text("Checking…").foregroundStyle(Palette.secondary)
                 case .enrolled:
                     Icon("circle-check", size: 18).foregroundStyle(Palette.success)
-                    Text("mm2t knows your voice")
+                    Text("mm2t knows your voice").lineLimit(1)
                     Spacer()
                     PillButton("Read Again", icon: "refresh") {
                         model.retry()
                         Task { await model.start() }
                     }
                 case .idle, .rejected:
+                    // The step's main act, so it stays the orange one; the footer waits in grey.
                     PillButton("Start Reading", icon: "microphone", kind: .primary) {
                         model.retry()
                         Task { await model.start() }
                     }
-                    .disabled(!modelReady)
-                    if !modelReady {
-                        Text("Download the speaker separation model first.").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    .disabled(models != .downloaded)
+                    switch models {
+                    case .downloaded:
+                        EmptyView()
+                    case .downloading(let fraction):
+                        Text("Waiting for the speaker model… \(Int(fraction * 100))%")
+                            .font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit().lineLimit(1)
+                    case .notDownloaded, .failed:
+                        Text("Download the speaker separation model first.")
+                            .font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
                     }
                 }
             }
+            .frame(minHeight: 30)
             if case .rejected(let problem) = model.state {
                 HStack(spacing: 8) {
                     Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
@@ -115,43 +541,118 @@ struct VoiceEnrollmentView: View {
                 .transition(.opacity)
             }
         }
+        .setupRow()
         .motion(Motion.reveal, value: model.state)
+        .arrives(3)
     }
 }
 
-/// The permission list, shared by first-run setup and the settings page. macOS sends no
-/// notification when a switch is flipped in System Settings, so it re-reads them while on screen.
-struct PermissionRows: View {
-    let setup: SetupModel
+// MARK: 5. Services
+
+private struct ServiceRows: View {
+    let app: AppController
 
     var body: some View {
+        let flow = app.onboarding
+        let setup = app.setup
+        ForEach(Array(flow.services.enumerated()), id: \.element) { index, entry in
+            Group {
+                switch entry {
+                case .elevenLabs:
+                    ServiceRow(title: Text(verbatim: "ElevenLabs"), purpose: "Speech to text and live captions.") {
+                        CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
+                    }
+                case .gemini:
+                    ServiceRow(title: Text(verbatim: "Gemini"), purpose: "Cleans up transcripts, summaries and to-dos.") {
+                        CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
+                    }
+                case .transcriptionServer:
+                    ServiceRow(title: Text("Transcription server"), purpose: "Turns your meeting audio into text.") {
+                        ServerURLField(store: app.settings)
+                        CredentialFieldView(field: setup.field(.selfHostedToken), setup: setup)
+                    }
+                case .llmServer:
+                    ServiceRow(title: Text("Language model server"), purpose: "Cleans up transcripts, summaries and to-dos.") {
+                        LLMServerFields(store: app.settings, key: setup.field(.openAICompatibleAPIKey))
+                        CredentialFieldView(field: setup.field(.openAICompatibleAPIKey), setup: setup)
+                    }
+                }
+            }
+            .arrives(2 + index)
+        }
+        if !flow.otherIssues.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(flow.otherIssues, id: \.self) { IssueRow(issue: $0) }
+            }
+            .font(Typo.caption)
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .arrives(2 + flow.services.count)
+        }
+    }
+}
+
+private struct ServiceRow<Fields: View>: View {
+    let title: Text
+    let purpose: LocalizedStringKey
+    @ViewBuilder let fields: Fields
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                title.font(Typo.bodyStrong).lineLimit(1)
+                Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+            }
+            fields
+        }
+        .setupRow()
+    }
+}
+
+// MARK: 2. Permissions
+
+/// The permission list, shared by first-run setup and the settings page. macOS sends no
+/// notification when a switch is flipped in System Settings, so it re-reads them while on screen.
+/// In setup each permission is a row of its own and its request button gives way to the footer's.
+struct PermissionRows: View {
+    let setup: SetupModel
+    var asSetupRows = false
+
+    var body: some View {
+        let request: PillButton.Kind = asSetupRows ? .ghost : .primary
         Group {
         PermissionRow(title: "Microphone", purpose: "Records your side of the meeting.",
-                      state: setup.microphone, pane: .microphone) {
+                      state: setup.microphone, pane: .microphone, requestKind: request) {
             Task { await setup.requestMicrophone() }
         }
+        .asSetupRow(2, asSetupRows)
         PermissionRow(title: "System audio recording",
                       purpose: "Records only the meeting app's sound. macOS asks the first time you record.",
-                      state: setup.systemAudio, pane: .systemAudio, request: nil)
+                      state: setup.systemAudio, pane: .systemAudio, requestKind: request, request: nil)
+        .asSetupRow(3, asSetupRows)
         PermissionRow(title: "Accessibility", purpose: "Reads the meeting window's title to detect browser meetings.",
-                      state: setup.accessibility, pane: .accessibility) {
+                      state: setup.accessibility, pane: .accessibility, requestKind: request) {
             setup.requestAccessibility()
         }
+        .asSetupRow(4, asSetupRows)
         if setup.accessibility == .denied {
             // macOS ties the switch to the build that was added. A build signed differently shows
             // the old switch as on while the running app is still refused.
             Text("Already switched on? The switch may belong to an older build of mm2t. Select mm2t in the list, remove it with the − button, then add it again.")
                 .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                .asSetupCaption(5, asSetupRows)
         }
-        ForEach(setup.automation.keys.sorted(), id: \.self) { browser in
+        ForEach(Array(setup.automation.keys.sorted().enumerated()), id: \.element) { index, browser in
             PermissionRow(title: "Automation: \(browser)", purpose: "Reads the open tab's address to tell which meeting it is.",
-                          state: setup.automation[browser] ?? .unknown, pane: .automation) {
+                          state: setup.automation[browser] ?? .unknown, pane: .automation, requestKind: request) {
                 Task { await setup.requestAutomation(of: browser) }
             }
+            .asSetupRow(6 + index, asSetupRows)
         }
         if setup.automation.isEmpty {
             Text("Open your browser to grant it. It lets mm2t read the open tab's address.")
                 .font(Typo.caption).foregroundStyle(Palette.secondary)
+                .asSetupCaption(6, asSetupRows)
         }
         }
         .task {
@@ -163,11 +664,22 @@ struct PermissionRows: View {
     }
 }
 
+extension View {
+    @ViewBuilder fileprivate func asSetupRow(_ order: Int, _ on: Bool) -> some View {
+        if on { setupRow().arrives(order) } else { self }
+    }
+
+    @ViewBuilder fileprivate func asSetupCaption(_ order: Int, _ on: Bool) -> some View {
+        if on { padding(.horizontal, 14).arrives(order) } else { self }
+    }
+}
+
 struct PermissionRow: View {
     let title: LocalizedStringKey
     let purpose: LocalizedStringKey
     let state: PermissionState
     let pane: SettingsPane
+    var requestKind = PillButton.Kind.primary
     let request: (() -> Void)?
 
     var body: some View {
@@ -181,7 +693,7 @@ struct PermissionRow: View {
                 Icon("circle-check", size: 18).foregroundStyle(Palette.success)
                     .transition(.scale.combined(with: .opacity))
             } else if state == .notDetermined, let request {
-                PillButton("Allow…", kind: .primary, action: request)
+                PillButton("Allow…", kind: requestKind, action: request)
             } else if state == .notDetermined {
                 // macOS asks for this one itself, the first time it is used.
                 Text(Copy.permissionState(state)).font(Typo.caption).foregroundStyle(Palette.secondary)
