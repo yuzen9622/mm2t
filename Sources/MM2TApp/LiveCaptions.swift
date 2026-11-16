@@ -21,7 +21,8 @@ public final class LiveCaptions {
         /// When its first words appeared and when it was settled, to group close segments into paragraphs.
         public let started: Date
         public let ended: Date
-        /// Phase 2 fills this; nothing sets it yet.
+        /// Its translation on this Mac, when live translation is on and it is not already in the
+        /// target language.
         public var translation: String?
     }
 
@@ -39,9 +40,20 @@ public final class LiveCaptions {
     /// The bar was hidden by the user for this recording.
     public var isBarHidden = false
 
+    /// The language captions are translated into for this recording; nil when translation is off.
+    public private(set) var translationTarget: CaptionLanguage?
+    /// Segments whose translation has been asked for and has not come back. Until it does they
+    /// show no main text on the bar; a failed one goes back to showing its own words.
+    public private(set) var awaitingTranslation: Set<Int> = []
+    /// The translation of exactly the current `partial`; nil the moment the partial changes.
+    public private(set) var partialTranslation: String?
+    /// The current partial needs a translation that has not arrived yet.
+    public private(set) var isPartialAwaitingTranslation = false
+
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var partialStarted: Date?
+    @ObservationIgnored private var translation: LiveTranslation?
 
     public init(now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
@@ -59,6 +71,7 @@ public final class LiveCaptions {
             if partial.isEmpty, !text.isEmpty { partialStarted = time }
             partial = text
             lastActivity = time
+            partialChanged()
         case .final(let text):
             append(TraditionalChinese.convert(text), at: time)
             lastActivity = time
@@ -71,10 +84,16 @@ public final class LiveCaptions {
         let started = partialStarted ?? time
         partial = ""
         partialStarted = nil
+        partialChanged()
         guard !text.isEmpty else { return }
-        segments.append(Segment(id: nextID, text: text, started: started, ended: time))
+        let segment = Segment(id: nextID, text: text, started: started, ended: time)
+        segments.append(segment)
         nextID += 1
-        if segments.count > Self.limit { segments.removeFirst(segments.count - Self.limit) }
+        if segments.count > Self.limit {
+            segments.removeFirst(segments.count - Self.limit)
+            awaitingTranslation.formIntersection(segments.map(\.id))
+        }
+        translation?.finished(segment)
     }
 
     /// A session ended mid-segment: its unfinished words stay as they were last heard, since the
@@ -97,6 +116,59 @@ public final class LiveCaptions {
         status = .off
         lastActivity = nil
         isBarHidden = false
+        translation?.stop()
+        translation = nil
+        translationTarget = nil
+        awaitingTranslation = []
+        partialTranslation = nil
+        isPartialAwaitingTranslation = false
+    }
+
+    // MARK: Translation
+
+    /// Translates this recording's captions into `target` from here on. Called once per recording,
+    /// after `clear()`; the translator, and the model it holds, goes with the next `clear()`.
+    func translate(with translator: any CaptionTranslator, to target: CaptionLanguage,
+                   sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+        translation?.stop()
+        translationTarget = target
+        translation = LiveTranslation(captions: self, translator: translator, target: target, now: now, sleep: sleep)
+    }
+
+    /// What a surface shows as a segment's main text: its translation, its own words when no
+    /// translation is needed or one failed, or nothing while one is on its way.
+    public func mainText(of segment: Segment) -> String? {
+        if let translation = segment.translation { return translation }
+        return awaitingTranslation.contains(segment.id) ? nil : segment.text
+    }
+
+    /// The same for the unfinished partial.
+    public var partialMainText: String {
+        partialTranslation ?? (isPartialAwaitingTranslation ? "" : partial)
+    }
+
+    private func partialChanged() {
+        partialTranslation = nil
+        isPartialAwaitingTranslation = translation?.needsTranslation(partial) ?? false
+        translation?.partialChanged()
+    }
+
+    func willTranslate(_ id: Int) {
+        if segments.contains(where: { $0.id == id }) { awaitingTranslation.insert(id) }
+    }
+
+    /// Attaches a result to its own segment by identity, whatever order results come back in.
+    func attach(_ text: String?, to id: Int) {
+        awaitingTranslation.remove(id)
+        guard let text, let index = segments.firstIndex(where: { $0.id == id }) else { return }
+        segments[index].translation = text
+    }
+
+    /// Shown only while the partial is still exactly the text that was translated.
+    func attachPartial(_ text: String?, for source: String) {
+        guard source == partial, !partial.isEmpty else { return }
+        partialTranslation = text
+        isPartialAwaitingTranslation = false
     }
 
     /// The text the live page shows as paragraphs: consecutive segments less than `paragraphGap` apart join.

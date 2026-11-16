@@ -70,6 +70,12 @@ public protocol ModelInstalling: Sendable {
 
 extension DiarizationModels: ModelInstalling {}
 
+extension TranslationModels: ModelInstalling {
+    public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        try await download(configuration: .default, progress: progress)
+    }
+}
+
 extension ModelSnapshot: ModelInstalling {
     public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
         try await download(configuration: .default, progress: progress)
@@ -82,13 +88,16 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public let models: DiarizationModels
     public let transcriptionModel: LocalTranscriptionModel
     public let llmModel: LocalLLMModel
+    public let translationModels: TranslationModels
     private let speakerModels: LocalSpeakerModels
     private let transcription: LocalTranscription
 
-    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel) {
+    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel,
+                translationModels: TranslationModels) {
         self.models = models
         self.transcriptionModel = transcriptionModel
         self.llmModel = llmModel
+        self.translationModels = translationModels
         // Kept for the app's lifetime like the diarizer: preparing the speech model for the Neural
         // Engine takes minutes, so it happens once per launch, on the first offline transcription.
         transcription = LocalTranscription(model: transcriptionModel)
@@ -117,6 +126,10 @@ public final class LiveProviderCatalog: ProviderCatalog {
     /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
     /// while a meeting is being processed rather than while the app idles in the menu bar.
     public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
+    /// A fresh translator per recording, so its model is freed when the recording's captions end.
+    public func captionTranslator() -> (any CaptionTranslator)? {
+        translationModels.isDownloaded ? BergamotTranslator(models: translationModels) : nil
+    }
     public var thresholds: MatchThresholds { .weSpeaker }
 }
 

@@ -16,6 +16,21 @@ public enum CloudLLM: String, Codable, Sendable, CaseIterable {
     case openAICompatible
 }
 
+/// Live captions translated on this Mac into one language, or not at all.
+public enum CaptionTranslation: String, Codable, Sendable, CaseIterable {
+    case off
+    case traditionalChinese
+    case english
+
+    public var target: CaptionLanguage? {
+        switch self {
+        case .off: nil
+        case .traditionalChinese: .traditionalChinese
+        case .english: .english
+        }
+    }
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
     /// Tried in order; each one listed must be configured. The chain falls through only when a
@@ -42,6 +57,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Live captions while recording, streamed to ElevenLabs; usable only with an ElevenLabs key.
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
+    /// Translates live captions on this Mac with the downloaded models; never saved.
+    public var captionTranslation: CaptionTranslation = .off
     /// Where the user dragged the caption bar, by screen (its display number as text): the bar's
     /// offset from its default place, in points.
     public var captionBarOffsets: [String: CaptionBarOffset] = [:]
@@ -74,6 +91,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
+        captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
         captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
@@ -85,7 +103,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
         case recordShortcut
         case detectionRules
-        case liveCaptions, captionBarOffsets
+        case liveCaptions, captionBarOffsets, captionTranslation
     }
 
     /// These settings with the ones that only change what is shown while recording set aside, so
@@ -93,6 +111,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var forProcessing: AppSettings {
         var settings = self
         settings.liveCaptions = false
+        settings.captionTranslation = .off
         settings.captionBarOffsets = [:]
         return settings
     }

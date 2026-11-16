@@ -90,6 +90,7 @@ public final class AppController {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
+        translationInstaller: any ModelInstalling,
         machine: MachineProfile = .current,
         validator: any KeyValidating,
         calendars: [any CalendarSource] = [],
@@ -167,6 +168,10 @@ public final class AppController {
                 // Opt-in, and only with an ElevenLabs key; otherwise nothing runs and no socket opens.
                 let current = settings.settings
                 guard current.liveCaptions, let key = try? credentials.read(.elevenLabsAPIKey), !key.isEmpty else { return nil }
+                // Translation on this Mac, only once its models are downloaded.
+                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator() {
+                    captions.translate(with: translator, to: target)
+                }
                 let names = await voiceprints.spokenNames()
                 return CaptionStream(
                     provider: catalog.streamingTranscription(apiKey: key),
@@ -188,6 +193,7 @@ public final class AppController {
             })
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
+            translationInstaller: translationInstaller,
             suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
             settings: settings, runningBrowsers: runningBrowsers,
             checkSetup: {
@@ -240,11 +246,14 @@ public final class AppController {
         let models = DiarizationModels(directory: paths.models)
         let transcription = LocalTranscriptionModel.breeze(in: paths.models)
         let llm = LocalLLMModel.qwen35(in: paths.models)
+        let translation = TranslationModels.mozilla(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
-            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm),
+            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm,
+                                         translationModels: translation),
             recorder: recorder, permissions: permissions,
             installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
+            translationInstaller: translation,
             validator: LiveKeyValidator(),
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
@@ -275,6 +284,17 @@ public final class AppController {
         widget?.start()
         self.watchMeetings = watchMeetings
         startMonitorIfReady()
+    }
+
+    /// Live caption translation: the models for both directions download the first time it is
+    /// turned on. It applies from the next recording.
+    public func setCaptionTranslation(_ choice: CaptionTranslation) async {
+        settings.settings.captionTranslation = choice
+        guard choice != .off else { return }
+        switch setup.translationModels {
+        case .notDownloaded, .failed: await setup.downloadTranslationModels()
+        case .downloading, .downloaded: break
+        }
     }
 
     /// Marks setup finished; from here the app watches for meetings.

@@ -328,6 +328,12 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         offlineDownloaded[.llm]!.get ? onDeviceLLM : nil
     }
 
+    let translator = FakeTranslator()
+    let translationDownloaded = Box(false)
+    func captionTranslator() -> (any CaptionTranslator)? {
+        translationDownloaded.get ? translator : nil
+    }
+
     var thresholds: MatchThresholds { MatchThresholds(autoName: 0.9, suggest: 0.6) }
 
     var providerCalls: Int {
@@ -371,6 +377,38 @@ final class FakeInstaller: ModelInstalling, @unchecked Sendable {
         downloaded.set(true)
         progress(1)
     }
+}
+
+/// A caption translator whose answers the test controls: each call waits for its own release,
+/// so results can come back in any order. Unless `holds` is set, it answers at once.
+final class FakeTranslator: CaptionTranslator, @unchecked Sendable {
+    struct Call: Equatable { let text: String; let source: CaptionLanguage; let target: CaptionLanguage }
+    let calls = Box<[Call]>([])
+    let holds = Box(false)
+    let failing = Box<Set<String>>([])
+    /// Fixed answers by input; anything else comes back bracketed.
+    let answers = Box<[String: String]>([:])
+    private let gates = Box<[String: Gate<Bool>]>([:])
+
+    func translate(_ text: String, from source: CaptionLanguage, to target: CaptionLanguage) async throws -> String {
+        calls.update { $0.append(Call(text: text, source: source, target: target)) }
+        if holds.get {
+            let gate = Gate<Bool>()
+            gates.update { $0[text] = gate }
+            _ = await gate.wait()
+        }
+        if failing.get.contains(text) { throw CaptionTranslationError.engine("model failed") }
+        return answers.get[text] ?? "⟨\(text)⟩"
+    }
+
+    /// Lets the held call for `text` return.
+    func release(_ text: String) async {
+        let gate = gates.get[text]
+        gates.update { $0[text] = nil }
+        await gate?.open(true)
+    }
+
+    var held: [String] { gates.get.keys.sorted() }
 }
 
 struct FakeValidator: KeyValidating {
@@ -512,6 +550,7 @@ struct World {
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: FakeInstaller(catalog.modelsDownloaded),
             offlineInstallers: catalog.offlineDownloaded.mapValues(FakeInstaller.init),
+            translationInstaller: FakeInstaller(catalog.translationDownloaded),
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }
 

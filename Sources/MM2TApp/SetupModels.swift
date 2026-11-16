@@ -123,6 +123,8 @@ public final class SetupModel {
     public private(set) var models: ModelDownloadState = .notDownloaded
     /// The on-device speech model and LLM behind the two offline switches.
     public private(set) var offlineModels: [OfflineModel: ModelDownloadState] = [:]
+    /// Both directions of the live caption translation models.
+    public private(set) var translationModels: ModelDownloadState = .notDownloaded
     /// Whether this Mac is suited to each offline option, for the hint next to its switch.
     public let suitability: OfflineSuitability
     public private(set) var issues: [SetupIssue] = []
@@ -131,6 +133,7 @@ public final class SetupModel {
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let installer: any ModelInstalling
     @ObservationIgnored private let offlineInstallers: [OfflineModel: any ModelInstalling]
+    @ObservationIgnored private let translationInstaller: any ModelInstalling
     @ObservationIgnored private let runningBrowsers: @MainActor () -> [String]
     @ObservationIgnored private let checkSetup: @MainActor () -> [SetupIssue]
 
@@ -138,6 +141,7 @@ public final class SetupModel {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
+        translationInstaller: any ModelInstalling,
         suitability: OfflineSuitability,
         credentials: any CredentialStoring,
         validator: any KeyValidating,
@@ -148,6 +152,7 @@ public final class SetupModel {
         self.permissions = permissions
         self.installer = installer
         self.offlineInstallers = offlineInstallers
+        self.translationInstaller = translationInstaller
         self.suitability = suitability
         self.runningBrowsers = runningBrowsers
         self.checkSetup = checkSetup
@@ -173,6 +178,9 @@ public final class SetupModel {
         for model in OfflineModel.allCases {
             if case .downloading = offlineModels[model] { continue }
             offlineModels[model] = offlineInstallers[model]?.isDownloaded == true ? .downloaded : .notDownloaded
+        }
+        if case .downloading = translationModels {} else {
+            translationModels = translationInstaller.isDownloaded ? .downloaded : .notDownloaded
         }
         issues = checkSetup()
     }
@@ -233,6 +241,22 @@ public final class SetupModel {
             offlineModels[model] = .failed(String(describing: error))
         }
         issues = checkSetup()
+    }
+
+    /// Same as `downloadModels`, for the caption translation models; a retry resumes.
+    public func downloadTranslationModels() async {
+        if case .downloading = translationModels { return }
+        translationModels = .downloading(0)
+        do {
+            try await translationInstaller.download { [weak self] fraction in
+                Task { @MainActor in
+                    if case .downloading = self?.translationModels { self?.translationModels = .downloading(fraction) }
+                }
+            }
+            translationModels = .downloaded
+        } catch {
+            translationModels = .failed(String(describing: error))
+        }
     }
 
     /// Re-checks what processing still needs after the user changed keys or settings.

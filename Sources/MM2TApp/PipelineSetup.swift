@@ -53,6 +53,8 @@ public protocol ProviderCatalog: Sendable {
     func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)?
     /// nil until the model is on disk.
     func localLLM() -> (any LLMProvider)?
+    /// Live caption translation on this Mac; nil until its models are on disk.
+    func captionTranslator() -> (any CaptionTranslator)?
     var thresholds: MatchThresholds { get }
 }
 

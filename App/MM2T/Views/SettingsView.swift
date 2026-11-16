@@ -47,7 +47,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// One setting the search can find. A new setting is a case here, a place in its group's `rows`,
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
-    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions
+    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions, captionTranslation
     case diarizationOrder, diarizationModel
     case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
@@ -66,6 +66,7 @@ enum SettingsRow: Hashable {
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local)]
         case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
+        case .captionTranslation: [String(localized: "Translate captions"), "繁體中文", "English"]
         case .diarizationOrder: [String(localized: "Try first")] + DiarizationSource.allCases.map(Copy.diarization)
         case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
@@ -105,7 +106,7 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Assistant memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
-                                 .liveCaptions]),
+                                 .liveCaptions, .captionTranslation]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationOrder, .diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
@@ -330,6 +331,8 @@ struct SettingsRowView: View {
             }
         case .liveCaptions:
             LiveCaptionsRow(store: store, key: app.setup.field(.elevenLabsAPIKey))
+        case .captionTranslation:
+            CaptionTranslationRow(app: app, key: app.setup.field(.elevenLabsAPIKey))
         case .diarizationOrder:
             HStack {
                 Text("Try first")
@@ -708,6 +711,56 @@ private struct LiveCaptionsRow: View {
             Text(hasKey ? "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved."
                         : "Add an ElevenLabs key to use live captions.")
                 .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Live captions translated on this Mac. Choosing a language the first time downloads the models
+/// for both directions; the row follows the live captions switch.
+private struct CaptionTranslationRow: View {
+    let app: AppController
+    let key: CredentialField
+
+    private var enabled: Bool {
+        switch key.state {
+        case .empty, .storageFailed: false
+        default: app.settings.settings.liveCaptions
+        }
+    }
+
+    var body: some View {
+        let choice = app.settings.settings.captionTranslation
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Translate captions")
+                Spacer()
+                Segmented(options: CaptionTranslation.allCases, selection: Binding(
+                    get: { choice },
+                    set: { new in Task { await app.setCaptionTranslation(new) } })) { option in
+                    switch option {
+                    case .off: String(localized: "Off")
+                    case .traditionalChinese: "繁體中文"
+                    case .english: "English"
+                    }
+                }
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : 0.5)
+            }
+            switch choice == .off ? .notDownloaded : app.setup.translationModels {
+            case .downloading(let fraction):
+                Text("Downloading translation model… \(Int(fraction * 100))%")
+                    .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
+            case .failed:
+                HStack {
+                    Text("Couldn't download the translation model.")
+                        .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
+                }
+            case .notDownloaded, .downloaded:
+                Text("Translated on this Mac. Nothing is sent anywhere.")
+                    .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

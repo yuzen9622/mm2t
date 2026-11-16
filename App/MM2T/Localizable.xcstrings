@@ -1,6 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Translate captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯字幕" } } } },
+    "Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
+    "Downloading translation model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在下載翻譯模型… %lld%%" } } } },
+    "Couldn't download the translation model.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法下載翻譯模型。" } } } },
+    "Translated on this Mac. Nothing is sent anywhere.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在這台 Mac 上翻譯，不會傳送到任何地方。" } } } },
     "Open Live Page": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開啟即時頁面" } } } },
     "Live captions are a preview. The saved transcript is produced after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕僅供預覽，儲存的逐字稿會在會議結束後產生。" } } } },
     "Listening…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中…" } } } },
