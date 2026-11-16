@@ -71,7 +71,8 @@ public struct ElevenLabsScribe: TranscriptionProvider {
     }
 
     /// Scribe rejects terms over 50 characters, over 5 words, or containing `<>{}[]\`.
-    static func keyterms(from hints: [String]) -> [String] {
+    /// The realtime API allows fewer and shorter terms, so it passes its own limits.
+    static func keyterms(from hints: [String], limit: Int = maxKeyterms, maxLength: Int = 50) -> [String] {
         let forbidden = CharacterSet(charactersIn: "<>{}[]\\")
         var seen = Set<String>()
         var terms: [String] = []
@@ -79,9 +80,9 @@ public struct ElevenLabsScribe: TranscriptionProvider {
             let term = String(hint.unicodeScalars.filter { !forbidden.contains($0) })
                 .split(whereSeparator: \.isWhitespace).joined(separator: " ")
             let wordCount = term.split(separator: " ").count
-            guard !term.isEmpty, term.count <= 50, wordCount <= 5, seen.insert(term.lowercased()).inserted else { continue }
+            guard !term.isEmpty, term.count <= maxLength, wordCount <= 5, seen.insert(term.lowercased()).inserted else { continue }
             terms.append(term)
-            if terms.count == maxKeyterms { break }
+            if terms.count == limit { break }
         }
         return terms
     }
