@@ -1,6 +1,7 @@
 import Foundation
 import MM2TApp
 import MM2TCore
+import MM2TProviders
 import Testing
 
 @MainActor
@@ -129,7 +130,8 @@ import Testing
         #expect(store.settings.llmLocation == .cloud && store.settings.cloudLLM == .openAICompatible)
         #expect(flow.services == [.transcriptionServer, .llmServer])
         #expect(world.app.setup.issues.contains(.missingSelfHostedURL), "the issues follow the new settings")
-        #expect(flow.otherIssues.isEmpty, "every issue has its own field on the last step")
+        #expect(world.app.setup.issues.allSatisfy { OnboardingFlow.entry(for: $0).map(flow.services.contains) ?? true },
+                "every issue has its own row on the last step")
 
         flow.select(.ownKeys)
         #expect(store.settings.transcriptionOrder == [.cloud])
@@ -155,9 +157,152 @@ import Testing
         world.app.setup.recheck()
         flow.reopen()
         #expect(flow.choice == .ownKeys)
-        #expect(flow.services.isEmpty)
-        #expect(flow.otherIssues == [.offlineModelMissing(.transcription), .offlineModelMissing(.llm)],
-                "issues without a field of their own are listed")
+        #expect(flow.services == [.offlineModel(.transcription), .offlineModel(.llm)])
+        #expect(flow.note == nil, "not on the last step")
+    }
+
+    /// Every issue there is, so that a new one cannot be left without a row.
+    private static var everyIssue: [SetupIssue] {
+        let issues: [SetupIssue] = Credential.allCases.map { .missingCredential($0) }
+            + [.missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource, .diarizationModelsMissing]
+            + OfflineModel.allCases.map { .offlineModelMissing($0) }
+        // Fails to compile when SetupIssue gains a case, until it is added above.
+        for issue in issues {
+            switch issue {
+            case .missingCredential, .missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource,
+                 .diarizationModelsMissing, .offlineModelMissing: break
+            }
+        }
+        return issues
+    }
+
+    @Test func everyIssueIsResolvedOnTheLastStepOrByAnEarlierOne() {
+        var keys = AppSettings()
+        keys.transcriptionOrder = [.cloud]
+        var server = AppSettings()
+        server.transcriptionOrder = [.selfHosted]
+        server.cloudLLM = .openAICompatible
+        var none = AppSettings()
+        none.transcriptionOrder = []
+        none.llmLocation = .local
+        for settings in [keys, server, none] {
+            for issue in Self.everyIssue {
+                let services = OnboardingFlow.services(settings: settings, issues: [issue])
+                if let entry = OnboardingFlow.entry(for: issue) {
+                    #expect(services.contains(entry), "\(issue) has a row")
+                } else {
+                    #expect(issue == .diarizationModelsMissing, "only the speaker model is left to the models step")
+                }
+            }
+            let all = OnboardingFlow.services(settings: settings, issues: Self.everyIssue)
+            #expect(Set(all).count == all.count, "no row twice")
+        }
+        #expect(OnboardingFlow.entry(for: .offlineModelMissing(.transcription)) == .offlineModel(.transcription))
+        #expect(OnboardingFlow.entry(for: .noTranscriptionSource) == .transcriptionSource)
+        #expect(OnboardingFlow.entry(for: .missingSelfHostedURL) == .transcriptionServer)
+        #expect(OnboardingFlow.entry(for: .missingCredential(.googleCalendarRefreshToken)) == .settings(.missingCredential(.googleCalendarRefreshToken)))
+    }
+
+    /// The last step with keys stored, both models in and the voice enrolled.
+    private func atTheLastStep(_ change: (inout AppSettings) -> Void) async throws -> World {
+        let world = try World()
+        world.catalog.translationDownloaded.set(true)
+        try await enrollVoice(world)
+        world.app.settings.settings.hasCompletedOnboarding = true
+        change(&world.app.settings.settings)
+        world.app.setup.refresh()
+        world.app.onboarding.reopen()
+        #expect(world.app.onboarding.step == .services)
+        return world
+    }
+
+    @Test func aMissingOnDeviceModelIsDownloadedOnTheLastStep() async throws {
+        let world = try await atTheLastStep { $0.transcriptionOrder = [.cloud, .local] }
+        let flow = world.app.onboarding
+        let setup = world.app.setup
+        #expect(flow.services == [.elevenLabs, .offlineModel(.transcription), .gemini])
+        #expect(!flow.canContinue)
+        #expect(flow.note == .issue(.offlineModelMissing(.transcription)))
+
+        let gate = Gate<Bool>()
+        world.offlineInstallers[.transcription]!.hold.set(gate)
+        let download = Task { await setup.downloadOfflineModel(.transcription) }
+        #expect(await eventually { setup.offlineModels[.transcription] == .downloading(0.5) })
+        // 220 MB + 75 MB done, 1 GB half way.
+        #expect(flow.note == .finishingDownloads((295 + 500) / 1295.0))
+
+        await gate.open(false)
+        await download.value
+        #expect(flow.note == .issue(.offlineModelMissing(.transcription)), "Retry is in the row")
+
+        world.offlineInstallers[.transcription]!.hold.set(nil)
+        await setup.downloadOfflineModel(.transcription)
+        #expect(setup.issues.isEmpty)
+        #expect(flow.canContinue && flow.note == nil)
+        #expect(flow.services.contains(.offlineModel(.transcription)), "the row stays, now with its check")
+    }
+
+    @Test func turningAnOnDeviceSourceOffClearsItsIssue() async throws {
+        let world = try await atTheLastStep { $0.transcriptionOrder = [.selfHosted, .local]; $0.llmLocation = .local }
+        let flow = world.app.onboarding
+        let store = world.app.settings
+        store.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8000")
+        world.app.setup.recheck()
+        #expect(world.app.setup.issues == [.offlineModelMissing(.transcription), .offlineModelMissing(.llm)])
+
+        flow.turnOff(.transcription)
+        #expect(store.settings.transcriptionOrder == [.selfHosted], "the same as the Settings switch")
+        flow.turnOff(.llm)
+        #expect(store.settings.llmLocation == .cloud)
+        #expect(world.app.setup.issues.isEmpty)
+        #expect(flow.services == [.transcriptionServer, .gemini])
+        #expect(flow.canContinue)
+    }
+
+    @Test func turningTheOnlySourceOffOffersTheChosenOneBack() async throws {
+        let world = try await atTheLastStep { $0.transcriptionOrder = [.local] }
+        let flow = world.app.onboarding
+        flow.turnOff(.transcription)
+        #expect(world.app.setup.issues == [.noTranscriptionSource])
+        #expect(flow.services == [.gemini, .transcriptionSource])
+        #expect(flow.note == .issue(.noTranscriptionSource))
+        flow.turnOnTranscriptionSource()
+        #expect(world.app.settings.settings.transcriptionOrder == [.cloud])
+        #expect(flow.services == [.elevenLabs, .gemini])
+        #expect(flow.canContinue)
+    }
+
+    @Test func aDisabledPrimaryAlwaysSaysWhy() async throws {
+        let world = try firstRun()
+        let flow = world.app.onboarding
+        func check() { #expect(flow.canContinue == (flow.note == nil), "step \(flow.step)") }
+        check()
+        flow.advance()
+        check()
+        #expect(flow.note == .needsMicrophone)
+        world.permissions.mic.set(.granted)
+        world.app.setup.refreshPermissions()
+        check()
+        flow.advance()
+        check()
+        flow.advance()
+        check()
+        #expect(flow.note == .needsVoice)
+        try await enrollVoice(world)
+        check()
+        flow.advance()
+        check()
+        #expect(flow.note == .issue(.missingCredential(.elevenLabsAPIKey)))
+        try world.credentials.save("eleven-key", for: .elevenLabsAPIKey)
+        world.app.setup.recheck()
+        #expect(flow.note == .issue(.missingCredential(.geminiAPIKey)))
+        try world.credentials.save("gemini-key", for: .geminiAPIKey)
+        world.app.setup.recheck()
+        check()
+        #expect(flow.note == .modelsNotDownloaded, "keys are in; the models never started")
+        await flow.startDownloads()
+        check()
+        #expect(flow.note == nil)
     }
 
     @Test func theLastStepWaitsForBothModelsAndSaysHowFarTheyAre() async throws {

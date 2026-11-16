@@ -36,6 +36,12 @@ public enum ServiceEntry: Hashable, Sendable {
     case transcriptionServer
     /// The OpenAI-compatible server's address, model name and key.
     case llmServer
+    /// An on-device model a chosen source needs: downloaded here, or its source turned off.
+    case offlineModel(OfflineModel)
+    /// No transcription source is on; the row turns the chosen one back on.
+    case transcriptionSource
+    /// Something only Settings can fix; the row says what and opens Settings.
+    case settings(SetupIssue)
 }
 
 /// What the footer's primary button does.
@@ -44,11 +50,18 @@ public enum OnboardingPrimary: Equatable, Sendable {
     case start
 }
 
-/// A line under the footer buttons on the last screen while the models are not ready.
+/// The line under the footer buttons saying why the primary is disabled.
 public enum OnboardingNote: Equatable, Sendable {
-    /// Both downloads together, 0...1.
+    case needsMicrophone
+    case needsVoice
+    /// Every model still downloading, together, 0...1.
     case finishingDownloads(Double)
+    /// The speaker or translation model failed; its Retry is on the models screen.
     case downloadFailed
+    /// The speaker or translation model has not started downloading.
+    case modelsNotDownloaded
+    /// What setup still needs, which a row on the last screen resolves.
+    case issue(SetupIssue)
 }
 
 /// Step order, what lets each step continue, and which way the screens travel. Settings and
@@ -113,12 +126,20 @@ public final class OnboardingFlow {
     public var canGoBack: Bool { step != .usage }
     public var primary: OnboardingPrimary { step == .services ? .start : .continue }
 
-    /// Shown under the buttons on the last screen when only the models hold it up.
+    /// Why the primary is disabled; nil exactly when it is enabled.
     public var note: OnboardingNote? {
-        guard step == .services, !modelsReady else { return nil }
+        guard !canContinue else { return nil }
+        switch step {
+        case .usage, .models: return nil  // Never held: a choice is always selected, downloads run on.
+        case .permissions: return .needsMicrophone
+        case .voice: return .needsVoice
+        case .services: break
+        }
+        if isDownloading { return .finishingDownloads(modelProgress) }
         if case .failed = setup.models { return .downloadFailed }
         if case .failed = setup.translationModels { return .downloadFailed }
-        return .finishingDownloads(modelProgress)
+        if let issue = setup.issues.first(where: { $0 != .diarizationModelsMissing }) { return .issue(issue) }
+        return .modelsNotDownloaded
     }
 
     // MARK: Travel
@@ -170,40 +191,65 @@ public final class OnboardingFlow {
 
     // MARK: Last screen
 
-    /// What the last screen asks for, following the settings the choice wrote.
+    /// What the last screen asks for: the rows the settings call for, then a row for every issue
+    /// they leave unanswered, so no issue is ever shown without a way to resolve it there.
     public var services: [ServiceEntry] {
-        let current = settings.settings
+        Self.services(settings: settings.settings, issues: setup.issues)
+    }
+
+    public static func services(settings: AppSettings, issues: [SetupIssue]) -> [ServiceEntry] {
         var entries: [ServiceEntry] = []
-        for source in current.transcriptionOrder {
+        for source in settings.transcriptionOrder {
             switch source {
             case .cloud: entries.append(.elevenLabs)
             case .selfHosted: entries.append(.transcriptionServer)
-            case .local: break
+            case .local: entries.append(.offlineModel(.transcription))
             }
         }
-        if current.llmLocation == .cloud {
-            entries.append(current.cloudLLM == .gemini ? .gemini : .llmServer)
+        switch settings.llmLocation {
+        case .cloud: entries.append(settings.cloudLLM == .gemini ? .gemini : .llmServer)
+        case .local: entries.append(.offlineModel(.llm))
+        }
+        for issue in issues {
+            if let entry = entry(for: issue), !entries.contains(entry) { entries.append(entry) }
         }
         return entries
     }
 
-    /// Setup issues the last screen's own fields do not already answer, and that are not the
-    /// model downloads, which the footer reports.
-    public var otherIssues: [SetupIssue] {
-        let shown = Set(services)
-        return setup.issues.filter { issue in
-            switch issue {
-            case .missingCredential(.elevenLabsAPIKey): !shown.contains(.elevenLabs)
-            case .missingCredential(.geminiAPIKey): !shown.contains(.gemini)
-            case .missingCredential(.selfHostedToken): !shown.contains(.transcriptionServer)
-            case .missingCredential(.openAICompatibleAPIKey): !shown.contains(.llmServer)
-            case .missingCredential: true
-            case .missingSelfHostedURL: !shown.contains(.transcriptionServer)
-            case .missingLLMEndpoint: !shown.contains(.llmServer)
-            case .diarizationModelsMissing: false
-            case .noTranscriptionSource, .offlineModelMissing: true
-            }
+    /// The row of the last screen that resolves `issue`; nil for the speaker model, which the
+    /// models screen downloads and the footer note reports.
+    public static func entry(for issue: SetupIssue) -> ServiceEntry? {
+        switch issue {
+        case .missingCredential(.elevenLabsAPIKey): .elevenLabs
+        case .missingCredential(.geminiAPIKey): .gemini
+        case .missingCredential(.selfHostedToken): .transcriptionServer
+        case .missingCredential(.openAICompatibleAPIKey): .llmServer
+        // Calendar sign-ins are never required for processing; should one be, Settings has it.
+        case .missingCredential(.googleCalendarRefreshToken), .missingCredential(.microsoftCalendarRefreshToken): .settings(issue)
+        case .missingSelfHostedURL: .transcriptionServer
+        case .missingLLMEndpoint: .llmServer
+        case .noTranscriptionSource: .transcriptionSource
+        case .diarizationModelsMissing: nil
+        case .offlineModelMissing(let model): .offlineModel(model)
         }
+    }
+
+    /// Turns an on-device source off the way its Settings switch does.
+    public func turnOff(_ model: OfflineModel) {
+        switch model {
+        case .transcription:
+            let enabled = Set(settings.settings.transcriptionOrder).subtracting([.local])
+            settings.settings.transcriptionOrder = TranscriptionSource.allCases.filter(enabled.contains)
+        case .llm:
+            settings.settings.llmLocation = .cloud
+        }
+        setup.recheck()
+    }
+
+    /// Turns the chosen way of using mm2t's transcription source back on.
+    public func turnOnTranscriptionSource() {
+        settings.settings.transcriptionOrder = choice == .ownServer ? [.selfHosted] : [.cloud]
+        setup.recheck()
     }
 
     // MARK: Models
@@ -213,12 +259,34 @@ public final class OnboardingFlow {
     /// Both downloads in bytes, for "About N MB in total".
     public var modelBytes: Int64 { setup.speakerModelBytes + setup.translationModelBytes }
 
-    /// Both downloads together, weighted by size, 0...1.
+    /// The on-device models the settings use.
+    public var requiredOfflineModels: [OfflineModel] {
+        let current = settings.settings
+        return (current.transcriptionOrder.contains(.local) ? [.transcription] : [])
+            + (current.llmLocation == .local ? [.llm] : [])
+    }
+
+    /// Whether any download setup waits on is running.
+    public var isDownloading: Bool {
+        progressParts.contains { if case .downloading = $0.state { true } else { false } }
+    }
+
+    /// Every download setup waits on, weighted by size, 0...1: both models, plus a required
+    /// on-device model while it downloads.
     public var modelProgress: Double {
-        let total = Double(modelBytes)
+        let parts = progressParts
+        let total = parts.reduce(0) { $0 + Double($1.bytes) }
         guard total > 0 else { return modelsReady ? 1 : 0 }
-        return (Self.fraction(setup.models) * Double(setup.speakerModelBytes)
-            + Self.fraction(setup.translationModels) * Double(setup.translationModelBytes)) / total
+        return parts.reduce(0) { $0 + Self.fraction($1.state) * Double($1.bytes) } / total
+    }
+
+    private var progressParts: [(state: ModelDownloadState, bytes: Int64)] {
+        [(setup.models, setup.speakerModelBytes), (setup.translationModels, setup.translationModelBytes)]
+            + requiredOfflineModels.compactMap { model in
+                let state = setup.offlineModels[model] ?? .notDownloaded
+                guard case .downloading = state else { return nil }
+                return (state, setup.offlineModelBytes(model))
+            }
     }
 
     public static func fraction(_ state: ModelDownloadState) -> Double {

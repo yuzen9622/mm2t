@@ -60,7 +60,7 @@ struct OnboardingView: View {
             await app.enrollment.refresh()
             flow.reopen()
             ready = true
-            if flow.step == .models { startDownloads() }
+            if flow.step >= .models { startDownloads() }
         }
     }
 
@@ -99,10 +99,22 @@ struct OnboardingView: View {
             // Under the buttons, inside the bottom margin.
             Group {
                 switch flow.note {
+                case .needsMicrophone:
+                    Text("Allow microphone access to continue.")
+                case .needsVoice:
+                    Text("Read the passage aloud to continue.")
                 case .finishingDownloads(let fraction):
                     Text("Finishing model downloads… \(Int(fraction * 100))%").monospacedDigit()
                 case .downloadFailed:
                     Text("A model couldn't download. Go back to retry it.")
+                case .modelsNotDownloaded:
+                    Text("Starting model downloads…")
+                case .issue(.missingSelfHostedURL):
+                    Text("Enter your transcription server's URL.")
+                case .issue(.missingLLMEndpoint):
+                    Text("Enter the language model server's URL and model name.")
+                case .issue(let issue):
+                    Text(Copy.issue(issue))
                 case nil:
                     EmptyView()
                 }
@@ -151,7 +163,7 @@ struct OnboardingView: View {
                 if outgoing?.step == old { outgoing = nil }
             }
         }
-        if flow.step == .models { startDownloads() }
+        if flow.step >= .models { startDownloads() }
     }
 
     /// Runs past this view: the downloads carry on while the user moves through the other screens.
@@ -426,7 +438,14 @@ private struct ModelRow: View {
     let state: ModelDownloadState
     /// What a failure says; nil shows the download's own error.
     let failure: LocalizedStringKey?
+    /// A second caption line: size, or why this Mac is not suited.
+    var detail: Text?
+    /// Whether the row starts its own download; otherwise it starts on its own and shows 0%.
+    var offersDownload = false
+    /// Starts the download, and again after a failure.
     let retry: () -> Void
+    /// Turns the source that needs this model off, while the model is not on disk.
+    var turnOff: (() -> Void)?
 
     private var failed: String? {
         if case .failed(let reason) = state { reason } else { nil }
@@ -438,6 +457,9 @@ private struct ModelRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name).font(Typo.bodyStrong).lineLimit(1)
                     Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                    if let detail {
+                        detail.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 8)
                 trailing
@@ -466,14 +488,35 @@ private struct ModelRow: View {
                 .accessibilityElement()
                 .accessibilityLabel("Downloaded")
         case .failed:
-            PillButton("Retry", icon: "refresh", action: retry)
-                .transition(.opacity)
+            HStack(spacing: 12) {
+                turnOffButton
+                PillButton("Retry", icon: "refresh", action: retry)
+            }
+            .transition(.opacity)
+        case .notDownloaded where offersDownload:
+            HStack(spacing: 12) {
+                turnOffButton
+                PillButton("Download", icon: "download", action: retry)
+            }
+            .transition(.opacity)
         case .downloading, .notDownloaded:
             Text(OnboardingFlow.fraction(state), format: .percent.precision(.fractionLength(0)))
                 .font(Typo.caption)
                 .foregroundStyle(Palette.secondary)
                 .monospacedDigit()
                 .transition(.opacity)
+        }
+    }
+
+    /// Quieter than the pill beside it: plain secondary text.
+    @ViewBuilder private var turnOffButton: some View {
+        if let turnOff {
+            Button(action: turnOff) {
+                Text("Turn Off").font(Typo.captionStrong).foregroundStyle(Palette.secondary)
+                    .frame(height: 30).contentShape(Rectangle())
+            }
+            .buttonStyle(Pressable())
+            .focusEffectDisabled()
         }
     }
 }
@@ -559,49 +602,90 @@ private struct ServiceRows: View {
             Group {
                 switch entry {
                 case .elevenLabs:
-                    ServiceRow(title: Text(verbatim: "ElevenLabs"), purpose: "Speech to text and live captions.") {
+                    ServiceRow(title: Text(verbatim: "ElevenLabs"), purpose: Text("Speech to text and live captions.")) {
                         CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
                     }
                 case .gemini:
-                    ServiceRow(title: Text(verbatim: "Gemini"), purpose: "Cleans up transcripts, summaries and to-dos.") {
+                    ServiceRow(title: Text(verbatim: "Gemini"), purpose: Text("Cleans up transcripts, summaries and to-dos.")) {
                         CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
                     }
                 case .transcriptionServer:
-                    ServiceRow(title: Text("Transcription server"), purpose: "Turns your meeting audio into text.") {
+                    ServiceRow(title: Text("Transcription server"), purpose: Text("Turns your meeting audio into text.")) {
                         ServerURLField(store: app.settings)
                         CredentialFieldView(field: setup.field(.selfHostedToken), setup: setup)
                     }
                 case .llmServer:
-                    ServiceRow(title: Text("Language model server"), purpose: "Cleans up transcripts, summaries and to-dos.") {
+                    ServiceRow(title: Text("Language model server"), purpose: Text("Cleans up transcripts, summaries and to-dos.")) {
                         LLMServerFields(store: app.settings, key: setup.field(.openAICompatibleAPIKey))
                         CredentialFieldView(field: setup.field(.openAICompatibleAPIKey), setup: setup)
+                    }
+                case .offlineModel(let model):
+                    OfflineModelRow(model: model, setup: setup, flow: flow)
+                case .transcriptionSource:
+                    ServiceRow(title: Text("Transcription"), purpose: Text(Copy.issue(.noTranscriptionSource))) {
+                        Group {
+                            if flow.choice == .ownServer {
+                                PillButton("Use Your Server", action: flow.turnOnTranscriptionSource)
+                            } else {
+                                PillButton("Use ElevenLabs", action: flow.turnOnTranscriptionSource)
+                            }
+                        }
+                    }
+                case .settings(let issue):
+                    // Never needed for processing today; kept so no issue is ever left without a way out.
+                    ServiceRow(title: Text("Settings"), purpose: Text(Copy.issue(issue))) {
+                        PillButton("Open Settings") {
+                            MainNavigation.shared.settingsOpen = true
+                            WindowOpener.open(WindowID.main)
+                        }
                     }
                 }
             }
             .arrives(2 + index)
         }
-        if !flow.otherIssues.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(flow.otherIssues, id: \.self) { IssueRow(issue: $0) }
+    }
+}
+
+/// An on-device model a chosen source needs: download it here, or turn that source off the way
+/// its Settings switch does.
+private struct OfflineModelRow: View {
+    let model: OfflineModel
+    let setup: SetupModel
+    let flow: OnboardingFlow
+
+    var body: some View {
+        ModelRow(name: model == .transcription ? "On-device transcription" : "On-device language model",
+                 purpose: model == .transcription ? "Turns your meeting audio into text on this Mac." : "Cleans up transcripts, summaries and to-dos.",
+                 state: setup.offlineModels[model] ?? .notDownloaded, failure: nil, detail: detail,
+                 offersDownload: true,
+                 retry: { Task { await setup.downloadOfflineModel(model) } },
+                 turnOff: { flow.turnOff(model) })
+    }
+
+    /// The size, or why this Mac is not suited, in the words Settings uses.
+    private var detail: Text {
+        let fit = model == .transcription ? setup.suitability.transcription : setup.suitability.llm
+        if case .unsuited(let reason) = fit {
+            switch reason {
+            case .intelProcessor: return Text("Not recommended on a Mac with an Intel processor.")
+            case .memory(let minimumGB): return Text("Not recommended: needs at least \(minimumGB) GB of memory.")
             }
-            .font(Typo.caption)
-            .padding(.horizontal, 14)
-            .padding(.top, 4)
-            .arrives(2 + flow.services.count)
         }
+        let size = ByteCountFormatter.string(fromByteCount: setup.offlineModelBytes(model), countStyle: .file)
+        return Text("Needs a model on this Mac (\(size)).")
     }
 }
 
 private struct ServiceRow<Fields: View>: View {
     let title: Text
-    let purpose: LocalizedStringKey
+    let purpose: Text
     @ViewBuilder let fields: Fields
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 title.font(Typo.bodyStrong).lineLimit(1)
-                Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                purpose.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
             }
             fields
         }

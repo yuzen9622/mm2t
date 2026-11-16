@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Allow microphone access to continue.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "允許使用麥克風後才能繼續。" } } } },
+    "Enter the language model server's URL and model name.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入語言模型伺服器的網址與模型名稱。" } } } },
+    "Enter your transcription server's URL.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入轉錄伺服器的網址。" } } } },
+    "On-device language model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機語言模型" } } } },
+    "On-device transcription": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機轉錄" } } } },
+    "Read the passage aloud to continue.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "唸出這段文字後才能繼續。" } } } },
+    "Starting model downloads…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在開始下載模型…" } } } },
+    "Turn Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
+    "Turns your meeting audio into text on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在這台 Mac 上把會議音訊轉成文字。" } } } },
+    "Use ElevenLabs": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用 ElevenLabs" } } } },
+    "Use Your Server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用你的伺服器" } } } },
     "How do you want to use mm2t?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你想怎麼使用 mm2t？" } } } },
     "You can change this later in Settings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "之後可以在「設定」中更改。" } } } },
     "Sign in": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "登入" } } } },

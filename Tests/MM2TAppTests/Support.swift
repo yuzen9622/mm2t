@@ -546,6 +546,7 @@ struct World {
     let validator = FakeValidator()
     let speakerInstaller: FakeInstaller
     let translationInstaller: FakeInstaller
+    let offlineInstallers: [OfflineModel: FakeInstaller]
     let defaults: UserDefaults
     let now: Box<Date>
     let app: AppController
@@ -563,10 +564,11 @@ struct World {
         self.now = now
         speakerInstaller = FakeInstaller(catalog.modelsDownloaded, bytes: 220_000_000)
         translationInstaller = FakeInstaller(catalog.translationDownloaded, bytes: 75_000_000)
+        offlineInstallers = catalog.offlineDownloaded.mapValues { FakeInstaller($0, bytes: 1_000_000_000) }
         app = try AppController(
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: speakerInstaller,
-            offlineInstallers: catalog.offlineDownloaded.mapValues { FakeInstaller($0) },
+            offlineInstallers: offlineInstallers,
             translationInstaller: translationInstaller,
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }

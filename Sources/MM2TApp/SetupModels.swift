@@ -132,6 +132,7 @@ public final class SetupModel {
     /// What the speaker model and the translation models each download from nothing.
     public var speakerModelBytes: Int64 { installer.downloadBytes }
     public var translationModelBytes: Int64 { translationInstaller.downloadBytes }
+    public func offlineModelBytes(_ model: OfflineModel) -> Int64 { offlineInstallers[model]?.downloadBytes ?? 0 }
 
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let installer: any ModelInstalling
