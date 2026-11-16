@@ -1,14 +1,18 @@
 import Foundation
 import MM2TCore
 
-// ElevenLabs Scribe v2 Realtime, read 2026-11-16:
+// ElevenLabs Scribe v3 Live, read 2026-11-16:
 //   https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime
+//   https://elevenlabs.io/docs/overview/models
+//   https://elevenlabs.io/docs/changelog (Scribe v3, 2026-11-09)
 //   https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/event-reference
 //   https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies
 //   https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/batch/keyterm-prompting
 //   https://elevenlabs.io/pricing/api
 // - WSS wss://api.elevenlabs.io/v1/speech-to-text/realtime, key in the `xi-api-key` header.
-//   Query: model_id, audio_format (pcm_16000 ...), commit_strategy (manual default | vad),
+// - scribe_v3_live succeeds scribe_v2_realtime on the same socket, with the same query parameters
+//   and messages; v2 remains available and is still the endpoint's default model_id.
+//   Query: model_id, audio_format (pcm_16000 ...), commit_strategy (manual default | vad | turn_prediction),
 //   language_code, keyterms (repeated; realtime: at most 50, 20 characters each, billed extra),
 //   keepalive_interval_ms (500...10000).
 // - Client sends {"message_type":"input_audio_chunk","audio_base_64","commit","sample_rate"};
@@ -19,13 +23,14 @@ import MM2TCore
 //   with `error` text, before the socket closes.
 // - The server closes a session after 15 s without client messages. All streamed audio is billed,
 //   silence included, so a paused recording closes the socket rather than idling it.
-// - List price: $0.22 per hour of audio for Scribe v2 Realtime; keyterm prompting is an add-on.
+// - List price: $0.22 per hour of audio for Scribe v3 Live (same as v2 Realtime); keyterm prompting
+//   is a $0.08 per hour add-on.
 
-/// Live captions from ElevenLabs Scribe v2 Realtime over a WebSocket. Display only: nothing it
+/// Live captions from ElevenLabs Scribe v3 Live over a WebSocket. Display only: nothing it
 /// returns is stored.
 public struct ElevenLabsRealtime: StreamingTranscriptionProvider {
     public static let endpoint = URL(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
-    public static let model = "scribe_v2_realtime"
+    public static let model = "scribe_v3_live"
     /// The realtime keyterm limits, lower than batch.
     static let maxKeyterms = 50
     static let maxKeytermLength = 20

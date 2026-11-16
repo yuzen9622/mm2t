@@ -14,7 +14,7 @@ import Testing
         #expect(components.path == "/v1/speech-to-text/realtime")
         let items = components.queryItems ?? []
         func values(_ name: String) -> [String] { items.filter { $0.name == name }.compactMap(\.value) }
-        #expect(values("model_id") == ["scribe_v2_realtime"])
+        #expect(values("model_id") == ["scribe_v3_live"])
         #expect(values("audio_format") == ["pcm_16000"])
         #expect(values("commit_strategy") == ["vad"])
         #expect(values("language_code") == ["zh"])
@@ -56,7 +56,7 @@ import Testing
     }
 
     @Test func decodesTheDocumentedMessages() {
-        let started = #"{"message_type":"session_started","session_id":"abc","config":{"sample_rate":16000,"audio_format":"pcm_16000","model_id":"scribe_v2_realtime","commit_strategy":"vad"}}"#
+        let started = #"{"message_type":"session_started","session_id":"abc","config":{"sample_rate":16000,"audio_format":"pcm_16000","model_id":"scribe_v3_live","commit_strategy":"vad"}}"#
         #expect(ElevenLabsRealtime.decode(Data(started.utf8)) == .sessionStarted)
         let partial = #"{"message_type":"partial_transcript","text":"My phone number is 415","turn_probability":0.08}"#
         #expect(ElevenLabsRealtime.decode(Data(partial.utf8)) == .transcript(.partial("My phone number is 415")))

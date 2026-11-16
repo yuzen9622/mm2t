@@ -51,7 +51,7 @@ ElevenLabs 如何保存與使用這些資料，依 [ElevenLabs 隱私權政策](
 
 ### ElevenLabs 即時字幕（預設關閉）
 
-只有在設定中開啟「即時字幕」且已儲存 ElevenLabs 金鑰時使用，關閉時不會建立這條連線。端點：`wss://api.elevenlabs.io/v1/speech-to-text/realtime`，模型 `scribe_v2_realtime`，以 WebSocket 持續連線。
+只有在設定中開啟「即時字幕」且已儲存 ElevenLabs 金鑰時使用，關閉時不會建立這條連線。端點：`wss://api.elevenlabs.io/v1/speech-to-text/realtime`，模型 `scribe_v3_live`，以 WebSocket 持續連線。
 
 錄音進行中，本 App 會把「我」與「遠端」兩條音軌混成一條單聲道 16 kHz 音訊，約每 0.1 到 0.25 秒送出一段，直到暫停或停止錄音。每次連線包含：
 
