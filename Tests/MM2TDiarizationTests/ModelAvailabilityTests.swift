@@ -25,7 +25,7 @@ import Testing
 
     @Test func diarizingWithoutModelsFailsWithATypedErrorAndNeverDownloads() async throws {
         let store = try emptyStore()
-        let diarizer = NemotronDiarizer(models: store, embedder: WeSpeakerEmbedder(models: store))
+        let diarizer = NemotronDiarizer(models: store, embedder: VoiceprintEmbedder(models: store))
 
         await #expect(throws: DiarizationModelError.missing(directory: store.directory)) {
             try await diarizer.diarize(track: try silentTrack(seconds: 1))
@@ -35,7 +35,7 @@ import Testing
 
     @Test func speakersWithTooLittleCleanSpeechGetNoVoiceprintRatherThanANoisyOne() async throws {
         let store = try emptyStore()
-        let embedder = WeSpeakerEmbedder(models: store)
+        let embedder = VoiceprintEmbedder(models: store)
         let track = try silentTrack(seconds: 60)
 
         // 7 s and 6 s of clean 2-8 s pieces: below the rule, so the model is not even needed.
@@ -51,7 +51,7 @@ import Testing
     }
 
     @Test func pipelineDefaultsKeepSuggestionsSeparateFromAutomaticNames() {
-        #expect(MatchThresholds.weSpeaker == MatchThresholds(autoName: 0.70, suggest: 0.60, user: 0.60))
+        #expect(MatchThresholds.campPlus == MatchThresholds(autoName: 0.70, suggest: 0.60, user: 0.62))
     }
 
     @Test func defaultMatchingSuggestsWithoutLearningAndStillAutoNames() async throws {
@@ -61,7 +61,7 @@ import Testing
         for score: Float in [0.59, 0.60, 0.65, 0.6953087, 0.699, 0.70, 0.701, 0.80] {
             let candidate = Embedding([score, (1 - score * score).squareRoot()])
             let similarity = candidate.cosineSimilarity(to: enrolled)
-            let result = await store.match([candidate], thresholds: .weSpeaker)
+            let result = await store.match([candidate], thresholds: .campPlus)
             if similarity >= 0.70 {
                 #expect(result == .autoName(person, similarity: similarity))
             } else if similarity >= 0.60 {
@@ -70,7 +70,7 @@ import Testing
                 #expect(result == .none)
             }
         }
-        #expect(await store.match([], thresholds: .weSpeaker) == .none)
+        #expect(await store.match([], thresholds: .campPlus) == .none)
         #expect(await store.person(person)?.embeddings == [enrolled])
     }
 }

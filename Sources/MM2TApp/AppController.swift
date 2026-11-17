@@ -7,6 +7,7 @@ import MM2TProviders
 import MM2TSystem
 import MM2TWidgetData
 import Observation
+import OSLog
 
 /// Where the app keeps its data. `MM2TDataRoot` in UserDefaults (or `-MM2TDataRoot <path>` on the
 /// command line) moves everything, for development against a scratch library.
@@ -69,9 +70,13 @@ public final class AppController {
     }
     /// Recordings repaired at launch (or left unprocessed by a quit), offered for processing.
     public private(set) var recovered: [MeetingID] = []
+    /// Set while an update to the voiceprint model fetches it and rebuilds stored voices.
+    public private(set) var voiceprintUpdate: VoiceprintUpdate?
     public private(set) var recoveryFailures: [URL: String] = [:]
 
     @ObservationIgnored private let pipelineSetup: PipelineSetup
+    @ObservationIgnored private let migrateVoiceprints: @Sendable (_ progress: @escaping @Sendable (Int, Int) async -> Void) async -> Void
+    private nonisolated static let logger = Logger(subsystem: "dev.mm2t.app", category: "Voiceprints")
     @ObservationIgnored private var monitor: SystemSignalMonitor?
     @ObservationIgnored private var watchMeetings = false
     @ObservationIgnored private var hotkey: GlobalHotkeyMonitor?
@@ -119,6 +124,19 @@ public final class AppController {
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
         let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
+        migrateVoiceprints = { progress in
+            guard let models = catalog.localSpeakerModels() else { return }
+            let migration = VoiceprintMigration(library: library, voiceprints: voiceprints, embedder: models.embedder)
+            guard (try? await migration.isNeeded()) == true else { return }
+            let started = Date()
+            do {
+                let outcome = try await migration.run(progress: progress)
+                let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+                Self.logger.notice("event=voiceprint_migration meetings=\(outcome.meetings) unreadable=\(outcome.unreadable) dropped=\(outcome.dropped) userCalls=\(outcome.userCalls) seconds=\(seconds, privacy: .public)")
+            } catch {
+                Self.logger.error("event=voiceprint_migration_failed error=\(String(describing: error), privacy: .public)")
+            }
+        }
         let queue = ProcessingQueue(
             makePipeline: { try pipelineSetup.build(settings.settings) },
             makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
@@ -288,6 +306,18 @@ public final class AppController {
         recovered = outcome.recovered + unprocessed.filter { !outcome.recovered.contains($0) }
         await meetings.reload()
         await enrollment.refresh()
+        // Re-deriving voiceprints after a model change reads every meeting's audio, about 85 s for
+        // 15 meetings, so the app opens first and shows the result when it is done.
+        Task {
+            if setup.needsCompletingModels { voiceprintUpdate = .fetchingModel }
+            await setup.completeModelsAfterUpdate()
+            await migrateVoiceprints { done, total in
+                await MainActor.run { self.voiceprintUpdate = .rebuilding(done: done, of: total) }
+            }
+            voiceprintUpdate = nil
+            await meetings.reload()
+            await enrollment.refresh()
+        }
         reminders.start()
         widget?.start()
         self.watchMeetings = watchMeetings
@@ -360,4 +390,10 @@ public final class AppController {
         hotkey.start()
         self.hotkey = hotkey
     }
+}
+
+/// What the app shows while an update to the voiceprint model is applied.
+public enum VoiceprintUpdate: Equatable, Sendable {
+    case fetchingModel
+    case rebuilding(done: Int, of: Int)
 }

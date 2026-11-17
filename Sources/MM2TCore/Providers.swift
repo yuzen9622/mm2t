@@ -149,7 +149,20 @@ public protocol Diarizer: Sendable {
 /// Voice vectors for speaker turns another source segmented, so voiceprints still match
 /// when the local diarizer did not produce the segments.
 public protocol SpeakerEmbedder: Sendable {
+    /// Length of every vector it makes. Vectors of another length came from an earlier model.
+    var dimensions: Int { get }
     func embeddings(track: URL, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]]
+    /// `kept` are vectors to store and match by; `brief` are those of clusters with too little clean
+    /// speech for that, which only a user's confirmation may store.
+    func voiceprints(track: URL, segments: [Diarization.Segment], includingBrief: Bool) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]])
+}
+
+extension SpeakerEmbedder {
+    public func voiceprints(track: URL, segments: [Diarization.Segment], includingBrief: Bool) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]]) {
+        (try await embeddings(track: track, segments: segments), [:])
+    }
 }
 
 /// Where the remote track's who-spoke-when comes from.

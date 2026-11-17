@@ -67,7 +67,7 @@ enum SettingsRow: Hashable {
         case .localTranscription: [Copy.source(.local)]
         case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
         case .captionTranslation: [String(localized: "Translate captions")] + CaptionTarget.all.map(\.name)
-        case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
+        case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
         case .geminiKey: [Copy.credentialName(.geminiAPIKey)]
@@ -827,12 +827,12 @@ struct ModelDownloadView: View {
             }
         case .downloading(let fraction):
             VStack(alignment: .leading, spacing: 8) {
-                Text("Downloading speaker separation model (about 210 MB)")
+                Text("Downloading speaker separation model (about 230 MB)")
                 ProgressLine(fraction: fraction)
             }
         case .notDownloaded, .failed:
             HStack {
-                Text("Speaker separation model (about 210 MB) runs on this Mac.")
+                Text("Speaker separation model (about 230 MB) runs on this Mac.")
                 Spacer()
                 PillButton("Download", icon: "download") { Task { await setup.downloadModels() } }
             }

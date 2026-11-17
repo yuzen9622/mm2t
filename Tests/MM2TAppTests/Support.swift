@@ -270,6 +270,7 @@ struct ScriptedDiarizer: Diarizer {
 }
 
 struct ScriptedEmbedder: SpeakerEmbedder {
+    let dimensions = 3
     func embeddings(track: URL, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]] {
         Script.diarization.embeddings
     }

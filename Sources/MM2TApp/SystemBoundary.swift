@@ -68,6 +68,12 @@ public protocol ModelInstalling: Sendable {
     /// What a download from nothing fetches, for the setup screen's total.
     var downloadBytes: Int64 { get }
     func download(progress: @escaping @Sendable (Double) -> Void) async throws
+    /// Some of it is on disk and an update needs the rest, which the app then fetches on its own.
+    var needsCompleting: Bool { get }
+}
+
+extension ModelInstalling {
+    public var needsCompleting: Bool { false }
 }
 
 extension DiarizationModels: ModelInstalling {}
@@ -105,7 +111,7 @@ public final class LiveProviderCatalog: ProviderCatalog {
         // Kept for the app's lifetime like the diarizer: preparing the speech model for the Neural
         // Engine takes minutes, so it happens once per launch, on the first offline transcription.
         transcription = LocalTranscription(model: transcriptionModel)
-        let embedder = WeSpeakerEmbedder(models: models)
+        let embedder = VoiceprintEmbedder(models: models)
         // One diarizer for the app's lifetime so the CoreML models load once, not per meeting.
         speakerModels = LocalSpeakerModels(diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder)
     }
@@ -135,7 +141,7 @@ public final class LiveProviderCatalog: ProviderCatalog {
         let needed = translationModels.for(target)
         return needed.isDownloaded ? BergamotTranslator(models: needed) : nil
     }
-    public var thresholds: MatchThresholds { .weSpeaker }
+    public var thresholds: MatchThresholds { .campPlus }
 }
 
 /// One "verify" press; the self-hosted token can only be checked against a configured server.

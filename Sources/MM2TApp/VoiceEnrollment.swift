@@ -104,7 +104,8 @@ public final class VoiceEnrollmentModel {
     }
 
     public func refresh() async {
-        hasVoice = await voiceprints.user() != nil
+        // An update that changed the voiceprint model drops the enrollment, which it cannot re-derive.
+        hasVoice = await voiceprints.user()?.embeddings.isEmpty == false
         hasCheckedVoice = true
         if hasVoice, state == .idle { state = .enrolled }
     }

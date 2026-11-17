@@ -12,7 +12,7 @@ struct RealAudioTests {
     let data = EvaluationData()
 
     @Test func separatesTheFourSpeakersOfAnAliMeetingSessionAsTheEvaluationMeasured() async throws {
-        let embedder = WeSpeakerEmbedder(models: data.models)
+        let embedder = VoiceprintEmbedder(models: data.models)
         let diarizer = NemotronDiarizer(models: data.models, embedder: embedder)
         let end = try data.scoredEnd()
         let reference = try readRTTM(data.reference)
@@ -59,14 +59,14 @@ struct RealAudioTests {
 
         for cluster in clusters {
             let vectors = try #require(result.embeddings[cluster], "\(cluster.rawValue) spoke minutes, so it has a voiceprint")
-            #expect(vectors.count == 1 && vectors[0].values.count == 256)
+            #expect(vectors.count == 1 && vectors[0].values.count == VoiceprintEmbedder.dimensions)
         }
         let prints = clusters.sorted { $0.rawValue < $1.rawValue }.map { result.embeddings[$0]![0] }
         for (i, a) in prints.enumerated() {
             for b in prints[(i + 1)...] {
                 print(String(format: "[real] voiceprint cosine between two clusters: %.3f", a.cosineSimilarity(to: b)))
                 // RESULTS.md saw different people reach 0.607, above `suggest`; only `autoName` must hold.
-                #expect(a.cosineSimilarity(to: b) < MatchThresholds.weSpeaker.autoName,
+                #expect(a.cosineSimilarity(to: b) < MatchThresholds.campPlus.autoName,
                         "different people in one meeting must never auto-name each other")
             }
         }
@@ -96,12 +96,12 @@ struct RealAudioTests {
 
         let library = MeetingLibrary(root: directory.appending(path: "library"))
         let voiceprints = try VoiceprintStore(fileURL: directory.appending(path: "voiceprints.json"))
-        let embedder = WeSpeakerEmbedder(models: data.models)
+        let embedder = VoiceprintEmbedder(models: data.models)
         let pipeline = MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
             diarizer: NemotronDiarizer(models: data.models, embedder: embedder), embedder: embedder,
             transcription: TranscriptionChain([.init(.cloud, EveryTwoSecondsSTT())]),
-            llm: SilentLLM(), thresholds: .weSpeaker, vocabulary: [])
+            llm: SilentLLM(), thresholds: .campPlus, vocabulary: [])
 
         func run(_ track: URL, duration: TimeInterval) async throws -> Meeting {
             let mic = directory.appending(path: "mic-\(UUID().uuidString).wav")
@@ -142,7 +142,7 @@ struct RealAudioTests {
         var autoNamed = 0
         for speaker in second.speakers {
             let person = secondScore.mapping[ClusterID(speaker.id.rawValue)]
-            let best = await voiceprints.match(speaker.embeddings, thresholds: .weSpeaker)
+            let best = await voiceprints.match(speaker.embeddings, thresholds: .campPlus)
             let similarities = await voiceprints.allPersons().map { stored in
                 "\(stored.name) " + String(format: "%.3f", speaker.embeddings.first.map { stored.embeddings[0].cosineSimilarity(to: $0) } ?? .nan)
             }
@@ -187,7 +187,7 @@ struct RealAudioTests {
             }
         }
 
-        let embedder = WeSpeakerEmbedder(models: data.models)
+        let embedder = VoiceprintEmbedder(models: data.models)
         let diarizer = NemotronDiarizer(models: data.models, embedder: embedder)
         _ = try await diarizer.diarize(track: try clip(seconds: 60))
         let loaded = currentFootprintMB()

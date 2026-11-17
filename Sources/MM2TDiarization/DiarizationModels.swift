@@ -7,8 +7,8 @@ public enum DiarizationModelError: Error, Equatable, Sendable {
     case downloadFailed(String)
 }
 
-/// Where the Nemotron-3 offline diarizer and the WeSpeaker embedding model live, in FluidAudio's
-/// cache layout (`nemotron-3-diarization/`, `speaker-diarization/`), about 210 MB together.
+/// Where the Nemotron-3 offline diarizer and the CAM++ voiceprint model live, in FluidAudio's
+/// cache layout (`nemotron-3-diarization/`, `campplus/`), about 230 MB together.
 public struct DiarizationModels: Sendable {
     public let directory: URL
 
@@ -22,11 +22,14 @@ public struct DiarizationModels: Sendable {
         return DiarizationModels(directory: base.appending(path: "mm2t/Models"))
     }
 
-    public var isDownloaded: Bool { nemotronIsComplete && weSpeakerIsComplete }
+    public var isDownloaded: Bool { nemotronIsComplete && campPlusIsComplete }
 
-    /// Both models' files as installed (2026-11-16: Nemotron-3 199,162,417 bytes, WeSpeaker
-    /// 21,787,007). Hugging Face serves them uncompressed, so this is also what a download fetches.
-    public var downloadBytes: Int64 { 220_949_424 }
+    /// Whether only the voiceprint model is missing, as after updating from a WeSpeaker version.
+    public var needsCompleting: Bool { nemotronIsComplete && !campPlusIsComplete }
+
+    /// Both models' files as installed (Nemotron-3 199,162,417 bytes on 2026-11-16, CAM++ 29,418,980
+    /// on 2026-11-17). Hugging Face serves them uncompressed, so this is also what a download fetches.
+    public var downloadBytes: Int64 { 228_581_397 }
 
     /// Fetches whichever model is missing from Hugging Face. `progress` receives 0...1.
     /// Throws `DiarizationModelError.downloadFailed`; partial files resume on the next call.
@@ -38,9 +41,9 @@ public struct DiarizationModels: Sendable {
                     progressHandler: { progress(0.9 * $0.fractionCompleted) })
             }
             progress(0.9)
-            if !weSpeakerIsComplete {
-                _ = try await OfflineDiarizerModels.load(
-                    from: directory, progressHandler: { progress(0.9 + 0.1 * $0.fractionCompleted) })
+            if !campPlusIsComplete {
+                try await ModelHub.download(
+                    .campPlus, to: directory, progressHandler: { progress(0.9 + 0.1 * $0.fractionCompleted) })
             }
         } catch {
             throw DiarizationModelError.downloadFailed(String(describing: error))
@@ -55,9 +58,9 @@ public struct DiarizationModels: Sendable {
         return try await Nemotron3Models.loadFromHuggingFace(config: .offline, cacheDirectory: directory)
     }
 
-    func loadWeSpeaker() async throws -> OfflineDiarizerModels {
-        guard weSpeakerIsComplete else { throw DiarizationModelError.missing(directory: directory) }
-        return try await OfflineDiarizerModels.load(from: directory)
+    func loadCampPlus() throws -> CampPlusModels {
+        guard campPlusIsComplete else { throw DiarizationModelError.missing(directory: directory) }
+        return try CampPlusModels.load(from: campPlusDirectory)
     }
 
     /// Mirrors what `Nemotron3Models.loadFromHuggingFace` accepts without fetching: a compiled
@@ -73,14 +76,10 @@ public struct DiarizationModels: Sendable {
             && exists(repo.appending(path: ModelNames.Nemotron3.silenceEmbeddingFile))
     }
 
-    /// Mirrors FluidAudio's `ModelHub` cache check: pinned revision marker plus every required file.
-    private var weSpeakerIsComplete: Bool {
-        let repo = directory.appending(path: Repo.diarizer.folderName)
-        let revision = try? String(contentsOf: repo.appending(path: ".fluidaudio-revision"), encoding: .utf8)
-        guard revision?.trimmingCharacters(in: .whitespacesAndNewlines) == Repo.diarizer.revision else { return false }
-        return ModelNames.OfflineDiarizer.requiredModels.allSatisfy { name in
-            exists(repo.appending(path: name.hasSuffix(".mlmodelc") ? "\(name)/coremldata.bin" : name))
-        }
+    private var campPlusDirectory: URL { directory.appending(path: Repo.campPlus.folderName) }
+
+    private var campPlusIsComplete: Bool {
+        ModelNames.CampPlus.requiredModels.allSatisfy { exists(campPlusDirectory.appending(path: "\($0)/coremldata.bin")) }
     }
 
     private func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }

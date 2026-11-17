@@ -850,11 +850,11 @@ It links these components:
 - License: OpenMDW License 1.1, https://github.com/OpenMDW/OpenMDW
 - Original model by NVIDIA. Core ML conversion by Fluid Inference.
 
-### pyannote community-1 with WeSpeaker embeddings (voiceprints)
+### CAM++ (voiceprints)
 
-- Source: https://huggingface.co/FluidInference/speaker-diarization-coreml (revision `df2625ac79a7ac6b65ad868fee6d80f320da4232`), a Core ML conversion of https://huggingface.co/pyannote/speaker-diarization-community-1
-- License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
-- Attribution: pyannote (pyannoteAI, Hervé Bredin), the WeSpeaker speaker-embedding model, the PLDA parameters from BUT Speech@FIT (also CC BY 4.0), and Fluid Inference for the Core ML conversion. The app uses the FBank and WeSpeaker embedding models to compute voiceprints. The conversion was not otherwise modified by mm2t.
+- Source: https://huggingface.co/FluidInference/campplus-coreml (`CamPlusPreprocessor_v2`, `CamPlusPlus_v2`), a Core ML conversion of the 3D-Speaker CAM++ checkpoint `iic/speech_campplus_sv_zh-cn_16k-common` (https://github.com/modelscope/3D-Speaker)
+- License: the model card states that the upstream license applies. The 3D-Speaker repository is licensed under the Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0. A separate license for the checkpoint itself was not found.
+- Original model by Alibaba DAMO Academy (3D-Speaker). Core ML conversion by Fluid Inference. The app uses it unmodified to compute voiceprints.
 
 ### Breeze-ASR-25 (on-device transcription, optional download)
 

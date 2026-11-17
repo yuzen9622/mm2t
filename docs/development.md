@@ -28,7 +28,7 @@ macOS 依程式碼簽章記住權限。用 ad-hoc 簽章時，每次重新建置
 
 自己建置的 App 也會用 Sparkle 檢查正式版的更新。開發時不想讓它檢查，把 `App/Config/Info.plist` 的 `SUPublicEDKey` 清空即可（不要 commit 這個改動）。
 
-說話者分群模型（約 210 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
+說話者分群模型（約 230 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
 
 ## Google Calendar 的 OAuth 設定
 

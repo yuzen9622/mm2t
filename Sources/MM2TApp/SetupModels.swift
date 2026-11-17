@@ -231,6 +231,14 @@ public final class SetupModel {
         issues = checkSetup()
     }
 
+    /// After an update that changed a speaker model, fetches it when the rest was already set up,
+    /// so speaker separation keeps working without a trip to setup.
+    public var needsCompletingModels: Bool { installer.needsCompleting }
+
+    public func completeModelsAfterUpdate() async {
+        if installer.needsCompleting { await downloadModels() }
+    }
+
     /// Same as `downloadModels`, for one offline model; safe to call again after a failure, which resumes.
     public func downloadOfflineModel(_ model: OfflineModel) async {
         if case .downloading = offlineModels[model] { return }

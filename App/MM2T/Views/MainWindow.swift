@@ -294,6 +294,12 @@ struct MainWindow: View {
             .motion(Motion.select, value: section)
 
             Spacer(minLength: 12)
+            if let update = app.voiceprintUpdate {
+                VoiceprintUpdateStatus(update: update)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 12)
+                    .transition(.opacity)
+            }
             HStack(spacing: 2) {
                 IconButton("Settings", icon: "settings") { show(.settings) }
                 IconButton("Help", icon: "help-circle") { openURL(AppLinks.help) }
@@ -740,5 +746,25 @@ private struct RecordButton: View {
         .disabled(!idle && !capture.state.isCapturing)
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
+    }
+}
+
+/// After an update to the voiceprint model: fetching it, then rebuilding voices meeting by meeting.
+private struct VoiceprintUpdateStatus: View {
+    let update: VoiceprintUpdate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch update {
+            case .fetchingModel:
+                Text("Downloading voiceprint model").font(Typo.caption).foregroundStyle(Palette.secondary)
+                ProgressView().progressViewStyle(.linear).controlSize(.small)
+            case .rebuilding(let done, let total):
+                Text("Updating voiceprints \(done)/\(total)").font(Typo.caption).foregroundStyle(Palette.secondary)
+                    .monospacedDigit()
+                ProgressLine(fraction: total == 0 ? 0 : Double(done) / Double(total))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

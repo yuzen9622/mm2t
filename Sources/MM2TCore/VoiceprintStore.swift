@@ -142,6 +142,38 @@ public actor VoiceprintStore {
         try save(persons.filter { $0.id != source })
     }
 
+    /// Swaps vectors a meeting taught for that voice as a newer model hears it, in every person
+    /// holding any of `old`.
+    public func replace(_ old: [Embedding], with new: [Embedding]) throws {
+        guard persons.contains(where: { $0.embeddings.contains(where: old.contains) }) else { return }
+        try save(persons.map { person in
+            guard person.embeddings.contains(where: old.contains) else { return person }
+            var next = person
+            next.embeddings.removeAll(where: old.contains)
+            next.embeddings += new.filter { !next.embeddings.contains($0) }
+            return next
+        })
+    }
+
+    /// Whether any vector came from a model whose vectors are not `dimensions` long.
+    public func hasVectors(otherThan dimensions: Int) -> Bool {
+        persons.contains { $0.embeddings.contains { $0.values.count != dimensions } }
+    }
+
+    /// Drops every vector not `dimensions` long, which no current vector can be compared with.
+    /// Returns how many were dropped.
+    @discardableResult
+    public func dropVectors(otherThan dimensions: Int) throws -> Int {
+        let dropped = persons.reduce(0) { $0 + $1.embeddings.filter { $0.values.count != dimensions }.count }
+        guard dropped > 0 else { return 0 }
+        try save(persons.map { person in
+            var next = person
+            next.embeddings.removeAll { $0.values.count != dimensions }
+            return next
+        })
+        return dropped
+    }
+
     /// Removes the person and all their vectors from disk.
     public func delete(_ id: PersonID) throws {
         guard person(id) != nil else { throw VoiceprintError.unknownPerson(id) }

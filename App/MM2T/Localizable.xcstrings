@@ -1035,16 +1035,18 @@
         }
       }
     },
-    "Downloading speaker separation model (about 210 MB)": {
+    "Downloading speaker separation model (about 230 MB)": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在下載說話者分群模型（約 210 MB）"
+            "value": "正在下載說話者分群模型（約 230 MB）"
           }
         }
       }
     },
+    "Downloading voiceprint model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在下載聲紋模型" } } } },
+    "Updating voiceprints %lld/%lld": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在更新聲紋 %1$lld/%2$lld" } } } },
     "Edit": {
       "localizations": {
         "zh-Hant": {
@@ -2485,12 +2487,12 @@
         }
       }
     },
-    "Speaker separation model (about 210 MB) runs on this Mac.": {
+    "Speaker separation model (about 230 MB) runs on this Mac.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "說話者分群模型（約 210 MB）在這台 Mac 上執行。"
+            "value": "說話者分群模型（約 230 MB）在這台 Mac 上執行。"
           }
         }
       }
