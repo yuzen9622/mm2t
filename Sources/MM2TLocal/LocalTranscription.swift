@@ -91,6 +91,8 @@ actor WhisperEngine {
         do {
             let config = WhisperKitConfig(
                 modelFolder: folder.path, tokenizerFolder: folder,
+                // The GPU measured 9-10x slower on 180 s of meeting audio, run back to back on an
+                // M4 Air: 524-563 s against 55 s here, with 4 GB peak against 1.6 GB.
                 computeOptions: ModelComputeOptions(audioEncoderCompute: .cpuAndNeuralEngine, textDecoderCompute: .cpuAndNeuralEngine),
                 verbose: false, logLevel: .error, prewarm: false, load: true, download: false)
             let whisper = try await WhisperKit(config)
