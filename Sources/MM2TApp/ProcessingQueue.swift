@@ -45,6 +45,7 @@ public final class ProcessingQueue {
     @ObservationIgnored private let makeLLM: @MainActor () throws -> LLMBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
+    @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>)] = [:]
 
     public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild,
                 makeLLM: @escaping @MainActor () throws -> LLMBuild) {
@@ -89,13 +90,35 @@ public final class ProcessingQueue {
         guard !isBusy(id) else { return }
         jobs[id] = .queued
         let previous = tail
+        let token = UUID()
         let task = Task { @MainActor in
             await previous?.value
+            guard !Task.isCancelled else { return }
             let current = await whileValid()
+            guard !Task.isCancelled else { return }
             await self.execute(operation, on: id, using: current ? prepared : nil)
         }
+        tasks[id] = (token, task)
         tail = task
         await task.value
+        // A newer job for this meeting may have started after this one was cancelled; it is not ours to clear.
+        guard tasks[id]?.token == token else { return }
+        tasks[id] = nil
+        if task.isCancelled, jobs[id]?.isActive == true { jobs[id] = nil }
+        revision += 1
+    }
+
+    /// Stops a queued or running job. The meeting keeps its audio and every finished step, and
+    /// waits as not processed until the user processes it again. A queued job leaves the queue at
+    /// once; its place in line only ends when the job ahead of it does.
+    public func cancel(_ id: MeetingID) {
+        guard let entry = tasks[id] else { return }
+        entry.task.cancel()
+        if jobs[id] == .queued {
+            tasks[id] = nil
+            jobs[id] = nil
+            revision += 1
+        }
     }
 
     /// Retries every meeting that was waiting on setup.
@@ -143,6 +166,8 @@ public final class ProcessingQueue {
             case .failed(let step, let reason): jobs[id] = .failed(step: step, reason: reason)
             case .pending(let step): jobs[id] = .failed(step: step, reason: "processing stopped before \(step.rawValue)")
             }
+        } catch is CancellationError {
+            jobs[id] = nil
         } catch {
             jobs[id] = .failed(step: nil, reason: String(describing: error))
         }

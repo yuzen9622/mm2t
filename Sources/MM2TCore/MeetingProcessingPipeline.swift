@@ -144,8 +144,12 @@ public struct MeetingProcessingPipeline: Sendable {
             progress(step)
             do {
                 try await run(step, on: &meeting)
+                // Some steps fall back instead of throwing; a cancelled one must not count as done.
+                try Task.checkCancellation()
                 meeting.status = step.next.map { .pending(next: $0) } ?? .completed
             } catch {
+                // A stop the user asked for leaves the meeting waiting at this step, ready to resume.
+                if Task.isCancelled { throw CancellationError() }
                 meeting.status = .failed(step: step, reason: String(describing: error))
                 try await library.save(meeting)
                 return meeting
@@ -183,7 +187,12 @@ public struct MeetingProcessingPipeline: Sendable {
                 try? await library.save(meeting)
             }
         }
-        if let failed = steps.first(where: { failures[$0] != nil }) {
+        if Task.isCancelled {
+            // What finished is kept; the rest runs again from `first` when the user resumes.
+            meeting.status = .pending(next: first)
+            try await library.save(meeting)
+            throw CancellationError()
+        } else if let failed = steps.first(where: { failures[$0] != nil }) {
             meeting.status = .failed(step: failed, reason: failures[failed]!)
         } else {
             meeting.status = .completed
@@ -333,6 +342,12 @@ public struct MeetingProcessingPipeline: Sendable {
 
         var separated = meeting
         await diarize(&separated)
+        if Task.isCancelled {
+            // Separation falls back when stopped, so its result is not kept.
+            meeting.status = .completed
+            try await library.save(meeting)
+            throw CancellationError()
+        }
         if case .unseparated = separated.attribution {
             if case .unseparated = meeting.attribution { meeting.attribution = separated.attribution }
         } else {

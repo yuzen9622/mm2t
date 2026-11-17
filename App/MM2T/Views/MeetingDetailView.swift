@@ -144,6 +144,8 @@ struct MeetingDetailView: View {
                 Spacer()
                 if case .failed = job {
                     PillButton("Retry") { Task { await model.retry() } }
+                } else if job.isActive {
+                    PillButton("Cancel") { model.cancelProcessing() }
                 } else if case .needsSetup = job {
                     PillButton("Open Setup") { MainNavigation.shared.openSetup() }
                 }

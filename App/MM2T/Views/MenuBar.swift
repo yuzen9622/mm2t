@@ -60,7 +60,7 @@ struct MenuBarContent: View {
             header
             CaptureCard(state: state, meters: meters, needsOnboarding: needsOnboarding, capture: app.capture)
             if let job = app.queue.activeJob {
-                ProcessingRow(title: title(job.id), detail: Copy.job(job.state))
+                ProcessingRow(title: title(job.id), detail: Copy.job(job.state)) { app.queue.cancel(job.id) }
                     .transition(.opacity)
             }
             if !app.recovered.isEmpty {
@@ -337,6 +337,7 @@ private struct MenuCountdown: View {
 private struct ProcessingRow: View {
     let title: String
     let detail: String
+    let cancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -346,6 +347,7 @@ private struct ProcessingRow: View {
                 Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
+            PillButton("Cancel", action: cancel)
         }
         .card()
     }

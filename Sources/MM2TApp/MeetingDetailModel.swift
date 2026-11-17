@@ -219,6 +219,11 @@ public final class MeetingDetailModel {
         await load()
     }
 
+    /// Stops this meeting's job; it waits as not processed until the user processes it again.
+    public func cancelProcessing() {
+        queue.cancel(id)
+    }
+
     /// Shows the source utterance in the raw transcript and plays from it.
     public func jump(to target: JumpTarget) {
         selectedView = .raw
