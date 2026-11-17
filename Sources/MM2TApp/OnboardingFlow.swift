@@ -72,6 +72,8 @@ public final class OnboardingFlow {
     /// Whether the latest step change went forward; back reverses the travel.
     public private(set) var forward = true
     public private(set) var choice: UsageChoice
+    /// The user opened setup again after finishing it, from a meeting or the menu bar.
+    public private(set) var isOpenedAgain = false
 
     @ObservationIgnored private let setup: SetupModel
     @ObservationIgnored private let settings: SettingsStore
@@ -92,6 +94,17 @@ public final class OnboardingFlow {
     public var firstIncompleteStep: OnboardingStep {
         guard settings.settings.hasCompletedOnboarding else { return .usage }
         return OnboardingStep.allCases.first { !isComplete($0) } ?? .services
+    }
+
+    /// Opens setup again; it starts at its first incomplete screen.
+    public func open() {
+        isOpenedAgain = true
+        reopen()
+    }
+
+    /// Leaves setup that was opened again.
+    public func close() {
+        isOpenedAgain = false
     }
 
     /// Starts over at the first incomplete screen, for each time the window opens.

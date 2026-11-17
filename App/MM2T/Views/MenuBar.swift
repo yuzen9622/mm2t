@@ -153,7 +153,7 @@ private struct CaptureCard: View {
                 if needsOnboarding {
                     Text("mm2t needs your permissions and keys before it can take notes.")
                         .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-                    WideButton("Continue Setup", icon: "settings") { WindowOpener.open(WindowID.onboarding) }
+                    WideButton("Continue Setup", icon: "settings") { MainNavigation.shared.openSetup() }
                 } else {
                     WideButton("Start Recording", icon: "microphone") {
                         Task { await capture.startNow(title: String(localized: "Recording")) }

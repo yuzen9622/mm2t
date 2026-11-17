@@ -145,7 +145,7 @@ struct MeetingDetailView: View {
                 if case .failed = job {
                     PillButton("Retry") { Task { await model.retry() } }
                 } else if case .needsSetup = job {
-                    PillButton("Open Setup") { WindowOpener.open(WindowID.onboarding) }
+                    PillButton("Open Setup") { MainNavigation.shared.openSetup() }
                 }
             }
         } else if case .failed(let step, let reason) = model.meeting?.status {

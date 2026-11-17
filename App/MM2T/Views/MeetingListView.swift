@@ -16,7 +16,6 @@ struct MeetingListView: View {
         self.open = open
         _layout = State(initialValue: AssistantLayoutState(active: assistant.isActive))
     }
-    @Environment(\.openWindow) private var openWindow
 
     private var model: MeetingListModel { app.meetings }
 
@@ -91,7 +90,7 @@ struct MeetingListView: View {
                     }
                     MeetingCard(row: row, isRecovered: app.recovered.contains(row.id), compact: compact,
                                 cited: assistant.citedMeetings.contains(row.id),
-                                process: { Task { await process(row) } }, setUp: { openWindow(id: WindowID.onboarding) })
+                                process: { Task { await process(row) } }, setUp: { MainNavigation.shared.openSetup() })
                         .contentShape(Rectangle())
                         .onTapGesture { if compact || row.status == .completed { open(row.id) } }
                         .accessibilityAction { open(row.id) }

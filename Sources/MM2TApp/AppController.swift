@@ -60,6 +60,13 @@ public final class AppController {
 
     /// The app is not usable until setup is finished and the user's voice is enrolled.
     public var needsOnboarding: Bool { !settings.settings.hasCompletedOnboarding || !enrollment.hasVoice }
+    /// Whether the main window shows setup instead of the app: while setup is unfinished, or after
+    /// the user opened it again. Until the voiceprints are read, a finished setup counts as still
+    /// finished, so a launch never shows setup for a moment before the app.
+    public var showsSetup: Bool {
+        onboarding.isOpenedAgain || !settings.settings.hasCompletedOnboarding
+            || (enrollment.hasCheckedVoice && !enrollment.hasVoice)
+    }
     /// Recordings repaired at launch (or left unprocessed by a quit), offered for processing.
     public private(set) var recovered: [MeetingID] = []
     public private(set) var recoveryFailures: [URL: String] = [:]
@@ -298,10 +305,21 @@ public final class AppController {
         }
     }
 
-    /// Marks setup finished; from here the app watches for meetings.
+    /// Marks setup finished and leaves it; from here the app watches for meetings.
     public func completeOnboarding() {
         settings.settings.hasCompletedOnboarding = true
+        onboarding.close()
         startMonitorIfReady()
+    }
+
+    /// Shows setup in the main window again, at its first incomplete screen.
+    public func openSetup() {
+        onboarding.open()
+    }
+
+    /// Leaves setup the user opened again without finishing it; unfinished setup stays.
+    public func closeSetup() {
+        onboarding.close()
     }
 
     public func processRecovered(_ id: MeetingID) async {

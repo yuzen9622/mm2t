@@ -57,12 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !fixture { Updates.start() }
         Task { await app.launch(watchMeetings: !fixture) }
         // Opening the app shows its window; without this a launch leaves only the menu bar icon.
+        // While setup is unfinished the window shows setup and nothing else.
         WindowOpener.open(WindowID.main)
-        // Setup comes first: the main window shows nothing else until it is finished.
-        Task {
-            await app.enrollment.refresh()
-            if app.needsOnboarding { WindowOpener.open(WindowID.onboarding) }
-        }
     }
 
     /// Opening the app again while it runs (Finder, Dock, `open`) brings the window back.

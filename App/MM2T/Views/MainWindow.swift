@@ -66,6 +66,14 @@ final class MainNavigation {
         liveOpen = true
         WindowOpener.open(WindowID.main)
     }
+
+    /// Asked for from anywhere: the main window shows setup again. `MainWindow` takes the request.
+    var setupRequested = false
+
+    func openSetup() {
+        setupRequested = true
+        WindowOpener.open(WindowID.main)
+    }
 }
 
 /// The main window's content sits in one centered column that grows with the window up to a
@@ -93,20 +101,118 @@ struct MainWindow: View {
     @State private var movedUp = false
     @Namespace private var sidebarSpace
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    /// Setup or the app, or the window on its way from one to the other.
+    @State private var stage: WindowStage
+    /// During a change of stage, whether the arriving side has started to show.
+    @State private var arriving = false
 
     static let sidebarWidth: CGFloat = 220
+    static let setupSize = CGSize(width: 600, height: 580)
+    static let appMinimum = CGSize(width: 820, height: 540)
 
     init(app: AppController) {
         self.app = app
         _assistant = State(initialValue: app.makeAssistant())
+        _stage = State(initialValue: app.showsSetup ? .setup : .app)
     }
 
     var body: some View {
         let navigation = MainNavigation.shared
+        ZStack {
+            // While the frame changes, the ground shows alone: nothing of the app is drawn squashed.
+            Palette.window
+            if stage == .setup || (stage == .toSetup && arriving) {
+                OnboardingView(app: app)
+                    .transition(arrival)
+            }
+            if stage == .app || (stage == .toApp && arriving) {
+                appContent
+                    // Laid out at the app's size even while the window is still smaller, and clipped.
+                    .frame(minWidth: Self.appMinimum.width, minHeight: Self.appMinimum.height)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
+                    .transition(arrival)
+            }
+        }
+        .foregroundStyle(Palette.text)
+        .font(Typo.body)
+        .background(WindowChrome(close: windowClosed, layout: stage.layout, settled: settled))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            assistant.close()
+        }
+        .ignoresSafeArea()
+        // The window takes its limits from these: fixed while setup shows, the app's minimum
+        // after, and loose while the frame animates between them.
+        .frame(minWidth: stage == .app ? Self.appMinimum.width : Self.setupSize.width,
+               maxWidth: stage == .setup ? Self.setupSize.width : .infinity,
+               minHeight: stage == .app ? Self.appMinimum.height : Self.setupSize.height,
+               maxHeight: stage == .setup ? Self.setupSize.height : .infinity)
+        .onChange(of: app.showsSetup) { _, setup in travel(toSetup: setup) }
+        .onChange(of: navigation.setupRequested, initial: true) {
+            guard navigation.setupRequested else { return }
+            navigation.setupRequested = false
+            navigation.searchOpen = false
+            navigation.settingsOpen = false
+            app.openSetup()
+        }
+        .onAppear {
+            app.meetings.meLabel = Copy.presentationLabels.me
+            app.dashboard.meLabel = Copy.presentationLabels.me
+        }
+        .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
+            guard let question = MainNavigation.shared.assistantQuestion else { return }
+            MainNavigation.shared.assistantQuestion = nil
+            assistant.handoff(question)
+            show(.meetings)
+        }
+        .onChange(of: app.capture.state.isCapturing) { _, capturing in
+            if !capturing { navigation.liveOpen = false }
+        }
+        .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
+            guard let request else { return }
+            show(request.section, meeting: request.meeting, utterance: request.utterance)
+            MainNavigation.shared.request = nil
+        }
+    }
+
+    /// The side arriving rises 6 pt as it fades in; the side leaving only fades. Reduce Motion: fades.
+    private var arrival: AnyTransition {
+        .asymmetric(insertion: reduce ? .opacity : .opacity.combined(with: .offset(y: 6)), removal: .opacity)
+    }
+
+    /// Setup fades out (0.15 s) as the frame starts to change; the other side fades in over the
+    /// last 0.25 s of the frame's 0.45 s. Reduce Motion: the frame jumps and the two cross-fade.
+    private func travel(toSetup: Bool) {
+        let target: WindowStage = toSetup ? .toSetup : .toApp
+        guard stage != (toSetup ? .setup : .app), stage != target else { return }
+        arriving = false
+        withAnimation(.easeOut(duration: 0.15)) { stage = target }
+        let delay = reduce ? 0 : Motion.windowDuration - 0.25
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard stage == target else { return }
+            withAnimation(.easeOut(duration: 0.25)) { arriving = true }
+        }
+    }
+
+    /// The frame reached `layout`; the window takes that side's limits from here.
+    private func settled(_ layout: WindowLayout) {
+        switch (stage, layout) {
+        case (.toApp, .app): stage = .app
+        case (.toSetup, .compact): stage = .setup
+        default: break
+        }
+    }
+
+    /// Closing the window leaves setup the user opened again; unfinished setup stays.
+    private func windowClosed() {
+        assistant.close()
+        app.closeSetup()
+    }
+
+    @ViewBuilder private var appContent: some View {
+        let navigation = MainNavigation.shared
         Group {
-            if app.needsOnboarding {
-                SetupGate()
-            } else {
             HStack(spacing: 0) {
                 sidebar
                 GeometryReader { proxy in
@@ -135,7 +241,6 @@ struct MainWindow: View {
             .accessibilityHidden(vocabularyEditor != nil)
             .overlay { vocabularyDialog }
             .overlay { settings(isOpen: navigation.settingsOpen) }
-            }
         }
         .disabled(navigation.searchOpen)
         .accessibilityHidden(navigation.searchOpen)
@@ -143,32 +248,6 @@ struct MainWindow: View {
             SearchPaletteOverlay(app: app, isOpen: navigation.searchOpen) {
                 navigation.searchOpen = false
             }
-        }
-        .foregroundStyle(Palette.text)
-        .font(Typo.body)
-        .background(WindowChrome(close: { assistant.close() }))
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            assistant.close()
-        }
-        .ignoresSafeArea()
-        .frame(minWidth: 820, minHeight: 540)
-        .onAppear {
-            app.meetings.meLabel = Copy.presentationLabels.me
-            app.dashboard.meLabel = Copy.presentationLabels.me
-        }
-        .onChange(of: MainNavigation.shared.assistantQuestion, initial: true) {
-            guard let question = MainNavigation.shared.assistantQuestion else { return }
-            MainNavigation.shared.assistantQuestion = nil
-            assistant.handoff(question)
-            show(.meetings)
-        }
-        .onChange(of: app.capture.state.isCapturing) { _, capturing in
-            if !capturing { navigation.liveOpen = false }
-        }
-        .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
-            guard let request else { return }
-            show(request.section, meeting: request.meeting, utterance: request.utterance)
-            MainNavigation.shared.request = nil
         }
     }
 
@@ -325,21 +404,6 @@ struct MainWindow: View {
     }
 }
 
-/// What the main window shows until setup is finished: nothing of the app, and the way into setup.
-struct SetupGate: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            Icon("microphone", size: 34).foregroundStyle(Palette.orange)
-            Text("Finish setting up mm2t").font(Typo.title)
-            Text("mm2t needs your permissions, your keys and a short reading in your own voice before it can take notes.")
-                .foregroundStyle(Palette.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
-            PillButton("Continue Setup", kind: .primary) { WindowOpener.open(WindowID.onboarding) }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.window)
-    }
-}
-
 struct SidebarRow: View {
     let item: SidebarItem
     let isSelected: Bool
@@ -374,14 +438,42 @@ struct SidebarRow: View {
     }
 }
 
-/// Lets the content run under the title bar so the sidebar reaches the top, and makes the empty
-/// background drag the window.
+/// What the main window shows: setup in a compact window, or the app, or the frame on its way
+/// from one to the other.
+enum WindowStage: Equatable {
+    case setup
+    case toApp
+    case app
+    case toSetup
+
+    var layout: WindowLayout {
+        switch self {
+        case .setup, .toSetup: .compact
+        case .app, .toApp: .app
+        }
+    }
+}
+
+/// The main window's frame: compact and centred for setup, or the app's own frame.
+enum WindowLayout: Equatable {
+    case compact
+    case app
+}
+
+/// Lets the content run under the title bar so the sidebar reaches the top, makes the empty
+/// background drag the window, and sizes the window for setup or the app.
 struct WindowChrome: NSViewRepresentable {
     let close: () -> Void
+    let layout: WindowLayout
+    /// Called once the frame has reached a new layout.
+    let settled: (WindowLayout) -> Void
 
     func makeNSView(context: Context) -> WindowHost {
         let view = WindowHost()
         view.close = close
+        view.settled = settled
+        view.animates = !context.environment.accessibilityReduceMotion
+        view.request(layout)
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             window.titlebarAppearsTransparent = true
@@ -402,18 +494,122 @@ struct WindowChrome: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: WindowHost, context: Context) { view.close = close }
+    func updateNSView(_ view: WindowHost, context: Context) {
+        view.close = close
+        view.settled = settled
+        view.animates = !context.environment.accessibilityReduceMotion
+        view.request(layout)
+    }
 
     final class WindowHost: NSView {
         var close: () -> Void = {}
+        var settled: (WindowLayout) -> Void = { _ in }
+        var animates = true
+        private var wanted = WindowLayout.app
+        private var applied: WindowLayout?
+        private var resizing = false
+
+        /// The app's frame is kept here, never through AppKit's frame autosave, so the compact
+        /// setup frame can never be saved as the app's.
+        private static let frameKey = "MainWindowFrame"
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             NotificationCenter.default.removeObserver(self)
             guard let window else { return }
-            NotificationCenter.default.addObserver(self, selector: #selector(windowClosed),
-                name: NSWindow.willCloseNotification, object: window)
+            window.setFrameAutosaveName("")
+            let center = NotificationCenter.default
+            center.addObserver(self, selector: #selector(windowClosed), name: NSWindow.willCloseNotification, object: window)
+            center.addObserver(self, selector: #selector(frameChanged), name: NSWindow.didEndLiveResizeNotification, object: window)
+            center.addObserver(self, selector: #selector(frameChanged), name: NSWindow.didMoveNotification, object: window)
+            // Before the window first shows: a launch into setup opens compact, with no app-sized frame first.
+            applied = nil
+            apply()
         }
-        @objc private func windowClosed() { close() }
+
+        @objc private func windowClosed() {
+            saveAppFrame()
+            close()
+        }
+
+        @objc private func frameChanged() { saveAppFrame() }
+
+        func request(_ layout: WindowLayout) {
+            wanted = layout
+            apply()
+        }
+
+        private func apply() {
+            guard let window, applied != wanted else { return }
+            saveAppFrame()
+            let first = applied == nil
+            applied = wanted
+            let layout = wanted
+            switch layout {
+            case .compact:
+                move(window, to: compactFrame(window), animated: !first)
+            case .app:
+                if first {
+                    // A window opened on the app keeps the frame it was given, or the one saved.
+                    if let saved = savedAppFrame() { window.setFrame(saved, display: true) }
+                    saveAppFrame()
+                    DispatchQueue.main.async { self.settled(layout) }
+                } else {
+                    move(window, to: savedAppFrame() ?? defaultAppFrame(window), animated: true)
+                }
+            }
+        }
+
+        private func move(_ window: NSWindow, to frame: NSRect, animated: Bool) {
+            let layout = wanted
+            guard animated, animates else {
+                window.setFrame(frame, display: true)
+                DispatchQueue.main.async { self.settled(layout) }
+                return
+            }
+            resizing = true
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Motion.windowDuration
+                context.timingFunction = Motion.windowCurve
+                context.allowsImplicitAnimation = true
+                window.animator().setFrame(frame, display: true)
+            } completionHandler: {
+                MainActor.assumeIsolated {
+                    self.resizing = false
+                    self.settled(layout)
+                }
+            }
+        }
+
+        private func saveAppFrame() {
+            guard let window, applied == .app, !resizing, window.isVisible else { return }
+            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameKey)
+        }
+
+        /// The saved frame, if it still lands on a screen and fits the app.
+        private func savedAppFrame() -> NSRect? {
+            guard let text = UserDefaults.standard.string(forKey: Self.frameKey) else { return nil }
+            let frame = NSRectFromString(text)
+            guard frame.width >= MainWindow.appMinimum.width, frame.height >= MainWindow.appMinimum.height,
+                  NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return nil }
+            return frame
+        }
+
+        private func compactFrame(_ window: NSWindow) -> NSRect {
+            centred(window, size: MainWindow.setupSize)
+        }
+
+        private func defaultAppFrame(_ window: NSWindow) -> NSRect {
+            centred(window, size: CGSize(width: 980, height: 680))
+        }
+
+        /// A frame of `size`, centred on the window's screen. The content runs under the hidden
+        /// title bar, so the frame and the content are the same size.
+        private func centred(_ window: NSWindow, size: CGSize) -> NSRect {
+            let screen = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+            return NSRect(x: (screen.midX - size.width / 2).rounded(), y: (screen.midY - size.height / 2).rounded(),
+                          width: size.width, height: size.height)
+        }
     }
 }
 

@@ -7,13 +7,11 @@ import SwiftUI
 /// screens, one thing each. Order, gating and re-entry live in `OnboardingFlow`.
 struct OnboardingView: View {
     let app: AppController
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduce
     /// False until the flow has reopened at its first incomplete screen, so opening never travels.
     @State private var ready = false
     /// The screen being left. It stays drawn, as the same view, while it fades out and the next arrives.
     @State private var outgoing: Outgoing?
-    @State private var finishing = false
 
     private struct Outgoing: Equatable {
         let step: OnboardingStep
@@ -43,11 +41,10 @@ struct OnboardingView: View {
         .padding(.top, Self.indicatorTop + 6 + Self.titleGap)
         .padding(.bottom, Self.footerBottom + 30 + 24)
         .frame(width: 600, height: 580)
-        .opacity(finishing ? 0 : 1)
         .overlay(alignment: .top) {
             StepIndicator(current: flow.step).padding(.top, Self.indicatorTop)
         }
-        .overlay(alignment: .bottom) { footer(flow).opacity(finishing ? 0 : 1) }
+        .overlay(alignment: .bottom) { footer(flow) }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
         // The window takes its size from this view; it stays this size on every screen.
@@ -137,11 +134,10 @@ struct OnboardingView: View {
         }
     }
 
-    /// The content fades out, then the window closes.
+    /// The main window then grows from setup into the app.
     private func finish() {
         app.completeOnboarding()
         Task { await app.queue.retryAfterSetup() }
-        withAnimation(.easeOut(duration: 0.18)) { finishing = true } completion: { dismiss() }
     }
 
     // MARK: Travel

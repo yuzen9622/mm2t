@@ -5,7 +5,6 @@ import SwiftUI
 
 struct AssistantCanvas: View {
     let model: AssistantModel
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         FadingScrollView(ground: Palette.window) {
@@ -14,7 +13,7 @@ struct AssistantCanvas: View {
                 ForEach(model.turns) { turn in
                     AssistantTurnView(model: model, turn: turn, isLast: turn.id == model.turns.last?.id,
                         toggle: { model.toggleActivity(turn.id) }, retry: { model.retry() },
-                        setUp: { openWindow(id: WindowID.onboarding) })
+                        setUp: { MainNavigation.shared.openSetup() })
                 }
             }
             .frame(maxWidth: 680, alignment: .leading)

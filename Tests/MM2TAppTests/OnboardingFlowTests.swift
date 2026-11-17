@@ -362,3 +362,66 @@ import Testing
         #expect(flow.modelsReady && flow.modelProgress == 1)
     }
 }
+
+@MainActor
+@Suite struct SetupInTheMainWindowTests {
+    @Test func aFirstRunShowsSetupFromTheStart() throws {
+        let world = try World()
+        #expect(world.app.showsSetup, "known before the voiceprints are read")
+    }
+
+    @Test func aFinishedSetupShowsTheAppBeforeAndAfterTheVoiceprintsAreRead() async throws {
+        let world = try World()
+        world.app.settings.settings.hasCompletedOnboarding = true
+        #expect(!world.app.showsSetup, "no flash of setup while the voiceprints load")
+        try await world.app.voiceprints.enrollUser(name: "我", embeddings: [Embedding([0, 1, 0])])
+        await world.app.enrollment.refresh()
+        #expect(!world.app.showsSetup)
+    }
+
+    @Test func aMissingVoiceBringsSetupBackOnceKnown() async throws {
+        let world = try World()
+        world.app.settings.settings.hasCompletedOnboarding = true
+        world.catalog.translationDownloaded.set(true)
+        world.app.setup.refresh()
+        await world.app.enrollment.refresh()
+        #expect(world.app.showsSetup)
+        #expect(world.app.onboarding.firstIncompleteStep == .voice)
+    }
+
+    @Test func finishingLeavesSetupForTheApp() async throws {
+        let world = try World()
+        try await world.app.voiceprints.enrollUser(name: "我", embeddings: [Embedding([0, 1, 0])])
+        await world.app.enrollment.refresh()
+        #expect(world.app.showsSetup)
+        world.app.completeOnboarding()
+        #expect(!world.app.showsSetup)
+    }
+
+    @Test func setupOpenedAgainShowsUntilFinishedOrClosed() async throws {
+        let world = try World()
+        world.app.settings.settings.hasCompletedOnboarding = true
+        try await world.app.voiceprints.enrollUser(name: "我", embeddings: [Embedding([0, 1, 0])])
+        await world.app.enrollment.refresh()
+        world.catalog.modelsDownloaded.set(false)
+        world.app.setup.refresh()
+
+        world.app.openSetup()
+        #expect(world.app.showsSetup)
+        #expect(world.app.onboarding.step == .models, "at the first incomplete step")
+        world.app.closeSetup()
+        #expect(!world.app.showsSetup)
+
+        world.app.openSetup()
+        world.app.completeOnboarding()
+        #expect(!world.app.showsSetup)
+        #expect(!world.app.onboarding.isOpenedAgain)
+    }
+
+    @Test func closingCannotSkipUnfinishedSetup() throws {
+        let world = try World()
+        world.app.openSetup()
+        world.app.closeSetup()
+        #expect(world.app.showsSetup)
+    }
+}

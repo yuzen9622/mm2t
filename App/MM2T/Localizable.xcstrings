@@ -1159,16 +1159,6 @@
         }
       }
     },
-    "Finish setting up mm2t": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "完成 mm2t 的設定"
-          }
-        }
-      }
-    },
     "Gemini API key": {
       "localizations": {
         "zh-Hant": {
@@ -2519,16 +2509,6 @@
         }
       }
     },
-    "Set up mm2t": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "設定 mm2t"
-          }
-        }
-      }
-    },
     "Settings": {
       "localizations": {
         "zh-Hant": {
@@ -3395,16 +3375,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "mm2t 需要先取得權限與 API 金鑰，才能開始記錄會議。"
-          }
-        }
-      }
-    },
-    "mm2t needs your permissions, your keys and a short reading in your own voice before it can take notes.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開始記錄會議之前，mm2t 需要你授權、填入金鑰，並用自己的聲音唸一小段話。"
           }
         }
       }

@@ -74,6 +74,11 @@ enum Motion {
     static let page = Animation.spring(response: 0.44, dampingFraction: 0.88)
     /// Content appearing or leaving in place: banners, tooltips, capsule states.
     static let reveal = Animation.spring(response: 0.30, dampingFraction: 0.84)
+
+    /// The main window growing from setup into the app, or shrinking back. AppKit animates a
+    /// window's frame, so this is a duration and a curve close to `page`'s spring.
+    static let windowDuration: TimeInterval = 0.45
+    static var windowCurve: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.25, 0.9, 0.3, 1) }
 }
 
 extension View {
