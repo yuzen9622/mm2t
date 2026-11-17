@@ -106,9 +106,9 @@ LLM 位置設為雲端時使用。端點：`https://generativelanguage.googleapi
 
 ### 即時字幕翻譯（預設關閉，在 Mac 上執行）
 
-在設定中為即時字幕選擇「翻譯字幕」語言（繁體中文或 English）時使用。翻譯以 Mozilla 的 Bergamot 引擎在你的 Mac 上執行，字幕文字不會為了翻譯送到任何服務。翻譯結果只在錄音期間顯示，不寫入磁碟，停止錄音後即清除。
+在設定中為即時字幕選擇「翻譯字幕」語言（繁體中文、简体中文、한국어、日本語、English、Deutsch 或 Čeština）時使用。翻譯以 Mozilla 的 Bergamot 引擎在你的 Mac 上執行，字幕文字不會為了翻譯送到任何服務。翻譯結果只在錄音期間顯示，不寫入磁碟，停止錄音後即清除。
 
-第一次開啟時，本 App 會從 Mozilla 的 Google Cloud Storage（`storage.googleapis.com`）下載英翻繁中與繁中翻英兩組翻譯模型，約 74 MB，存放在 `Models/translation`。這個請求不含任何會議資料。
+第一次選擇某個語言時，本 App 只會從 Mozilla 的 Google Cloud Storage（`storage.googleapis.com`）下載該語言需要的翻譯模型（每組約 26 到 38 MB；韓文、日文、德文與捷克文另需中翻英模型，中文先譯成英文再譯成該語言），存放在 `Models/translation`。改選其他語言不會刪除已下載的模型。這個請求不含任何會議資料。
 
 ### 軟體更新（Sparkle 與 GitHub）
 

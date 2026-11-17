@@ -1,6 +1,6 @@
 # Third-party notices
 
-mm2t separates speakers on the Mac with the software and models below. The SDK is linked into the app. The models are not shipped with the app; it downloads them from Hugging Face on first use into `~/Library/Application Support/mm2t/Models`. The live caption translation models come from Mozilla's Google Cloud Storage the same way, the first time translation is turned on.
+mm2t separates speakers on the Mac with the software and models below. The SDK is linked into the app. The models are not shipped with the app; it downloads them from Hugging Face on first use into `~/Library/Application Support/mm2t/Models`. The live caption translation models come from Mozilla's Google Cloud Storage the same way, the first time a caption language is chosen.
 
 ## Software
 
@@ -868,9 +868,9 @@ It links these components:
 - License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
 - Original model by Alibaba Cloud (Qwen team). GGUF quantization by Unsloth.
 
-### Firefox Translations models, English to Traditional Chinese and back (live caption translation, optional download)
+### Firefox Translations models (live caption translation, optional download)
 
-- Source: Mozilla's model registry, https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json (`en-zh_hant` and `zh_hant-en`, `base-memory` release models; exact files and hashes pinned in `Sources/MM2TLocal/TranslationModels.swift`)
+- Source: Mozilla's model registry, https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json (`en-zh_hant`, `zh_hant-en`, `en-zh`, `en-ko`, `en-ja`, `en-de` and `en-cs`, `base-memory` release models; only the ones the chosen caption language needs are downloaded; exact files and hashes pinned in `Sources/MM2TLocal/TranslationModels.swift`)
 - License: Mozilla Public License 2.0, https://mozilla.org/MPL/2.0/ ("The model files are distributed under the MPL 2.0 license", https://github.com/mozilla/firefox-translations-models)
 - Trained by Mozilla with https://github.com/mozilla/translations. Not modified by mm2t.
 
