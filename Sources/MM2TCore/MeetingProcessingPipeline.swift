@@ -380,8 +380,8 @@ public struct MeetingProcessingPipeline: Sendable {
             separated = await separation(of: remote, track: library.audioURL(meeting, track: track))
         }
         let channel: VoiceChannel = track == .me ? .room : .call
-        let ids = apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
-                        to: &meeting)
+        apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
+              brief: separated.brief.mapValues { $0.map { $0.heard(on: channel) } }, to: &meeting)
         let attribution = separated.attribution
         meeting.separatedTrack = track == .me ? .me : nil
         meeting.mergedSpeakers = [:]
@@ -401,11 +401,7 @@ public struct MeetingProcessingPipeline: Sendable {
                 await separateMic(&meeting)
             }
         }
-        if track == .me {
-            let brief = Dictionary(separated.brief.compactMap { cluster, vectors in ids[cluster].map { ($0, vectors) } },
-                                   uniquingKeysWith: +)
-            await claimUser(in: &meeting, brief: brief)
-        }
+        if track == .me { await claimUser(in: &meeting) }
     }
 
     /// On a call the mic is the user's own, but in a shared room it hears the people next to them
@@ -461,7 +457,8 @@ public struct MeetingProcessingPipeline: Sendable {
             let id = SpeakerID.remote(meeting.speakers.count + 1)
             meeting.speakers.append(RemoteSpeaker(
                 id: id, label: Self.label(meeting.speakers.count), person: nil,
-                embeddings: (heard.embeddings[cluster] ?? []).map { $0.heard(on: .room) }))
+                embeddings: (heard.embeddings[cluster] ?? []).map { $0.heard(on: .room) },
+                briefEmbeddings: heard.briefEmbeddings[cluster]?.map { $0.heard(on: .room) }))
             others[cluster] = id
         }
         guard !others.isEmpty else { return }
@@ -502,13 +499,12 @@ public struct MeetingProcessingPipeline: Sendable {
 
     /// In a meeting recorded in the room, the speaker who sounds most like the enrolled user becomes
     /// `.me`, as the mic track is on a call. Below the user threshold nobody is. A speaker who
-    /// said too little to store a voiceprint is judged by their `brief` vectors: telling the user
+    /// said too little to store a voiceprint is judged by their brief vectors: telling the user
     /// apart needs less than naming someone, and short meetings are mostly short turns.
-    private func claimUser(in meeting: inout Meeting, brief: [SpeakerID: [Embedding]]) async {
+    private func claimUser(in meeting: inout Meeting) async {
         var best: (id: SpeakerID, similarity: Double)?
         for speaker in meeting.speakers {
-            let vectors = speaker.embeddings.isEmpty ? brief[speaker.id] ?? [] : speaker.embeddings
-            guard let similarity = await voiceprints.similarityToUser(vectors),
+            guard let similarity = await voiceprints.similarityToUser(speaker.learnableEmbeddings),
                   similarity >= thresholds.user, similarity > (best?.similarity ?? -.infinity) else { continue }
             best = (speaker.id, similarity)
         }
@@ -517,7 +513,8 @@ public struct MeetingProcessingPipeline: Sendable {
             $0.speaker == mine ? SpeakerSegment(speaker: .me, range: $0.range) : $0
         }
         meeting.speakers = meeting.speakers.filter { $0.id != mine }.enumerated().map { index, speaker in
-            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
+                          briefEmbeddings: speaker.briefEmbeddings)
         }
     }
 
@@ -554,13 +551,14 @@ public struct MeetingProcessingPipeline: Sendable {
         meeting.micSegments = meeting.micSegments?.filter { !silent.contains($0.speaker) }
         meeting.speakers = meeting.speakers.filter { !silent.contains($0.id) }
             .enumerated().map { index, speaker in
-                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
+                              briefEmbeddings: speaker.briefEmbeddings)
             }
     }
 
     @discardableResult
     private func apply(_ segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]],
-                       to meeting: inout Meeting) -> [ClusterID: SpeakerID] {
+                       brief: [ClusterID: [Embedding]], to meeting: inout Meeting) {
         var order: [ClusterID] = []
         for segment in segments.sorted(by: { $0.range.start < $1.range.start })
         where !order.contains(segment.cluster) {
@@ -569,10 +567,9 @@ public struct MeetingProcessingPipeline: Sendable {
         let ids = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, SpeakerID.remote($0 + 1)) })
         meeting.speakers = order.enumerated().map { index, cluster in
             RemoteSpeaker(id: ids[cluster]!, label: Self.label(index), person: nil,
-                          embeddings: embeddings[cluster] ?? [])
+                          embeddings: embeddings[cluster] ?? [], briefEmbeddings: brief[cluster])
         }
         meeting.remoteSegments = segments.map { SpeakerSegment(speaker: ids[$0.cluster]!, range: $0.range) }
-        return ids
     }
 
     /// One segment per run of consecutive words sharing a label.

@@ -32,6 +32,25 @@ import Testing
         #expect(meeting.speaker(SpeakerID("r1"))?.person == nil, "too little speech to name Alice by")
     }
 
+    @Test func namingABriefRoomVoiceByHandTeachesItAsHeardInTheRoom() async throws {
+        let script = Script.diarization, c1 = ClusterID("c1")
+        let world = try await World(diarization: Diarization(
+            segments: script.segments, overlaps: script.overlaps,
+            embeddings: script.embeddings.filter { $0.key != c1 }, briefEmbeddings: [c1: script.embeddings[c1]!]))
+        world.cloud.roomOnly.update { $0 = true }
+        let meeting = try await world.processed()
+        let r1 = SpeakerID("r1")
+        #expect(meeting.speaker(r1)?.embeddings == [], "too little speech to match by")
+
+        _ = try await world.editing.rename(r1, in: meeting.id, to: .newPerson(name: "建維"))
+        let person = try #require(await world.voiceprints.person(named: "建維"))
+        #expect(person.embeddings.map(\.values) == script.embeddings[c1]!.map(\.values))
+        #expect(person.channels == [.room])
+
+        _ = try await world.editing.rename(r1, in: meeting.id, to: .existing(world.aliceID))
+        #expect(await world.voiceprints.person(person.id)?.embeddings == [], "a corrected name takes the voice back")
+    }
+
     @Test func vectorsRememberWhetherTheyWereHeardInTheRoomOrOnACall() async throws {
         let world = try await World()
         let call = try await world.processed()

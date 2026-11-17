@@ -151,10 +151,11 @@ public final class MeetingDetailModel {
                 }
             }
             let stored = people.first { $0.id == speaker.person }?.embeddings
-            let learned = speaker.embeddings.filter { stored?.contains($0) == true }.count
+            let voice = speaker.learnableEmbeddings
+            let learned = voice.filter { stored?.contains($0) == true }.count
             return SpeakerRow(id: speaker.id, label: speaker.label, displayName: presentation.speakerName(speaker.id),
-                              person: speaker.person, suggestion: suggestion, hasVoice: !speaker.embeddings.isEmpty,
-                              canLearnVoice: stored != nil && learned < speaker.embeddings.count, canForgetVoice: learned > 0)
+                              person: speaker.person, suggestion: suggestion, hasVoice: !voice.isEmpty,
+                              canLearnVoice: stored != nil && learned < voice.count, canForgetVoice: learned > 0)
         }
     }
 

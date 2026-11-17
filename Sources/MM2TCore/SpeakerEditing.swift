@@ -41,7 +41,7 @@ public struct SpeakerEditing: Sendable {
         var meeting = try await editableMeeting(meetingID)
         let index = try speakerIndex(speaker, in: meeting)
         let previous = meeting.speakers[index].person
-        let embeddings = learn ? meeting.speakers[index].embeddings : []
+        let embeddings = learn ? meeting.speakers[index].learnableEmbeddings : []
         let person: PersonID
         switch target {
         case .existing(let id):
@@ -51,7 +51,7 @@ public struct SpeakerEditing: Sendable {
             person = try await voiceprints.addPerson(name: name, embeddings: embeddings)
         }
         if let previous, previous != person {
-            try await voiceprints.removeEmbeddings(meeting.speakers[index].embeddings, from: previous)
+            try await voiceprints.removeEmbeddings(meeting.speakers[index].learnableEmbeddings, from: previous)
         }
         let id = meeting.speakers[index].id
         meeting.speakers[index].person = person
@@ -106,6 +106,8 @@ public struct SpeakerEditing: Sendable {
 
         meeting.speakers[targetIndex].person = person
         meeting.speakers[targetIndex].embeddings = embeddings
+        let brief = (into.briefEmbeddings ?? []) + (from.briefEmbeddings ?? []).filter { !(into.briefEmbeddings ?? []).contains($0) }
+        meeting.speakers[targetIndex].briefEmbeddings = brief.isEmpty ? nil : brief
         meeting.speakers.remove(at: sourceIndex)
         meeting.mergedSpeakers[from.id] = into.id
         for index in meeting.utterances.indices where meeting.utterances[index].speaker == from.id {
@@ -137,7 +139,7 @@ public struct SpeakerEditing: Sendable {
         let claimed = meeting.speakers[index]
         guard meeting.separatedTrack == .me || meeting.micSegments?.contains(where: { $0.speaker == claimed.id }) == true
         else { throw SpeakerEditError.notHeardOnMic(claimed.id) }
-        try await voiceprints.addUserEmbeddings(claimed.embeddings)
+        try await voiceprints.addUserEmbeddings(claimed.learnableEmbeddings)
 
         meeting.speakers.remove(at: index)
         meeting.mergedSpeakers[claimed.id] = .me
@@ -171,7 +173,7 @@ public struct SpeakerEditing: Sendable {
         let meeting = try await editableMeeting(meetingID)
         let named = meeting.speakers[try speakerIndex(speaker, in: meeting)]
         guard let person = named.person else { throw SpeakerEditError.unnamed(named.id) }
-        return (person, named.embeddings)
+        return (person, named.learnableEmbeddings)
     }
 
     private func speakerIndex(_ speaker: SpeakerID, in meeting: Meeting) throws -> Int {

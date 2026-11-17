@@ -115,6 +115,12 @@ public struct RemoteSpeaker: Codable, Hashable, Sendable, Identifiable {
     public let label: String
     public internal(set) var person: PersonID?
     public internal(set) var embeddings: [Embedding]
+    /// Vectors of a speaker with too little clean speech for `embeddings`. Never matched against
+    /// voiceprints, but naming the speaker by hand teaches them. nil in meetings processed before.
+    public internal(set) var briefEmbeddings: [Embedding]?
+
+    /// What naming this speaker teaches their person's voiceprint.
+    public var learnableEmbeddings: [Embedding] { embeddings.isEmpty ? briefEmbeddings ?? [] : embeddings }
 }
 
 /// How remote speech was split into speakers and what that split can tell the UI.
