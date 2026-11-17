@@ -34,9 +34,12 @@ let package = Package(
             name: "llama",
             url: "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-xcframework.zip",
             checksum: "22644a57aad53f4a0a440860607c6d2f1da9e683f78cf03266569c0030d2dbd7"),
-        // Mozilla's Bergamot translation engine behind a small C API, built by App/Tools/build-bergamot.sh.
-        // Local and git-ignored until the binary is hosted: a fresh clone runs that script first.
-        .binaryTarget(name: "Bergamot", path: "Vendor/Bergamot.xcframework"),
+        // Mozilla's Bergamot translation engine behind a small C API, built by App/Tools/build-bergamot.sh
+        // and published as a release asset of this repository.
+        .binaryTarget(
+            name: "Bergamot",
+            url: "https://github.com/yuzen9622/mm2t/releases/download/bergamot-0.4.5-9271618/Bergamot.xcframework.zip",
+            checksum: "97b1bb70599e7fab826cdb0548188be00b601258b896d3848f144d8b2d298d0b"),
         .target(name: "MM2TWidgetData"),
         .target(name: "MM2TApp", dependencies: ["MM2TCore", "MM2TProviders", "MM2TSystem", "MM2TDiarization", "MM2TLocal", "MM2TWidgetData"]),
         .testTarget(name: "MM2TCoreTests", dependencies: ["MM2TCore"]),

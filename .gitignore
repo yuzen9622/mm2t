@@ -22,5 +22,5 @@ generated_images/
 promo/
 /version-video/
 
-# Built locally by App/Tools/build-bergamot.sh; not hosted yet.
+# Output of App/Tools/build-bergamot.sh; the package downloads the published build instead.
 /Vendor/Bergamot.xcframework/
