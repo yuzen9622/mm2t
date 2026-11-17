@@ -83,7 +83,9 @@ export function NativeWaveform({
   );
 }
 
-export function RecordingDemo() {
+/** A resting speech shape for the capsule before the visitor turns the microphone on. */
+const RESTING = [0.85, 0.62, 0.9, 0.48, 0.7, 0.4];
+export function RecordingDemo({ className = "" }: { className?: string }) {
   const { t } = useCopy();
   const mic = useMicrophoneWaveform();
   const listening = mic.status === "listening";
@@ -91,9 +93,9 @@ export function RecordingDemo() {
   const action = requesting ? "取消麥克風請求" : listening ? "暫停麥克風" : "開啟麥克風試試";
   const time = `${String(Math.floor(mic.seconds / 60)).padStart(2, "0")}:${String(mic.seconds % 60).padStart(2, "0")}`;
   return (
-    <div className="mb-6 flex flex-col items-center">
+    <div className={`flex flex-col items-start ${className}`}>
       <div
-        className="flex items-center gap-3 rounded-full bg-black px-3 py-2 text-white shadow-lg shadow-black/5 md:px-4 md:py-3"
+        className="flex items-center gap-3 rounded-full bg-black py-2 pr-2 pl-2 text-white shadow-[0_12px_32px_-12px_#00000059]"
         role="group"
         aria-label={t("錄音膠囊互動示範")}
         aria-busy={requesting}
@@ -110,8 +112,8 @@ export function RecordingDemo() {
         >
           <Icon name={requesting ? "close" : listening ? "pause" : "mic"} size={16} />
         </Button>
-        <NativeWaveform samples={mic.history} paused={!listening} />
-        <time className="text-sm tabular-nums">{time}</time>
+        <NativeWaveform samples={listening ? mic.history : RESTING} className={listening ? "" : "opacity-60"} />
+        <time className="font-mono text-sm tabular-nums">{time}</time>
         <Icon name="star" size={20} />
         <Button
           type="button"
@@ -126,7 +128,7 @@ export function RecordingDemo() {
           <Icon name="check" size={16} />
         </Button>
       </div>
-      <p role="status" className={mic.error ? "mt-3 max-w-xs text-center text-xs text-muted-foreground" : "sr-only"}>
+      <p role="status" className={mic.error ? "mt-3 max-w-xs rounded-lg bg-background px-3 py-2 text-xs text-foreground" : "sr-only"}>
         {mic.error
           ? t(mic.error === "permission" ? "請允許麥克風權限，再點一下重試。" : "無法使用麥克風，請確認裝置與瀏覽器設定後重試。")
           : t(requesting ? "等待麥克風權限" : listening ? "麥克風已開啟，聲音僅在此裝置分析，不會儲存或上傳。" : "點擊麥克風，讓波形跟著你的聲音。")}

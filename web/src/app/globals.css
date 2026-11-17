@@ -20,16 +20,22 @@
   --secondary: #eeede8;
   --secondary-foreground: #1c1c1e;
   --muted: #eeede8;
-  --muted-foreground: #6c6c70;
+  --muted-foreground: #626266;
   --accent: #eee5dc;
   --accent-foreground: #1c1c1e;
   --border: #1c1c1e16;
   --ring: #b34c00;
   --radius: 1rem;
+  /* The dark stage the recording capsule floods into, one step under the App's dark window. */
+  --stage: #111113;
+  --stage-ink: #f5f5f7;
+  --stage-muted: #a1a1a6;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
 }
 @theme inline {
   --font-sans: "Geist", "PingFang TC", "Microsoft JhengHei", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, monospace;
+  --font-mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -44,6 +50,9 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-stage: var(--stage);
+  --color-stage-ink: var(--stage-ink);
+  --color-stage-muted: var(--stage-muted);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -70,7 +79,8 @@
 }
 @layer base {
   html {
-    @apply relative scroll-smooth scroll-pt-28;
+    scroll-behavior: auto;
+    scroll-padding-top: 0;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
@@ -90,17 +100,119 @@
   button:focus-visible,
   [tabindex]:focus-visible {
     outline: 2px solid var(--ring);
-    outline-offset: 5px;
+    outline-offset: 4px;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
+
+/* The rebuilt App: Palette from App/MM2T/Design/Tokens.swift, light and dark. */
+.app-ui {
+  --w-bg: #f6f5f1;
+  --w-side: #eeede8;
+  --w-card: #ffffff;
+  --w-field: #edece7;
+  --w-tonal: #0000000b;
+  --w-text: #1c1c1e;
+  --w-secondary: #6c6c70;
+  --w-muted: #a3a3a8;
+  --w-orange: #f0700f;
+  --w-orange-soft: #f0700f24;
+  --w-hairline: #1c1c1e10;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Geist", sans-serif;
+  box-shadow:
+    0 0 0 1px #1c1c1e12,
+    0 30px 60px -30px #1c1c1e33;
+}
+.app-ui[data-theme="dark"] {
+  --w-bg: #1b1b1d;
+  --w-side: #151516;
+  --w-card: #262628;
+  --w-field: #303033;
+  --w-tonal: #ffffff0f;
+  --w-text: #f5f5f7;
+  --w-secondary: #a1a1a6;
+  --w-muted: #6e6e73;
+  --w-hairline: #ffffff14;
+  box-shadow: 0 0 0 1px #ffffff14;
+}
+
+/*
+ * Karaoke, as LyricTranscript.swift paints it: each character waits at 34% ink, 0.7pt blur and 2pt
+ * under its baseline, and rises into place as it is said. `--k` is how far the reading has come.
+ */
+.kc {
+  --p: clamp(0, calc(var(--k, 0) - var(--i)), 1);
+  display: inline-block;
+  white-space: pre;
+  opacity: calc(var(--faint, 0.34) + (1 - var(--faint, 0.34)) * var(--p));
+  filter: blur(calc((1 - var(--p)) * 0.7px));
+  transform: translateY(calc((1 - var(--p)) * 2px));
+}
+.kc-done .kc {
+  --p: 1;
+}
+/* The accent word never waits faint: it stands in ink and turns to the accent as it is read. */
+.kc-accent {
+  --faint: 1;
+}
+.kc-accent .kc {
+  color: color-mix(in srgb, var(--ring) calc(var(--p) * 100%), currentColor);
+}
+
+/* Buttons: step up 1px on hover, sink and shrink a little on press (motion.md). */
+.btn {
+  transition:
+    background-color 150ms var(--ease),
+    color 150ms var(--ease),
+    transform 150ms var(--ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover {
+    transform: translateY(-1px);
   }
+}
+.btn:active {
+  transform: translateY(1px) scale(0.985);
+  transition-duration: 90ms;
+}
+.link-draw {
+  background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+  transition: background-size 150ms var(--ease);
+}
+.link-draw:hover,
+.link-draw:focus-visible {
+  background-size: 100% 1px;
+}
+
+/* The hero enters once on load: lines rise, then the lead and actions, then the picture settles. */
+.m-enter [data-enter] .enter {
+  animation: enter-rise 900ms var(--ease-enter) both;
+  animation-delay: calc(var(--d, 0) * 90ms + 80ms);
+}
+.m-enter [data-enter] .enter-art {
+  animation: enter-art 1100ms var(--ease-enter) 260ms both;
+}
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+@keyframes enter-art {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
+  }
+  .kc {
+    --p: 1;
   }
 }

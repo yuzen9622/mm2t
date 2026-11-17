@@ -1,128 +1,88 @@
 "use client";
-import { useRef } from "react";
-import Image from "next/image";
-import { motion, useScroll, useSpring, useTransform } from "motion/react";
-import { useMotionScene } from "@/hooks/use-motion-scene";
+import type { CSSProperties } from "react";
 import { useCopy } from "@/components/i18n";
-import { HeroWordmark, useIntroReady } from "@/components/brand-intro";
 import { RecordingDemo } from "@/components/native-waveform";
-import { Icon } from "@/components/icon";
-import { DownloadButton, container, frame } from "./shared";
+import { AppWindow, MeetingHeader, SpeakerPanel, StaticTabs, TranscriptRows } from "@/components/app-ui";
+import { DownloadButton, wrap } from "./shared";
 import { VideoButton } from "./video-dialog";
+
+const d = (n: number) => ({ "--d": n }) as CSSProperties;
+
 export function Hero() {
-  const { t, locale, media } = useCopy();
-  const ready = useIntroReady();
-  const enabled = useMotionScene();
-  const hero = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: hero,
-    offset: ["start start", "end start"],
-  });
-  const progress = useSpring(scrollYProgress, { stiffness: 110, damping: 28 });
-  const y = useTransform(progress, [0, 1], [0, 150]);
-  const rotateX = useTransform(progress, [0, 1], [0, 16]);
-  const rotateZ = useTransform(progress, [0, 1], [0, -7]);
-  const scale = useTransform(progress, [0, 1], [1, 0.86]);
+  const { t, locale } = useCopy();
   return (
     <section
-      ref={hero}
-      className="relative z-55 flex min-h-svh flex-col overflow-clip pt-32 pb-8 md:pt-40 xl:min-h-[800px]"
+      id="top"
+      data-enter=""
       aria-labelledby="hero-title"
+      className="hero relative h-svh overflow-hidden pt-24 pb-6 lg:pt-[120px] lg:pb-16"
     >
-      <div
-        className={`${container} grid flex-1 items-center gap-12 pb-14 perspective-[1400px] lg:grid-cols-[.8fr_1.2fr] lg:gap-10`}
-      >
-        <div className="relative z-1">
-          <HeroWordmark />
-          <motion.div
-            data-intro-content=""
-            initial={false}
-            animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 22 }}
-            transition={{ delay: 0.3, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      <div className={`${wrap} h-full`}>
+       <div className="hero-text grid h-full grid-rows-[auto_1fr] gap-8 lg:grid-cols-12 lg:grid-rows-1 lg:gap-6">
+        <div className="flex flex-col lg:col-span-5">
+          <h1
+            id="hero-title"
+            className="text-[38px] leading-[1.08] font-medium tracking-[-0.02em] md:text-[52px] lg:text-[64px] lg:leading-[1.04]"
           >
-            <div className="mb-6 flex items-center gap-3 text-[10px] tracking-wider text-muted-foreground md:text-xs">
-              <span className="size-1.5 rounded-full bg-primary ring-4 ring-primary/10" />
-              {t("為 macOS 而生的開源工具")}
-            </div>
-            <h1
-              id="hero-title"
-              className="text-[clamp(43px,5.1vw,78px)] leading-[1.15] font-medium tracking-[-.065em]"
-            >
-              {locale === "en" ? (
-                <>
-                  Meeting notes.
-                  <br />
-                  Made for Mac<span className="text-primary">.</span>
-                </>
-              ) : (
-                <>
-                  {t("Mac 上的")}
-                  <br className="hidden md:block" />
-                  {t("會議記錄，")}
-                  <br />
-                  <span className="whitespace-nowrap">
-                    {t("交給")} mm2t<span className="text-primary">。</span>
-                  </span>
-                </>
-              )}
-            </h1>
-            <p className="my-7 max-w-md text-base leading-8 text-muted-foreground md:text-lg">
-              {t("開會時專心說話。")}
-              <br />
-              {t("從錄音、辨識說話者，到逐字稿與摘要，")}
-              {t("mm2t 替你接著整理。")}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <DownloadButton />
-              <VideoButton />
-            </div>
-            <p className="mt-5 flex items-center gap-3 text-xs text-muted-foreground">
-              {t("免費開放原始碼")}
-              <span>·</span>
-              {t("macOS 14.2 以上")}
-            </p>
-          </motion.div>
-        </div>
-        <motion.div
-          data-intro-content=""
-          initial={false}
-          animate={{ opacity: ready ? 1 : 0 }}
-          transition={{ delay: 0.45, duration: 0.8 }}
-          className="mx-auto w-full max-w-[850px] min-w-0 origin-[center_35%]"
-          style={enabled ? { y, rotateX, rotateZ, scale } : undefined}
-        >
-          <RecordingDemo />
-          <div className={frame}>
-            <Image
-              src={media("app/transcript.webp")}
-              width={1600}
-              height={941}
-              alt={t("mm2t 會議逐字稿介面預覽，顯示不同說話者與時間戳記")}
-              sizes="(max-width: 1023px) 90vw, 60vw"
-              priority
-              className="h-auto w-full"
-            />
+            {locale === "en" ? (
+              <>
+                <span className="enter block" style={d(0)}>Meeting notes</span>
+                <span className="enter block" style={d(1)}>for Mac that</span>
+                <span className="enter block" style={d(1)}>know who spoke</span>
+              </>
+            ) : (
+              <>
+                <span className="enter block" style={d(0)}>Mac 會議記錄，</span>
+                <span className="enter block" style={d(1)}>認得每位說話者</span>
+              </>
+            )}
+          </h1>
+          <p
+            className="enter mt-5 max-w-[30em] text-base leading-[1.6] text-muted-foreground lg:mt-6 lg:text-xl lg:leading-[1.5]"
+            style={d(2)}
+          >
+            {t("直接錄下麥克風與會議 App 的聲音，不需要機器人進會議。會後在 Mac 上分出說話者，整理成逐字稿與摘要。")}
+          </p>
+          <div className="enter mt-6 flex flex-wrap items-center gap-2 lg:mt-8" style={d(3)}>
+            <DownloadButton size="lg" className="max-sm:w-full" />
+            <VideoButton />
           </div>
-        </motion.div>
-      </div>
-      <div
-        className={`${container} flex flex-wrap items-center gap-5 text-xs text-muted-foreground md:gap-8`}
-      >
-        <span>{t("融入你習慣的會議")}</span>
-        <div className="flex w-full justify-between gap-3 font-medium md:w-auto md:gap-7">
-          <span>Google Meet</span>
-          <span>Microsoft Teams</span>
-          <span>Zoom</span>
-          <span>Webex</span>
+          <p className="enter mt-5 text-sm text-muted-foreground lg:mt-6" style={d(4)}>
+            {t("免費開源 · macOS 14.2 以上")}
+          </p>
+          <div className="enter mt-auto hidden pt-10 lg:block" style={d(5)}>
+            <p className="text-sm text-muted-foreground">{t("錄得到這些會議 App")}</p>
+            <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[17px] font-medium">
+              {["Google Meet", "Microsoft Teams", "Zoom", "Webex"].map((app) => (
+                <li key={app}>{app}</li>
+              ))}
+            </ul>
+          </div>
         </div>
-        <a
-          href="#experience"
-          className="ml-auto hidden min-h-11 items-center gap-3 lg:flex"
-          aria-label={t("向下查看使用體驗")}
+        <div
+          className="enter-art relative min-h-[220px] overflow-hidden rounded-[20px] bg-[#e9e2d6] lg:col-span-6 lg:col-start-7"
+          data-visual=""
         >
-          {t("往下看看")}
-          <Icon name="arrow" size={17} />
-        </a>
+          {/* One soft light from the upper left, inside the sand ground. */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-[radial-gradient(90%_70%_at_18%_8%,#f4efe7_0%,#f4efe700_70%)]"
+          />
+          <AppWindow
+            sidebar={false}
+            className="absolute inset-x-4 top-4 h-[640px] [mask-image:linear-gradient(#000_55%,transparent_92%)] sm:inset-x-auto sm:left-10 sm:w-[calc(100%_-_40px_+_28px)] md:top-10 lg:top-16 lg:left-16 lg:h-[calc(100%_-_64px_+_28px)] lg:w-[calc(100%_-_64px_+_28px)] lg:[mask-image:none]"
+          >
+            <MeetingHeader tabs={<StaticTabs active="整理版逐字稿" />} />
+            <div className="flex gap-4 px-5 pt-5 pr-12">
+              <div className="min-w-0 flex-1">
+                <TranscriptRows mode="clean" />
+              </div>
+              <SpeakerPanel />
+            </div>
+          </AppWindow>
+          <RecordingDemo className="absolute bottom-8 left-10 hidden sm:flex lg:left-16" />
+        </div>
+       </div>
       </div>
     </section>
   );

@@ -1,120 +1,74 @@
 "use client";
-import Image from "next/image";
+import { useRef } from "react";
+import { useMotionValueEvent, useScroll } from "motion/react";
 import { useCopy } from "@/components/i18n";
-import { Icon } from "@/components/icon";
-import {
-  Reveal,
-  REPO,
-  container,
-  sectionPadding,
-  heading,
-  label,
-  textLink,
-} from "./shared";
+import { Icon, type IconName } from "@/components/icon";
+import { karaokeText } from "@/components/app-ui";
+import { cn } from "@/lib/utils";
+import { REPO, screen, wrap } from "./shared";
+
+const facts: { icon: IconName; text: string }[] = [
+  { icon: "key", text: "API 金鑰存在 macOS 鑰匙圈" },
+  { icon: "shield", text: "聲紋辨識在 Mac 本機完成" },
+  { icon: "video", text: "不錄螢幕，視窗也不會出現在螢幕分享" },
+];
+
+/**
+ * The dealt moment (word-highlight): the statement is read out in the App's karaoke as it crosses
+ * the middle of the screen, and runs back on the way up. Reduced motion shows it all in ink.
+ */
 export function Privacy() {
-  const { t } = useCopy();
+  const { t, locale } = useCopy();
+  const text = useRef<HTMLHeadingElement>(null);
+  const { scrollYProgress } = useScroll({ target: text, offset: ["start 0.85", "end 0.45"] });
+  const before = karaokeText(t("錄音、聲紋和會議紀錄都存在"), 0, locale);
+  const accent = karaokeText(t("這台 Mac"), before.end, locale);
+  const after = karaokeText(
+    t("。mm2t 沒有自己的伺服器：轉錄和摘要用你自己的 API 金鑰直接連到服務商，也可以改用你自架的轉錄伺服器。"),
+    accent.end,
+    locale,
+  );
+  useMotionValueEvent(scrollYProgress, "change", (v) => {
+    text.current?.style.setProperty("--k", (v * (after.end + 1)).toFixed(2));
+  });
   return (
     <section
       id="privacy"
-      className={`${sectionPadding} bg-[#1b1b1d] text-background`}
+      data-moment="word-highlight"
+      data-moment-mounted=""
       aria-labelledby="privacy-title"
+      className={screen}
     >
-      <div
-        className={`${container} grid items-center gap-16 lg:grid-cols-2 lg:gap-24`}
-      >
-        <Reveal>
-          <span className={`${label} text-[#e7a06b]`}>
-            {t("資料的去向，由你決定")}
-          </span>
-          <h2 id="privacy-title" className={heading}>
-            {t("你的會議，")}
-            <br />
-            {t("留在你的 Mac。")}
-          </h2>
-          <p className="mt-7 text-sm leading-8 text-background/60">
-            {t("錄音、聲紋與會議紀錄儲存在本機。")}
-            <br />
-            {t("mm2t 沒有自己的伺服器，也不代管你的資料。")}
-          </p>
-          <div className="my-8 grid gap-4 text-sm text-background/80">
-            <div className="flex items-center gap-3">
-              <Icon name="lock" />
-              {t("API 金鑰存放於 macOS 鑰匙圈")}
-            </div>
-            <div className="flex items-center gap-3">
-              <Icon name="shield" />
-              {t("聲紋辨識在 Mac 本機完成")}
-            </div>
-          </div>
+      <div className={cn(wrap, "flex h-full flex-col")}>
+        <h2
+          id="privacy-title"
+          ref={text}
+          className="max-w-[24em] text-[28px] leading-[1.35] font-medium tracking-[-0.02em] [--faint:0.5] lg:text-[48px] lg:leading-[1.25]"
+        >
+          {before.nodes}
+          {locale === "en" ? " " : ""}
+          <span className="kc-accent">{accent.nodes}</span>
+          {after.nodes}
+        </h2>
+        <div className="mt-12 grid gap-6 lg:mt-16">
+          <ul className="grid gap-4 sm:grid-cols-3">
+            {facts.map((fact) => (
+              <li key={fact.icon} className="flex items-start gap-3 text-[15px] leading-[1.5]">
+                <Icon name={fact.icon} size={18} className="mt-0.5 text-muted-foreground" />
+                {t(fact.text)}
+              </li>
+            ))}
+          </ul>
           <a
-            className={textLink}
+            className="link-draw inline-flex min-h-11 items-center gap-2 justify-self-start text-[15px] font-medium"
             href={`${REPO}/blob/main/PRIVACY.md`}
             target="_blank"
             rel="noreferrer"
           >
             {t("閱讀隱私權政策")}
-            <Icon name="diagonal" size={17} />
+            <Icon name="diagonal" size={15} />
           </a>
-        </Reveal>
-        <Reveal>
-          <div className="mx-auto w-72 rounded-[28px] border border-white/10 bg-[#28282a] p-5 shadow-[0_24px_50px_#0002]">
-            <div className="flex items-center justify-between text-xs text-background/60">
-              <span>{t("你的 Mac")}</span>
-              <Icon name="lock" size={18} />
-            </div>
-            <Image
-              src="/media/icon.png"
-              alt="mm2t"
-              width={78}
-              height={78}
-              className="mx-auto my-7 rounded-2xl"
-            />
-            <div className="flex justify-around text-xs text-background/80">
-              {[
-                { icon: "mic", label: "錄音" },
-                { icon: "users", label: "聲紋" },
-                { icon: "file", label: "紀錄" },
-              ].map((item) => (
-                <span
-                  key={item.icon}
-                  className="flex flex-col items-center gap-2"
-                >
-                  <Icon name={item.icon as "mic" | "users" | "file"} />
-                  {t(item.label)}
-                </span>
-              ))}
-            </div>
-            <div className="mt-6 flex items-center justify-center gap-2 border-t border-white/10 pt-4 text-xs text-background/50">
-              <span className="size-1.5 rounded-full bg-[#9da87d]" />
-              {t("保存在本機")}
-            </div>
-          </div>
-          <div className="mx-auto h-12 w-px bg-white/15" aria-hidden="true" />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 p-5 text-center">
-              <Icon name="cloud" size={22} />
-              <strong className="text-sm font-medium">
-                {t("你選擇的 API")}
-              </strong>
-              <span className="text-xs leading-6 text-background/50">
-                {t("使用自己的金鑰")}
-                <br />
-                {t("直接連線至服務商")}
-              </span>
-            </div>
-            <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 p-5 text-center">
-              <Icon name="laptop" size={22} />
-              <strong className="text-sm font-medium">
-                {t("自架轉錄伺服器")}
-              </strong>
-              <span className="text-xs leading-6 text-background/50">
-                {t("音訊在自己的")}
-                <br />
-                {t("設備之間傳輸")}
-              </span>
-            </div>
-          </div>
-        </Reveal>
+        </div>
       </div>
     </section>
   );

@@ -14,15 +14,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       data-type="software"
       data-radius="soft"
       data-buttons="pill"
-      data-motion="true"
       // Translation extensions can add attributes to this root before hydration.
       suppressHydrationWarning
     >
+      <head>
+        {/* The hero's entrance runs only when script is on; without it the page stands as written. */}
+        <script>{`document.documentElement.classList.add('m-enter')`}</script>
+      </head>
       <body>
         {children}
-        <noscript>
-          <style>{`[data-reveal], [data-intro-content] { opacity: 1 !important; transform: none !important; } [data-intro-overlay] { display: none !important; }`}</style>
-        </noscript>
       </body>
     </html>
   );

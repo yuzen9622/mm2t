@@ -1,78 +1,64 @@
 "use client";
-import Image from "next/image";
 import { useCopy } from "@/components/i18n";
 import { Icon } from "@/components/icon";
-import {
-  Reveal,
-  Brand,
-  DownloadButton,
-  REPO,
-  container,
-  heading,
-  textLink,
-} from "./shared";
+import { cn } from "@/lib/utils";
+import { Brand, DownloadButton, REPO, wrap } from "./shared";
+
+/** The close and the footer as one dark screen: the ask, then the links and the legal row. */
 export function Footer() {
   const { t } = useCopy();
+  const links = [
+    { label: "隱私權政策", href: `${REPO}/blob/main/PRIVACY.md` },
+    { label: "使用條款", href: `${REPO}/blob/main/TERMS.md` },
+    { label: "版本紀錄", href: `${REPO}/releases` },
+    { label: "原始碼", href: REPO },
+  ];
   return (
-    <footer id="download" className="bg-secondary pt-24 pb-8 md:pt-32">
-      <div className={container}>
-        <Reveal className="flex flex-col items-center pb-24 text-center">
-          <Image
-            src="/media/icon.png"
-            width={88}
-            height={88}
-            alt={t("mm2t 應用程式圖示")}
-            className="mb-9 rounded-3xl"
-          />
-          <h2 className={`${heading} max-w-4xl`}>{t("把注意力留給對話。")}</h2>
-          <p className="mt-5 mb-8 text-sm leading-7 text-muted-foreground">
-            {t("打開 mm2t，開始你的第一份會議記錄。")}
+    <footer
+      id="download"
+      data-ground="stage"
+      className="closing relative min-h-svh bg-stage pt-24 pb-8 text-stage-ink lg:h-svh lg:min-h-0 lg:pt-[120px] lg:pb-[72px]"
+    >
+      <div className={cn(wrap, "flex h-full flex-col")}>
+        <div>
+          <h2 className="text-[38px] leading-[1.1] font-medium tracking-[-0.02em] lg:text-[96px] lg:leading-[1.02] lg:tracking-[-0.03em]">
+            <span className="block">{t("下一場會議，")}</span>
+            <span className="block">{t("交給 mm2t 記錄")}</span>
+          </h2>
+          <p className="mt-6 text-base text-stage-muted lg:text-lg">
+            {t("免費開源 · macOS 14.2 以上")}
           </p>
-          <DownloadButton />
-          <span className="mt-5 text-xs text-muted-foreground">
-            {t("macOS 14.2 以上 · 免費開放原始碼")}
-          </span>
-        </Reveal>
-        <div className="flex flex-wrap items-center justify-between gap-5 border-b border-border pb-7">
-          <Brand />
-          <p className="hidden text-sm text-muted-foreground md:block">
-            {t("為每一場值得記下的對話。")}
-          </p>
-          <a href={REPO} className={textLink} target="_blank" rel="noreferrer">
-            <Icon name="github" size={18} />
-            {t("在 GitHub 給顆星")}
-            <Icon name="diagonal" size={15} />
-          </a>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-6 text-xs text-muted-foreground">
-          <span>© {new Date().getFullYear()} mm2t · AGPL-3.0</span>
-          <div className="flex flex-wrap gap-5">
+          <div className="mt-8 flex flex-wrap items-center gap-2">
+            <DownloadButton size="lg" className="max-sm:w-full" />
             <a
-              href={`${REPO}/blob/main/PRIVACY.md`}
+              href={REPO}
               target="_blank"
               rel="noreferrer"
-              className="hover:underline"
+              className="btn inline-flex min-h-12 items-center gap-2 rounded-full px-5 text-base font-medium text-stage-ink hover:bg-white/10 max-sm:w-full max-sm:justify-center"
             >
-              {t("隱私權政策")}
-            </a>
-            <a
-              href={`${REPO}/blob/main/TERMS.md`}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:underline"
-            >
-              {t("使用條款")}
-            </a>
-            <a
-              href={`${REPO}/releases`}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:underline"
-            >
-              {t("版本紀錄")}
+              <Icon name="github" size={18} />
+              {t("在 GitHub 查看原始碼")}
             </a>
           </div>
-          <span>Made for macOS.</span>
+        </div>
+        <div className="mt-auto flex flex-wrap items-center gap-x-8 gap-y-2 pt-16">
+          <Brand tone="stage" />
+          <nav aria-label={t("頁尾連結")} className="flex flex-wrap gap-x-6 lg:ml-6">
+            {links.map((link) => (
+              <a
+                key={link.label}
+                href={link.href}
+                target="_blank"
+                rel="noreferrer"
+                className="link-draw inline-flex min-h-11 items-center text-sm text-stage-muted hover:text-stage-ink"
+              >
+                {t(link.label)}
+              </a>
+            ))}
+          </nav>
+          <span className="text-sm text-stage-muted lg:ml-auto">
+            © {new Date().getFullYear()} mm2t · AGPL-3.0
+          </span>
         </div>
       </div>
     </footer>
