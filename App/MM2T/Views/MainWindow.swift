@@ -329,7 +329,10 @@ struct MainWindow: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // Lists open from settings rows are drawn here, outside the dialog's clip and scroll view.
+        .dropdownLayer()
         .motion(Motion.reveal, value: isOpen)
+        .onChange(of: isOpen) { if !isOpen { DropdownState.shared.open = nil } }
     }
 
     private var vocabularyDialog: some View {

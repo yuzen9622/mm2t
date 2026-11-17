@@ -174,7 +174,8 @@ struct SettingsDialog: View {
             .motion(Motion.reveal, value: showLicenses)
             .overlay(alignment: .topTrailing) {
                 IconButton("Close", icon: "x") { navigation.settingsOpen = false }
-                    .keyboardShortcut(.cancelAction)
+                    // While a list is open, Esc closes the list instead.
+                    .keyboardShortcut(DropdownState.shared.open == nil ? .cancelAction : nil)
                     .padding(14)
             }
         }
@@ -719,34 +720,13 @@ private struct CaptionTranslationRow: View {
             HStack {
                 Text("Translate captions")
                 Spacer()
-                Menu {
-                    // Plain checkmark items: an inline Picker adds an empty header row and tall items here.
-                    ForEach(CaptionTranslation.allCases, id: \.self) { option in
-                        Toggle(isOn: Binding(
-                            get: { choice == option },
-                            set: { on in if on { Task { await app.setCaptionTranslation(option) } } })) {
-                            // Menu items are one line of text, so the gap after the flag is a space.
-                            if let target = option.target {
-                                Text(verbatim: "\(target.flag) \(target.name)")
-                            } else {
-                                Text("Off")
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if let target = choice.target {
-                            Text(verbatim: target.flag)
-                            Text(verbatim: target.name)
-                        } else {
-                            Text("Off")
-                        }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .disabled(!enabled)
-                .opacity(enabled ? 1 : 0.5)
+                Dropdown(label: "Translate captions",
+                         options: CaptionTranslation.allCases.map { option in
+                             DropdownOption(id: option, leading: option.target?.flag,
+                                            title: option.target?.name ?? String(localized: "Off"))
+                         },
+                         selection: Binding(get: { choice }, set: { new in Task { await app.setCaptionTranslation(new) } }))
+                    .disabled(!enabled)
             }
             if choice != .off {
                 switch app.setup.translationModels {
