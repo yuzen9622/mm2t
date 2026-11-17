@@ -16,18 +16,26 @@ public enum CloudLLM: String, Codable, Sendable, CaseIterable {
     case openAICompatible
 }
 
-/// Live captions translated on this Mac into one language, or not at all.
-public enum CaptionTranslation: String, Codable, Sendable, CaseIterable {
-    case off
-    case traditionalChinese
-    case english
+/// Live captions translated on this Mac into one language, or not at all. Stored as the
+/// language's id (`traditionalChinese`, `english` and the rest of `CaptionTarget.all`) or `off`;
+/// an id this build does not know reads as off.
+public struct CaptionTranslation: Codable, Hashable, Sendable {
+    public let target: CaptionTarget?
 
-    public var target: CaptionLanguage? {
-        switch self {
-        case .off: nil
-        case .traditionalChinese: .traditionalChinese
-        case .english: .english
-        }
+    public init(_ target: CaptionTarget?) { self.target = target }
+
+    public static let off = CaptionTranslation(nil)
+
+    /// Off first, then every language in menu order.
+    public static var allCases: [CaptionTranslation] { [.off] + CaptionTarget.all.map(CaptionTranslation.init) }
+
+    public init(from decoder: Decoder) throws {
+        target = (try? decoder.singleValueContainer().decode(String.self)).flatMap(CaptionTarget.with)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(target?.id ?? "off")
     }
 }
 

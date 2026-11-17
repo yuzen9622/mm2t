@@ -16,12 +16,6 @@ struct LivePage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Text("Live captions are a preview. The saved transcript is produced after the meeting.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.muted)
-                .lineLimit(2)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
             if app.settings.settings.liveCaptions || captions.isActive {
                 if captions.segments.isEmpty && captions.partial.isEmpty {
                     placeholder(title: "Listening…", detail: "Captions appear here as people speak.")

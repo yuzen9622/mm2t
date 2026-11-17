@@ -151,8 +151,6 @@ private struct CaptureCard: View {
             switch state {
             case .idle:
                 if needsOnboarding {
-                    Text("mm2t needs your permissions and keys before it can take notes.")
-                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                     WideButton("Continue Setup", icon: "settings") { MainNavigation.shared.openSetup() }
                 } else {
                     WideButton("Start Recording", icon: "microphone") {

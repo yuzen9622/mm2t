@@ -2,7 +2,8 @@ import Foundation
 
 // MARK: Caption translation
 
-/// The two languages live captions translate between. Chinese is always Traditional (Taiwan).
+/// The two languages live captions are spoken in, as far as translation tells them apart.
+/// Chinese captions are always Traditional (Taiwan).
 public enum CaptionLanguage: String, Codable, Hashable, Sendable, CaseIterable {
     case traditionalChinese
     case english
@@ -25,9 +26,81 @@ public enum CaptionLanguage: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// A language live captions can be translated into, shown by its flag and its own name. Adding
+/// one is a row in `all` and its model files in `TranslationModels.mozilla`.
+public struct CaptionTarget: Hashable, Sendable, Identifiable {
+    /// What settings store.
+    public let id: String
+    /// The language's name in that language; never localized.
+    public let name: String
+    public let flag: String
+    /// Mozilla's code for the language in its translation models.
+    public let code: String
+
+    public static let traditionalChinese = CaptionTarget(id: "traditionalChinese", name: "繁體中文", flag: "🇹🇼", code: "zh_hant")
+    public static let simplifiedChinese = CaptionTarget(id: "simplifiedChinese", name: "简体中文", flag: "🇨🇳", code: "zh")
+    public static let korean = CaptionTarget(id: "korean", name: "한국어", flag: "🇰🇷", code: "ko")
+    public static let japanese = CaptionTarget(id: "japanese", name: "日本語", flag: "🇯🇵", code: "ja")
+    public static let english = CaptionTarget(id: "english", name: "English", flag: "🇺🇸", code: "en")
+    public static let german = CaptionTarget(id: "german", name: "Deutsch", flag: "🇩🇪", code: "de")
+    public static let czech = CaptionTarget(id: "czech", name: "Čeština", flag: "🇨🇿", code: "cs")
+
+    /// In the order a menu lists them.
+    public static let all: [CaptionTarget] = [traditionalChinese, simplifiedChinese, korean, japanese, english, german, czech]
+
+    public static func with(id: String) -> CaptionTarget? { all.first { $0.id == id } }
+
+    /// How a caption in `source` reaches this language.
+    public func route(from source: CaptionLanguage) -> CaptionRoute {
+        switch source {
+        case .english:
+            return self == .english ? .none : .models(["en", code])
+        case .traditionalChinese:
+            if self == .traditionalChinese { return .none }
+            if self == .simplifiedChinese { return .simplify }
+            // Mozilla translates Chinese only into English, so other languages go through English.
+            return .models(self == .english ? ["zh_hant", "en"] : ["zh_hant", "en", code])
+        }
+    }
+
+    /// Every model a recording translating into this language may use, as source-target codes.
+    public var modelPairs: [ModelPair] {
+        var pairs: [ModelPair] = []
+        for source in CaptionLanguage.allCases {
+            guard case .models(let path) = route(from: source) else { continue }
+            for pair in zip(path, path.dropFirst()).map(ModelPair.init) where !pairs.contains(pair) { pairs.append(pair) }
+        }
+        return pairs
+    }
+}
+
+/// One translation model's direction, by Mozilla's language codes.
+public struct ModelPair: Hashable, Sendable, CustomStringConvertible {
+    public let source: String
+    public let target: String
+
+    public init(_ source: String, _ target: String) {
+        self.source = source
+        self.target = target
+    }
+
+    public var description: String { "\(source)-\(target)" }
+}
+
+/// What turning a caption into the target language takes.
+public enum CaptionRoute: Equatable, Sendable {
+    /// It is already in the target language.
+    case none
+    /// Chinese into Simplified characters: a script conversion, no model.
+    case simplify
+    /// Through these languages in turn, one model per step.
+    case models([String])
+}
+
 /// Translates one caption on this Mac. Display only: nothing it returns is stored.
 public protocol CaptionTranslator: Sendable {
-    func translate(_ text: String, from source: CaptionLanguage, to target: CaptionLanguage) async throws -> String
+    /// Translates `text` from `languages[0]` into the last language, one model per step.
+    func translate(_ text: String, through languages: [String]) async throws -> String
 }
 
 /// Which part of an unfinished caption is worth translating now. Machine translation of a clause
@@ -57,8 +130,8 @@ public enum PartialTranslationPolicy {
         return candidate.count > sent.count ? candidate : nil
     }
 
-    /// Everything up to the last word known to be complete: a Han character always is, a word in a
-    /// spaced script only once a space follows it.
+    /// Everything up to the last word known to be complete: a Han or kana character always is, a
+    /// word in a spaced script (English, Korean) only once a space follows it.
     static func wholeWords(_ text: String) -> String? {
         guard let last = text.last else { return nil }
         if last.isWhitespace || isHan(last) {
@@ -78,7 +151,10 @@ public enum PartialTranslationPolicy {
         text.filter(isHan).count
     }
 
+    /// Han and Japanese kana: scripts written without spaces, where each character stands alone.
     static func isHan(_ character: Character) -> Bool {
-        character.unicodeScalars.contains { $0.properties.isIdeographic }
+        character.unicodeScalars.contains { scalar in
+            scalar.properties.isIdeographic || (0x3040...0x30FF).contains(scalar.value)
+        }
     }
 }

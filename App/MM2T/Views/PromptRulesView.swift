@@ -15,11 +15,7 @@ struct PromptAppRules: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Apps")
-                    Text("When one that's on starts using the mic, mm2t offers to record.")
-                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-                }
+                Text("Apps")
                 Spacer()
                 PillButton("Add App…", icon: "plus", action: chooseApp)
             }

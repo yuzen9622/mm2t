@@ -333,8 +333,10 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
 
     let translator = FakeTranslator()
     let translationDownloaded = Box(false)
-    func captionTranslator() -> (any CaptionTranslator)? {
-        translationDownloaded.get ? translator : nil
+    let translatorTargets = Box<[CaptionTarget]>([])
+    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+        translatorTargets.update { $0.append(target) }
+        return translationDownloaded.get ? translator : nil
     }
 
     var thresholds: MatchThresholds { MatchThresholds(autoName: 0.9, suggest: 0.6) }
@@ -395,7 +397,7 @@ final class FakeInstaller: ModelInstalling, @unchecked Sendable {
 /// A caption translator whose answers the test controls: each call waits for its own release,
 /// so results can come back in any order. Unless `holds` is set, it answers at once.
 final class FakeTranslator: CaptionTranslator, @unchecked Sendable {
-    struct Call: Equatable { let text: String; let source: CaptionLanguage; let target: CaptionLanguage }
+    struct Call: Equatable { let text: String; let languages: [String] }
     let calls = Box<[Call]>([])
     let holds = Box(false)
     let failing = Box<Set<String>>([])
@@ -403,8 +405,8 @@ final class FakeTranslator: CaptionTranslator, @unchecked Sendable {
     let answers = Box<[String: String]>([:])
     private let gates = Box<[String: Gate<Bool>]>([:])
 
-    func translate(_ text: String, from source: CaptionLanguage, to target: CaptionLanguage) async throws -> String {
-        calls.update { $0.append(Call(text: text, source: source, target: target)) }
+    func translate(_ text: String, through languages: [String]) async throws -> String {
+        calls.update { $0.append(Call(text: text, languages: languages)) }
         if holds.get {
             let gate = Gate<Bool>()
             gates.update { $0[text] = gate }
@@ -563,13 +565,14 @@ struct World {
         let now = Box(Date(timeIntervalSince1970: 1_800_000_000))
         self.now = now
         speakerInstaller = FakeInstaller(catalog.modelsDownloaded, bytes: 220_000_000)
-        translationInstaller = FakeInstaller(catalog.translationDownloaded, bytes: 75_000_000)
+        let translation = FakeInstaller(catalog.translationDownloaded, bytes: 75_000_000)
+        translationInstaller = translation
         offlineInstallers = catalog.offlineDownloaded.mapValues { FakeInstaller($0, bytes: 1_000_000_000) }
         app = try AppController(
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: speakerInstaller,
             offlineInstallers: offlineInstallers,
-            translationInstaller: translationInstaller,
+            translationInstaller: { _ in translation },
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }
 

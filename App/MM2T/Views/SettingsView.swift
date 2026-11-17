@@ -66,7 +66,7 @@ enum SettingsRow: Hashable {
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local)]
         case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
-        case .captionTranslation: [String(localized: "Translate captions"), "繁體中文", "English"]
+        case .captionTranslation: [String(localized: "Translate captions")] + CaptionTarget.all.map(\.name)
         case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
@@ -365,11 +365,7 @@ struct SettingsRowView: View {
         case .appLanguage:
             LanguagePicker()
         case .hideFromCapture:
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Hide mm2t from screen sharing and screenshots", isOn: $store.settings.hidesFromScreenCapture)
-                Text("While on, screen shares, recordings and screenshots leave mm2t's windows out.")
-                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            Toggle("Hide mm2t from screen sharing and screenshots", isOn: $store.settings.hidesFromScreenCapture)
         case .recordShortcut:
             RecordShortcutRow(app: app)
         case .promptApps:
@@ -401,10 +397,7 @@ struct SettingsRowView: View {
             LinkRow(icon: "file-text", title: "Terms of Service", url: AppLinks.terms)
         case .licenses:
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Third-party notices")
-                    Text("Licensed under AGPL-3.0.").font(Typo.caption).foregroundStyle(Palette.secondary)
-                }
+                Text("Third-party notices")
                 Spacer()
                 PillButton("Licenses") { showLicenses = true }
             }
@@ -697,15 +690,18 @@ private struct LiveCaptionsRow: View {
                 get: { hasKey && store.settings.liveCaptions },
                 set: { store.settings.liveCaptions = $0 }))
                 .disabled(!hasKey)
-            Text(hasKey ? "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved."
-                        : "Add an ElevenLabs key to use live captions.")
-                .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            if !hasKey {
+                Text("Add an ElevenLabs key to use live captions.")
+                    .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
 
-/// Live captions translated on this Mac. Choosing a language the first time downloads the models
-/// for both directions; the row follows the live captions switch.
+/// Live captions translated on this Mac into one language. Choosing a language the first time
+/// downloads the models it needs; the row follows the live captions switch. The choice is a menu,
+/// styled like the assistant's conversation history menu, since eight options do not fit a
+/// segmented control.
 private struct CaptionTranslationRow: View {
     let app: AppController
     let key: CredentialField
@@ -723,32 +719,50 @@ private struct CaptionTranslationRow: View {
             HStack {
                 Text("Translate captions")
                 Spacer()
-                Segmented(options: CaptionTranslation.allCases, selection: Binding(
-                    get: { choice },
-                    set: { new in Task { await app.setCaptionTranslation(new) } })) { option in
-                    switch option {
-                    case .off: String(localized: "Off")
-                    case .traditionalChinese: "繁體中文"
-                    case .english: "English"
+                Menu {
+                    // Plain checkmark items: an inline Picker adds an empty header row and tall items here.
+                    ForEach(CaptionTranslation.allCases, id: \.self) { option in
+                        Toggle(isOn: Binding(
+                            get: { choice == option },
+                            set: { on in if on { Task { await app.setCaptionTranslation(option) } } })) {
+                            // Menu items are one line of text, so the gap after the flag is a space.
+                            if let target = option.target {
+                                Text(verbatim: "\(target.flag) \(target.name)")
+                            } else {
+                                Text("Off")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if let target = choice.target {
+                            Text(verbatim: target.flag)
+                            Text(verbatim: target.name)
+                        } else {
+                            Text("Off")
+                        }
                     }
                 }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
                 .disabled(!enabled)
                 .opacity(enabled ? 1 : 0.5)
             }
-            switch choice == .off ? .notDownloaded : app.setup.translationModels {
-            case .downloading(let fraction):
-                Text("Downloading translation model… \(Int(fraction * 100))%")
-                    .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
-            case .failed:
-                HStack {
-                    Text("Couldn't download the translation model.")
-                        .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                    PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
+            if choice != .off {
+                switch app.setup.translationModels {
+                case .downloading(let fraction):
+                    Text("Downloading translation model… \(Int(fraction * 100))%")
+                        .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
+                case .failed:
+                    HStack {
+                        Text("Couldn't download the translation model.")
+                            .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
+                    }
+                case .notDownloaded, .downloaded:
+                    EmptyView()
                 }
-            case .notDownloaded, .downloaded:
-                Text("Translated on this Mac. Nothing is sent anywhere.")
-                    .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -909,14 +923,10 @@ private struct RecordShortcutRow: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start or stop recording")
-                    Group {
-                        if listening {
-                            Text("Press the new shortcut. Esc cancels.")
-                        } else {
-                            Text("Works in any app. Press it once to start recording and again to stop.")
-                        }
+                    if listening {
+                        Text("Press the new shortcut. Esc cancels.")
+                            .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 ShortcutField(app: app, shortcut: $store.settings.recordShortcut, listening: $listening)
@@ -928,11 +938,6 @@ private struct RecordShortcutRow: View {
                     Spacer(minLength: 8)
                     PillButton("Open System Settings") { SetupModel.openSettings(.accessibility) }
                 }
-            }
-            // macOS cannot tell whether a keyboard has an Fn key it reports, so this is a hint, not a check.
-            if store.settings.recordShortcut.usesFunctionKey {
-                Text("Some keyboards keep their Fn key to themselves. If the shortcut does nothing, click it and press another, such as ⌃⌥R.")
-                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .motion(Motion.reveal, value: app.setup.accessibility)

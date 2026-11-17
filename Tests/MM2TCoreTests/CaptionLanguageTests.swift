@@ -60,3 +60,46 @@ import Testing
         #expect(Policy.stablePart(of: "Hello", lastSent: nil) == nil)
     }
 }
+
+@Suite struct CaptionTargetTests {
+    @Test func everyTargetHasARouteFromBothSpokenLanguages() {
+        #expect(CaptionTarget.english.route(from: .english) == .none)
+        #expect(CaptionTarget.traditionalChinese.route(from: .traditionalChinese) == .none)
+        #expect(CaptionTarget.simplifiedChinese.route(from: .traditionalChinese) == .simplify)
+        #expect(CaptionTarget.english.route(from: .traditionalChinese) == .models(["zh_hant", "en"]))
+        #expect(CaptionTarget.traditionalChinese.route(from: .english) == .models(["en", "zh_hant"]))
+        #expect(CaptionTarget.simplifiedChinese.route(from: .english) == .models(["en", "zh"]))
+        for target in [CaptionTarget.korean, .japanese, .german, .czech] {
+            #expect(target.route(from: .english) == .models(["en", target.code]))
+            #expect(target.route(from: .traditionalChinese) == .models(["zh_hant", "en", target.code]), "pivots through English")
+        }
+    }
+
+    @Test func eachTargetNeedsOnlyItsOwnModels() {
+        #expect(CaptionTarget.traditionalChinese.modelPairs == [ModelPair("en", "zh_hant")])
+        #expect(CaptionTarget.english.modelPairs == [ModelPair("zh_hant", "en")])
+        #expect(CaptionTarget.simplifiedChinese.modelPairs == [ModelPair("en", "zh")])
+        #expect(Set(CaptionTarget.korean.modelPairs) == [ModelPair("en", "ko"), ModelPair("zh_hant", "en")])
+        #expect(Set(CaptionTarget.all.map(\.id)).count == CaptionTarget.all.count)
+        #expect(CaptionTarget.with(id: "japanese") == .japanese)
+        #expect(CaptionTarget.with(id: "off") == nil)
+    }
+}
+
+@Suite struct CaptionScriptTests {
+    typealias Policy = PartialTranslationPolicy
+
+    @Test func japaneseKanaCountsAsWholeCharactersLikeHan() {
+        // Japanese has no spaces: a growing partial is sent up to its last character.
+        let japanese = "来週の会議では予算の見直しについてもう一度話し合いましょう"
+        #expect(Policy.stablePart(of: japanese, lastSent: nil) == japanese)
+        #expect(Policy.stablePart(of: "来週の会議では、予算", lastSent: nil) == "来週の会議では、")
+    }
+
+    @Test func koreanIsSpacedAndBreaksBetweenWords() {
+        let korean = "다음 주 회의에서 예산 검토에 대해 다시 한번 이야기해 봅시다"
+        // Ten words, no boundary: sent up to the last word that a space closed.
+        #expect(Policy.stablePart(of: korean, lastSent: nil) == "다음 주 회의에서 예산 검토에 대해 다시 한번 이야기해")
+        #expect(Policy.stablePart(of: "좋습니다, 그럼 다음", lastSent: nil) == "좋습니다,")
+    }
+}

@@ -131,8 +131,9 @@ public final class LiveProviderCatalog: ProviderCatalog {
     /// while a meeting is being processed rather than while the app idles in the menu bar.
     public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
     /// A fresh translator per recording, so its model is freed when the recording's captions end.
-    public func captionTranslator() -> (any CaptionTranslator)? {
-        translationModels.isDownloaded ? BergamotTranslator(models: translationModels) : nil
+    public func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+        let needed = translationModels.for(target)
+        return needed.isDownloaded ? BergamotTranslator(models: needed) : nil
     }
     public var thresholds: MatchThresholds { .weSpeaker }
 }

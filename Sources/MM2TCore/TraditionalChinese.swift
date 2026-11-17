@@ -19,6 +19,11 @@ public enum TraditionalChinese {
     public static func convert(_ text: String) -> String {
         text.applyingTransform(StringTransform("Hans-Hant"), reverse: false) ?? text
     }
+
+    /// The reverse, for the one place Simplified is asked for: live captions translated into 简体中文.
+    public static func simplified(_ text: String) -> String {
+        text.applyingTransform(StringTransform("Hant-Hans"), reverse: false) ?? text
+    }
 }
 
 extension CleanedTranscript {

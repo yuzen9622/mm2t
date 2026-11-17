@@ -1,5 +1,4 @@
 import AppKit
-import CoreText
 import MM2TApp
 import SwiftUI
 
@@ -361,38 +360,6 @@ struct CaptionBarView: View {
                     breakLines: breaker.counts)
         // A new line pushes the older one up by one line; under Reduce Motion it just appears.
         withAnimation(reduce ? nil : Motion.select) { layout = next }
-    }
-}
-
-/// Where the bar's 18 pt rounded medium text wraps, so the bar can lay out whole lines itself.
-@MainActor
-struct CaptionLineBreaker {
-    let width: CGFloat
-
-    static let font: NSFont = {
-        let base = NSFont.systemFont(ofSize: 18, weight: .medium)
-        return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 18) } ?? base
-    }()
-
-    /// The number of characters on each line of `text`.
-    func counts(_ text: String) -> [Int] {
-        let attributed = NSAttributedString(string: text, attributes: [.font: Self.font])
-        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
-        let length = attributed.length
-        var counts: [Int] = []
-        var start = 0
-        var index = text.startIndex
-        // A hair narrower than the bar, so SwiftUI never finds a line too long for it.
-        let room = Double(max(width - 2, 40))
-        while start < length {
-            let count = CTTypesetterSuggestLineBreak(typesetter, start, room)
-            guard count > 0 else { break }
-            let end = String.Index(utf16Offset: start + count, in: text)
-            counts.append(text[index..<end].count)
-            index = end
-            start += count
-        }
-        return counts
     }
 }
 

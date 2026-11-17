@@ -217,7 +217,10 @@ import Testing
     }
 
     @Test func aMissingOnDeviceModelIsDownloadedOnTheLastStep() async throws {
-        let world = try await atTheLastStep { $0.transcriptionOrder = [.cloud, .local] }
+        let world = try await atTheLastStep {
+            $0.transcriptionOrder = [.cloud, .local]
+            $0.captionTranslation = CaptionTranslation(.traditionalChinese)
+        }
         let flow = world.app.onboarding
         let setup = world.app.setup
         #expect(flow.services == [.elevenLabs, .offlineModel(.transcription), .gemini])
@@ -310,6 +313,7 @@ import Testing
         let flow = world.app.onboarding
         let setup = world.app.setup
         world.catalog.modelsDownloaded.set(false)
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.traditionalChinese)
         setup.refresh()
         try await enrollVoice(world)
         world.app.settings.settings.hasCompletedOnboarding = true
@@ -353,6 +357,8 @@ import Testing
 
     @Test func downloadsStartOnceAndSkipWhatIsInstalled() async throws {
         let world = try World()
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.traditionalChinese)
+        world.app.setup.refresh()
         let flow = world.app.onboarding
         #expect(world.app.setup.models == .downloaded)
         await flow.startDownloads()
@@ -441,5 +447,19 @@ import Testing
         #expect(world.app.canCloseSetup)
         world.app.closeSetup()
         #expect(!world.app.showsSetup && !world.app.canCloseSetup)
+    }
+
+    @Test func withTranslationOffSetupNeitherWaitsForNorCountsTranslationModels() async throws {
+        let world = try World()
+        let flow = world.app.onboarding
+        #expect(world.app.setup.translationTarget == nil)
+        #expect(flow.modelBytes == 220_000_000, "the speaker model alone")
+        await flow.startDownloads()
+        #expect(world.translationInstaller.downloads.get == 0)
+        #expect(flow.modelsReady)
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.japanese)
+        world.app.setup.refresh()
+        #expect(flow.modelBytes == 295_000_000, "follows the chosen language's models")
+        #expect(!flow.modelsReady)
     }
 }

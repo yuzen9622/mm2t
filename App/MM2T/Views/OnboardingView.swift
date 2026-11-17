@@ -98,8 +98,6 @@ struct OnboardingView: View {
                 switch flow.note {
                 case .needsMicrophone:
                     Text("Allow microphone access to continue.")
-                case .needsVoice:
-                    Text("Read the passage aloud to continue.")
                 case .finishingDownloads(let fraction):
                     Text("Finishing model downloads… \(Int(fraction * 100))%").monospacedDigit()
                 case .downloadFailed:
@@ -112,7 +110,7 @@ struct OnboardingView: View {
                     Text("Enter the language model server's URL and model name.")
                 case .issue(let issue):
                     Text(Copy.issue(issue))
-                case nil:
+                case .needsVoice, nil:
                     EmptyView()
                 }
             }
@@ -277,28 +275,21 @@ private struct StepPage: View {
             .arrives(0)
             .frame(width: 440)
 
-            Group {
-                switch step {
-                case .usage: Text("You can change this later in Settings.")
-                case .permissions: Text("Recordings stay on this Mac.")
-                case .models:
-                    Text("Telling speakers apart and live translation both run on this Mac. About \(Self.megabytes(app.onboarding.modelBytes)) MB in total. You can go on while they download.")
-                case .voice: Text("Read this aloud at your normal speaking voice. The voiceprint stays on this Mac.")
-                case .services:
-                    if app.onboarding.choice == .ownServer {
-                        Text("Tokens are kept in this Mac's Keychain and only sent to your servers.")
-                    } else {
-                        Text("Keys are kept in this Mac's Keychain and only sent to their own service.")
+            if step == .models || step == .voice {
+                Group {
+                    switch step {
+                    case .models: Text("About \(Self.megabytes(app.onboarding.modelBytes)) MB in total.")
+                    default: Text("Read this aloud at your normal speaking voice.")
                     }
                 }
+                .font(Typo.body)
+                .foregroundStyle(Palette.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+                .arrives(1)
+                .frame(width: 440)
             }
-            .font(Typo.body)
-            .foregroundStyle(Palette.secondary)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 6)
-            .arrives(1)
-            .frame(width: 440)
 
             FadingScrollView(ground: Palette.window) {
                 VStack(alignment: .leading, spacing: 8) { rows }
@@ -414,23 +405,25 @@ private struct ModelRows: View {
     let setup: SetupModel
 
     var body: some View {
-        ModelRow(name: "Speakers and voiceprints", purpose: "Tells speakers apart and recognizes your voice.",
+        ModelRow(name: "Speakers and voiceprints",
                  state: setup.models, failure: nil) {
             Task { await setup.downloadModels() }
         }
         .arrives(2)
-        ModelRow(name: "Translation", purpose: "Translates live captions between Chinese and English.",
-                 state: setup.translationModels, failure: "Couldn't download the translation model.") {
-            Task { await setup.downloadTranslationModels() }
+        // Only the chosen caption language's models; none while translation is off.
+        if setup.translationTarget != nil {
+            ModelRow(name: "Translation",
+                     state: setup.translationModels, failure: "Couldn't download the translation model.") {
+                Task { await setup.downloadTranslationModels() }
+            }
+            .arrives(3)
         }
-        .arrives(3)
     }
 }
 
-/// A model's name, purpose and download: a progress line and a percentage that becomes a check.
+/// A model's name and download: a progress line and a percentage that becomes a check.
 private struct ModelRow: View {
     let name: LocalizedStringKey
-    let purpose: LocalizedStringKey
     let state: ModelDownloadState
     /// What a failure says; nil shows the download's own error.
     let failure: LocalizedStringKey?
@@ -452,7 +445,6 @@ private struct ModelRow: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name).font(Typo.bodyStrong).lineLimit(1)
-                    Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
                     if let detail {
                         detail.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
                     }
@@ -601,20 +593,20 @@ private struct ServiceRows: View {
             Group {
                 switch entry {
                 case .elevenLabs:
-                    ServiceRow(title: Text(verbatim: "ElevenLabs"), purpose: Text("Speech to text and live captions.")) {
+                    ServiceRow(title: Text(verbatim: "ElevenLabs")) {
                         CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
                     }
                 case .gemini:
-                    ServiceRow(title: Text(verbatim: "Gemini"), purpose: Text("Cleans up transcripts, summaries and to-dos.")) {
+                    ServiceRow(title: Text(verbatim: "Gemini")) {
                         CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
                     }
                 case .transcriptionServer:
-                    ServiceRow(title: Text("Transcription server"), purpose: Text("Turns your meeting audio into text.")) {
+                    ServiceRow(title: Text("Transcription server")) {
                         ServerURLField(store: app.settings)
                         CredentialFieldView(field: setup.field(.selfHostedToken), setup: setup)
                     }
                 case .llmServer:
-                    ServiceRow(title: Text("Language model server"), purpose: Text("Cleans up transcripts, summaries and to-dos.")) {
+                    ServiceRow(title: Text("Language model server")) {
                         LLMServerFields(store: app.settings, key: setup.field(.openAICompatibleAPIKey))
                         CredentialFieldView(field: setup.field(.openAICompatibleAPIKey), setup: setup)
                     }
@@ -654,7 +646,6 @@ private struct OfflineModelRow: View {
 
     var body: some View {
         ModelRow(name: model == .transcription ? "On-device transcription" : "On-device language model",
-                 purpose: model == .transcription ? "Turns your meeting audio into text on this Mac." : "Cleans up transcripts, summaries and to-dos.",
                  state: setup.offlineModels[model] ?? .notDownloaded, failure: nil, detail: detail,
                  offersDownload: true,
                  retry: { Task { await setup.downloadOfflineModel(model) } },
@@ -677,14 +668,14 @@ private struct OfflineModelRow: View {
 
 private struct ServiceRow<Fields: View>: View {
     let title: Text
-    let purpose: Text
+    var purpose: Text?
     @ViewBuilder let fields: Fields
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 title.font(Typo.bodyStrong).lineLimit(1)
-                purpose.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+                purpose?.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
             }
             fields
         }
@@ -704,16 +695,15 @@ struct PermissionRows: View {
     var body: some View {
         let request: PillButton.Kind = asSetupRows ? .ghost : .primary
         Group {
-        PermissionRow(title: "Microphone", purpose: "Records your side of the meeting.",
+        PermissionRow(title: "Microphone",
                       state: setup.microphone, pane: .microphone, requestKind: request) {
             Task { await setup.requestMicrophone() }
         }
         .asSetupRow(2, asSetupRows)
         PermissionRow(title: "System audio recording",
-                      purpose: "Records only the meeting app's sound. macOS asks the first time you record.",
                       state: setup.systemAudio, pane: .systemAudio, requestKind: request, request: nil)
         .asSetupRow(3, asSetupRows)
-        PermissionRow(title: "Accessibility", purpose: "Reads the meeting window's title to detect browser meetings.",
+        PermissionRow(title: "Accessibility",
                       state: setup.accessibility, pane: .accessibility, requestKind: request) {
             setup.requestAccessibility()
         }
@@ -726,14 +716,14 @@ struct PermissionRows: View {
                 .asSetupCaption(5, asSetupRows)
         }
         ForEach(Array(setup.automation.keys.sorted().enumerated()), id: \.element) { index, browser in
-            PermissionRow(title: "Automation: \(browser)", purpose: "Reads the open tab's address to tell which meeting it is.",
+            PermissionRow(title: "Automation: \(browser)",
                           state: setup.automation[browser] ?? .unknown, pane: .automation, requestKind: request) {
                 Task { await setup.requestAutomation(of: browser) }
             }
             .asSetupRow(6 + index, asSetupRows)
         }
         if setup.automation.isEmpty {
-            Text("Open your browser to grant it. It lets mm2t read the open tab's address.")
+            Text("Open your browser to grant it.")
                 .font(Typo.caption).foregroundStyle(Palette.secondary)
                 .asSetupCaption(6, asSetupRows)
         }
@@ -759,7 +749,6 @@ extension View {
 
 struct PermissionRow: View {
     let title: LocalizedStringKey
-    let purpose: LocalizedStringKey
     let state: PermissionState
     let pane: SettingsPane
     var requestKind = PillButton.Kind.primary
@@ -767,10 +756,7 @@ struct PermissionRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Typo.bodyStrong)
-                Text(purpose).font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            Text(title).font(Typo.bodyStrong)
             Spacer(minLength: 8)
             if state == .granted {
                 Icon("circle-check", size: 18).foregroundStyle(Palette.success)

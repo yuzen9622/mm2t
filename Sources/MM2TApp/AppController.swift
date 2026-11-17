@@ -99,7 +99,7 @@ public final class AppController {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
-        translationInstaller: any ModelInstalling,
+        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
         machine: MachineProfile = .current,
         validator: any KeyValidating,
         calendars: [any CalendarSource] = [],
@@ -176,7 +176,7 @@ public final class AppController {
                 let current = settings.settings
                 guard current.liveCaptions, let key = try? credentials.read(.elevenLabsAPIKey), !key.isEmpty else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
-                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator() {
+                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator(for: target) {
                     captions.translate(with: translator, to: target)
                 }
                 let names = await voiceprints.spokenNames()
@@ -261,7 +261,7 @@ public final class AppController {
                                          translationModels: translation),
             recorder: recorder, permissions: permissions,
             installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
-            translationInstaller: translation,
+            translationInstaller: { translation.for($0) },
             validator: LiveKeyValidator(),
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
@@ -294,10 +294,11 @@ public final class AppController {
         startMonitorIfReady()
     }
 
-    /// Live caption translation: the models for both directions download the first time it is
-    /// turned on. It applies from the next recording.
+    /// Live caption translation: the models the chosen language needs download when it is first
+    /// chosen; other languages' models stay on disk. It applies from the next recording.
     public func setCaptionTranslation(_ choice: CaptionTranslation) async {
         settings.settings.captionTranslation = choice
+        setup.refreshTranslation()
         guard choice != .off else { return }
         switch setup.translationModels {
         case .notDownloaded, .failed: await setup.downloadTranslationModels()

@@ -101,8 +101,8 @@ enum Copy {
     static func calendarSourceDetail(_ kind: CalendarSourceKind) -> String {
         switch kind {
         case .apple: String(localized: "iCloud and the accounts this Mac already syncs")
-        case .google: String(localized: "Your primary Google calendar, read-only")
-        case .microsoft: String(localized: "Microsoft 365 or Outlook.com, read-only")
+        case .google: String(localized: "Your primary Google calendar")
+        case .microsoft: String(localized: "Microsoft 365 or Outlook.com")
         }
     }
 

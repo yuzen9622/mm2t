@@ -73,3 +73,46 @@ import Testing
         #expect(runs.map(\.arrived) == [t0, t2])
     }
 }
+
+@MainActor
+@Suite struct CaptionLineBreakerTests {
+    let breaker = CaptionLineBreaker(width: 600)
+
+    private func lines(_ text: String) -> [String] {
+        var rest = Substring(text)
+        return breaker.counts(text).map { count in
+            defer { rest = rest.dropFirst(count) }
+            return String(rest.prefix(count))
+        }
+    }
+
+    @Test func japaneseWrapsBetweenCharactersWithinTheWidth() {
+        let japanese = "来週の会議では予算の見直しについてもう一度話し合いましょう。資料は金曜日までに共有してください。音声認識の遅延も、デモの前に必ず下げる必要があります。"
+        let wrapped = lines(japanese)
+        #expect(wrapped.count >= 2)
+        #expect(wrapped.joined() == japanese, "nothing lost or repeated")
+        #expect(wrapped.allSatisfy { breaker.width(of: $0.trimmingCharacters(in: .whitespaces)) <= 600 })
+        #expect(wrapped.dropFirst().allSatisfy { !"。、！？）」".contains($0.first!) }, "no line starts with closing punctuation")
+    }
+
+    @Test func koreanWrapsBetweenWords() {
+        let korean = "다음 주 회의에서 예산 검토에 대해 다시 한번 이야기해 봅시다. 자료는 금요일까지 공유해 주시고, 데모 전에 음성 인식 지연 시간도 반드시 줄여야 합니다."
+        let wrapped = lines(korean)
+        #expect(wrapped.count >= 2)
+        #expect(wrapped.joined() == korean)
+        #expect(wrapped.allSatisfy { breaker.width(of: $0.trimmingCharacters(in: .whitespaces)) <= 600 })
+        #expect(wrapped.dropLast().allSatisfy { $0.last == " " }, "every break falls on a space, never inside a word")
+    }
+
+    @Test func spacedLatinScriptsWrapBetweenWords() {
+        let czech = "Musíme před ukázkou snížit zpoždění rozpoznávání řeči a do pátku sdílet podklady se všemi účastníky schůzky."
+        let wrapped = lines(czech)
+        #expect(wrapped.count >= 2)
+        #expect(wrapped.dropLast().allSatisfy { $0.last == " " })
+    }
+
+    @Test func wideScriptsJoinWithoutASpaceAndKoreanWithOne() {
+        #expect(CaptionArrivals.joiner("会議です。", "次へ") == "")
+        #expect(CaptionArrivals.joiner("회의입니다.", "다음") == " ")
+    }
+}

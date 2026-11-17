@@ -150,7 +150,7 @@ public final class OnboardingFlow {
         }
         if isDownloading { return .finishingDownloads(modelProgress) }
         if case .failed = setup.models { return .downloadFailed }
-        if case .failed = setup.translationModels { return .downloadFailed }
+        if setup.translationTarget != nil, case .failed = setup.translationModels { return .downloadFailed }
         if let issue = setup.issues.first(where: { $0 != .diarizationModelsMissing }) { return .issue(issue) }
         return .modelsNotDownloaded
     }
@@ -267,9 +267,12 @@ public final class OnboardingFlow {
 
     // MARK: Models
 
-    public var modelsReady: Bool { setup.models == .downloaded && setup.translationModels == .downloaded }
+    public var modelsReady: Bool {
+        setup.models == .downloaded && (setup.translationTarget == nil || setup.translationModels == .downloaded)
+    }
 
-    /// Both downloads in bytes, for "About N MB in total".
+    /// Both downloads in bytes, for "About N MB in total"; translation counts only the chosen
+    /// language's models, and nothing while translation is off.
     public var modelBytes: Int64 { setup.speakerModelBytes + setup.translationModelBytes }
 
     /// The on-device models the settings use.
@@ -294,7 +297,8 @@ public final class OnboardingFlow {
     }
 
     private var progressParts: [(state: ModelDownloadState, bytes: Int64)] {
-        [(setup.models, setup.speakerModelBytes), (setup.translationModels, setup.translationModelBytes)]
+        [(setup.models, setup.speakerModelBytes)]
+            + (setup.translationTarget == nil ? [] : [(setup.translationModels, setup.translationModelBytes)])
             + requiredOfflineModels.compactMap { model in
                 let state = setup.offlineModels[model] ?? .notDownloaded
                 guard case .downloading = state else { return nil }
@@ -314,7 +318,8 @@ public final class OnboardingFlow {
     public func startDownloads() async {
         let setup = setup
         let speakers = setup.models == .notDownloaded ? Task { await setup.downloadModels() } : nil
-        let translation = setup.translationModels == .notDownloaded ? Task { await setup.downloadTranslationModels() } : nil
+        let translation = setup.translationTarget != nil && setup.translationModels == .notDownloaded
+            ? Task { await setup.downloadTranslationModels() } : nil
         await speakers?.value
         await translation?.value
     }

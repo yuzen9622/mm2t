@@ -3,31 +3,45 @@ import Foundation
 import MM2TCore
 
 public enum CaptionTranslationError: Error, Equatable, Sendable, CustomStringConvertible {
-    /// No installed model translates this way.
-    case unsupported(CaptionLanguage, CaptionLanguage)
+    /// No model translates this way.
+    case unsupported(ModelPair)
     case engine(String)
 
     public var description: String {
         switch self {
-        case .unsupported(let source, let target): "no translation model from \(source) to \(target)"
+        case .unsupported(let pair): "no translation model for \(pair)"
         case .engine(let reason): reason
         }
     }
 }
 
-/// Live caption translation on this Mac with Mozilla's Bergamot engine. Loads a direction's model
-/// on first use and keeps it until `unload()` (the recording stopped) or until the other direction
-/// is asked for; one model is in memory at a time. Runs on this actor, never on the main thread.
+/// Live caption translation on this Mac with Mozilla's Bergamot engine. Loads each model it is
+/// asked to use on first use and keeps it until `unload()` or until the translator goes, which is
+/// when the recording's captions end. A recording uses one target language, so at most the models
+/// of that language's routes are ever in memory (two when Chinese is pivoted through English).
+/// Runs on this actor, never on the main thread.
 public actor BergamotTranslator: CaptionTranslator {
     private let models: TranslationModels
-    private var loaded: LoadedModel?
+    private var loaded: [ModelPair: LoadedModel] = [:]
 
     public init(models: TranslationModels) {
         self.models = models
     }
 
-    public func translate(_ text: String, from source: CaptionLanguage, to target: CaptionLanguage) throws -> String {
-        let handle = try load(from: source, to: target).handle
+    public func translate(_ text: String, through languages: [String]) throws -> String {
+        var current = text
+        for pair in zip(languages, languages.dropFirst()).map(ModelPair.init) {
+            current = try translate(current, with: load(pair).handle)
+        }
+        return current
+    }
+
+    /// Frees every model; the next translation loads what it needs again.
+    public func unload() {
+        loaded = [:]
+    }
+
+    private func translate(_ text: String, with handle: OpaquePointer) throws -> String {
         var error: UnsafeMutablePointer<CChar>?
         guard let output = mm2t_bergamot_translate(handle, text, &error) else {
             throw CaptionTranslationError.engine(Self.take(error) ?? "translation failed")
@@ -36,17 +50,9 @@ public actor BergamotTranslator: CaptionTranslator {
         return String(cString: output)
     }
 
-    /// Frees the model; the next translation loads it again.
-    public func unload() {
-        loaded = nil
-    }
-
-    private func load(from source: CaptionLanguage, to target: CaptionLanguage) throws -> LoadedModel {
-        if let loaded, loaded.direction.source == source, loaded.direction.target == target { return loaded }
-        guard let direction = models.direction(from: source, to: target) else {
-            throw CaptionTranslationError.unsupported(source, target)
-        }
-        unload()
+    private func load(_ pair: ModelPair) throws -> LoadedModel {
+        if let model = loaded[pair] { return model }
+        guard let direction = models.direction(pair) else { throw CaptionTranslationError.unsupported(pair) }
         let paths = models.paths(direction)
         var error: UnsafeMutablePointer<CChar>?
         guard let handle = mm2t_bergamot_model_create(
@@ -54,7 +60,7 @@ public actor BergamotTranslator: CaptionTranslator {
             throw CaptionTranslationError.engine(Self.take(error) ?? "the translation model did not load")
         }
         let model = LoadedModel(direction: direction, handle: handle)
-        loaded = model
+        loaded[pair] = model
         return model
     }
 

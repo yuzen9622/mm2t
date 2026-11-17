@@ -31,7 +31,7 @@ import Testing
                                            size: Int64(data.count), sha256: TranslationModels.sha256(data))
         }
         let direction = TranslationDirection(
-            source: .english, target: .traditionalChinese, folder: "en-zh_hant",
+            pair: ModelPair("en", "zh_hant"),
             model: pinned["model.bin"]!, shortlist: pinned["vocab.spm"]!,
             sourceVocabulary: pinned["vocab.spm"]!, targetVocabulary: pinned["vocab.spm"]!)
         return Fixture(models: TranslationModels(directory: directory.appending(path: "translation"), directions: [direction]),
@@ -51,7 +51,8 @@ import Testing
         #expect(fractions.values.last == 1)
         #expect(fractions.values == fractions.values.sorted(), "progress never goes backwards")
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: paths.model.deletingLastPathComponent().path)
-        #expect(leftovers.sorted() == ["model.bin", "vocab.spm"], "no compressed or partial files stay behind")
+        #expect(leftovers.sorted() == [TranslationModels.markerName, "model.bin", "vocab.spm"],
+                "no compressed or partial files stay behind")
     }
 
     @Test func aFileThatDoesNotMatchItsHashIsDeletedAndNothingReadsAsInstalled() async throws {
@@ -91,15 +92,32 @@ import Testing
         #expect(throws: Gzip.Invalid.self) { try Gzip.decompress(Data("plain".utf8)) }
     }
 
-    @Test func thePinnedMozillaModelsCoverBothDirections() {
+    @Test func thePinnedMozillaModelsCoverEveryTarget() {
         let models = TranslationModels.mozilla(in: URL(filePath: "/tmp/none"))
-        #expect(models.direction(from: .english, to: .traditionalChinese) != nil)
-        #expect(models.direction(from: .traditionalChinese, to: .english) != nil)
-        #expect(models.downloadBytes > 70_000_000 && models.downloadBytes < 80_000_000)
+        for target in CaptionTarget.all {
+            let needed = models.for(target)
+            #expect(Set(needed.directions.map(\.pair)) == Set(target.modelPairs), "\(target.name)")
+        }
+        // Compressed bytes per target, as onboarding and the download line count them.
+        #expect(models.for(.traditionalChinese).downloadBytes == 36_402_857)
+        #expect(models.for(.english).downloadBytes == 37_754_294)
+        #expect(models.for(.japanese).downloadBytes == 36_229_257 + 37_754_294, "its own model and Chinese into English")
+        #expect(models.for(.german).downloadBytes == 25_720_702 + 37_754_294, "one shared vocabulary counted once")
         for file in models.directions.flatMap(\.files) {
             #expect(file.url.host() == "storage.googleapis.com")
+            #expect(file.url.path.contains("-prod-translations-data/models/"))
             #expect(file.sha256.count == 64 && file.compressedSHA256.count == 64)
         }
+    }
+
+    @Test func installingOneTargetKeepsTheOthersAndMarksEachDirection() async throws {
+        let setup = fixture(in: try scratchDirectory())
+        try await setup.models.download(configuration: setup.server.configuration)
+        let direction = setup.models.directions[0]
+        let marker = setup.models.directory.appending(path: direction.folder).appending(path: TranslationModels.markerName)
+        #expect(FileManager.default.fileExists(atPath: marker.path), "installed per direction")
+        let none = TranslationModels(directory: setup.models.directory, directions: [])
+        #expect(none.isDownloaded && none.downloadBytes == 0, "a target needing nothing is installed")
     }
 }
 
@@ -142,30 +160,32 @@ import Testing
         "謝謝大家參加，我今天下午會把會議紀錄寄出去。",
     ]
 
-    @Test(.enabled(if: models != nil)) func translatesBothWaysOnThisMac() async throws {
-        let translator = BergamotTranslator(models: Self.models!)
-        for (sentences, source, target) in [(Self.english, CaptionLanguage.english, CaptionLanguage.traditionalChinese),
-                                            (Self.chinese, .traditionalChinese, .english)] {
-            let clock = ContinuousClock()
-            let load = try await clock.measure { _ = try await translator.translate("Hello.", from: source, to: target) }
-            var times: [Duration] = []
-            for sentence in sentences {
-                var output = ""
-                times.append(try await clock.measure { output = try await translator.translate(sentence, from: source, to: target) })
-                print("\(source) -> \(target): \(sentence) => \(output)")
-                #expect(CaptionLanguage.of(output) == target)
+    @Test(.enabled(if: models != nil)) func translatesIntoEveryTargetOnThisMac() async throws {
+        for target in CaptionTarget.all {
+            let translator = BergamotTranslator(models: Self.models!.for(target))
+            for (sentences, source) in [(Self.english, CaptionLanguage.english), (Self.chinese, .traditionalChinese)] {
+                guard case .models(let languages) = target.route(from: source) else { continue }
+                let clock = ContinuousClock()
+                let load = try await clock.measure { _ = try await translator.translate("Hello, 你好。", through: languages) }
+                var times: [Duration] = []
+                for sentence in sentences {
+                    var output = ""
+                    times.append(try await clock.measure { output = try await translator.translate(sentence, through: languages) })
+                    print("\(languages.joined(separator: "->")): \(sentence) => \(output)")
+                    #expect(!output.isEmpty)
+                }
+                let sorted = times.sorted()
+                print("TIMING \(languages.joined(separator: "->")): first call with load \(load), median \(sorted[sorted.count / 2]), max \(sorted.last!)")
             }
-            let sorted = times.sorted()
-            print("\(source) -> \(target): first call with load \(load), median \(sorted[sorted.count / 2]), max \(sorted.last!)")
+            await translator.unload()
         }
-        await translator.unload()
     }
 
     @Test(.enabled(if: models != nil)) func aMissingModelFileIsAnErrorNotACrash() async throws {
         let empty = TranslationModels(directory: try scratchDirectory(), directions: Self.models!.directions)
         let translator = BergamotTranslator(models: empty)
         await #expect(throws: CaptionTranslationError.self) {
-            _ = try await translator.translate("Hello.", from: .english, to: .traditionalChinese)
+            _ = try await translator.translate("Hello.", through: ["en", "zh_hant"])
         }
     }
 }

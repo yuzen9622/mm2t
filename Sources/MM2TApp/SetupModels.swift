@@ -123,7 +123,7 @@ public final class SetupModel {
     public private(set) var models: ModelDownloadState = .notDownloaded
     /// The on-device speech model and LLM behind the two offline switches.
     public private(set) var offlineModels: [OfflineModel: ModelDownloadState] = [:]
-    /// Both directions of the live caption translation models.
+    /// The live caption translation models the chosen target language needs.
     public private(set) var translationModels: ModelDownloadState = .notDownloaded
     /// Whether this Mac is suited to each offline option, for the hint next to its switch.
     public let suitability: OfflineSuitability
@@ -131,13 +131,16 @@ public final class SetupModel {
     public let fields: [CredentialField]
     /// What the speaker model and the translation models each download from nothing.
     public var speakerModelBytes: Int64 { installer.downloadBytes }
-    public var translationModelBytes: Int64 { translationInstaller.downloadBytes }
+    public var translationModelBytes: Int64 { translationTarget.map { translationInstaller($0).downloadBytes } ?? 0 }
+    /// The language captions are translated into; nil when translation is off and needs no models.
+    public var translationTarget: CaptionTarget? { chosenTranslation() }
     public func offlineModelBytes(_ model: OfflineModel) -> Int64 { offlineInstallers[model]?.downloadBytes ?? 0 }
 
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let installer: any ModelInstalling
     @ObservationIgnored private let offlineInstallers: [OfflineModel: any ModelInstalling]
-    @ObservationIgnored private let translationInstaller: any ModelInstalling
+    @ObservationIgnored private let translationInstaller: @MainActor (CaptionTarget) -> any ModelInstalling
+    @ObservationIgnored private let chosenTranslation: @MainActor () -> CaptionTarget?
     @ObservationIgnored private let runningBrowsers: @MainActor () -> [String]
     @ObservationIgnored private let checkSetup: @MainActor () -> [SetupIssue]
 
@@ -145,7 +148,7 @@ public final class SetupModel {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
-        translationInstaller: any ModelInstalling,
+        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
         suitability: OfflineSuitability,
         credentials: any CredentialStoring,
         validator: any KeyValidating,
@@ -157,6 +160,7 @@ public final class SetupModel {
         self.installer = installer
         self.offlineInstallers = offlineInstallers
         self.translationInstaller = translationInstaller
+        chosenTranslation = { settings.settings.captionTranslation.target }
         self.suitability = suitability
         self.runningBrowsers = runningBrowsers
         self.checkSetup = checkSetup
@@ -183,9 +187,7 @@ public final class SetupModel {
             if case .downloading = offlineModels[model] { continue }
             offlineModels[model] = offlineInstallers[model]?.isDownloaded == true ? .downloaded : .notDownloaded
         }
-        if case .downloading = translationModels {} else {
-            translationModels = translationInstaller.isDownloaded ? .downloaded : .notDownloaded
-        }
+        refreshTranslation()
         issues = checkSetup()
     }
 
@@ -247,20 +249,34 @@ public final class SetupModel {
         issues = checkSetup()
     }
 
-    /// Same as `downloadModels`, for the caption translation models; a retry resumes.
+    /// Re-reads whether the chosen target's models are on disk, unless a download is running.
+    public func refreshTranslation() {
+        if case .downloading = translationModels { return }
+        translationModels = translationTarget.map { translationInstaller($0).isDownloaded ? .downloaded : .notDownloaded }
+            ?? .notDownloaded
+    }
+
+    /// Same as `downloadModels`, for the models of the chosen target language only; a retry resumes.
+    /// If the choice changes while it runs, the newly chosen language's models follow.
     public func downloadTranslationModels() async {
         if case .downloading = translationModels { return }
-        translationModels = .downloading(0)
-        do {
-            try await translationInstaller.download { [weak self] fraction in
-                Task { @MainActor in
-                    if case .downloading = self?.translationModels { self?.translationModels = .downloading(fraction) }
+        var fetched: Set<CaptionTarget> = []
+        while let target = translationTarget, !translationInstaller(target).isDownloaded, !fetched.contains(target) {
+            fetched.insert(target)
+            translationModels = .downloading(0)
+            do {
+                try await translationInstaller(target).download { [weak self] fraction in
+                    Task { @MainActor in
+                        if case .downloading = self?.translationModels { self?.translationModels = .downloading(fraction) }
+                    }
                 }
+            } catch {
+                translationModels = .failed(String(describing: error))
+                return
             }
-            translationModels = .downloaded
-        } catch {
-            translationModels = .failed(String(describing: error))
+            translationModels = .notDownloaded
         }
+        refreshTranslation()
     }
 
     /// Re-checks what processing still needs after the user changed keys or settings.

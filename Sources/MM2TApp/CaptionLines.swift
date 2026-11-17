@@ -1,3 +1,5 @@
+import AppKit
+import CoreText
 import Foundation
 
 /// The caption bar's main area as whole lines. Text wraps the way `breakLines` says; when a third
@@ -79,5 +81,58 @@ public struct CaptionLines: Sendable {
                                      arrived: run.arrived, isPartial: run.isPartial))
         }
         return result
+    }
+}
+
+/// Where the caption bar's 18 pt rounded medium text wraps, so the bar can lay out whole lines
+/// itself. Spaced scripts (English, Korean, German, Czech) break between words and unspaced ones
+/// (Chinese, Japanese) between characters, with CoreText's rules for punctuation. CoreText breaks
+/// Hangul between syllables, so a break inside a spaced word moves back to the space before it.
+@MainActor
+public struct CaptionLineBreaker {
+    public let width: CGFloat
+
+    public init(width: CGFloat) { self.width = width }
+
+    static let font: NSFont = {
+        let base = NSFont.systemFont(ofSize: 18, weight: .medium)
+        return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 18) } ?? base
+    }()
+
+    /// The number of characters on each line of `text`.
+    public func counts(_ text: String) -> [Int] {
+        let attributed = NSAttributedString(string: text, attributes: [.font: Self.font])
+        let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+        let length = attributed.length
+        var counts: [Int] = []
+        var start = 0
+        var index = text.startIndex
+        // A hair narrower than the bar, so SwiftUI never finds a line too long for it.
+        let room = Double(max(width - 2, 40))
+        while start < length {
+            var count = CTTypesetterSuggestLineBreak(typesetter, start, room)
+            guard count > 0 else { break }
+            var end = String.Index(utf16Offset: start + count, in: text)
+            if end < text.endIndex, let last = text[index..<end].last, Self.isSpacedWord(last), Self.isSpacedWord(text[end]),
+               let space = text[index..<end].lastIndex(where: \.isWhitespace) {
+                end = text.index(after: space)
+                count = end.utf16Offset(in: text) - start
+            }
+            counts.append(text[index..<end].count)
+            index = end
+            start += count
+        }
+        return counts
+    }
+
+    /// A letter or digit of a script written with spaces between words.
+    static func isSpacedWord(_ character: Character) -> Bool {
+        guard character.isLetter || character.isNumber else { return false }
+        return !character.unicodeScalars.contains { $0.properties.isIdeographic || (0x3040...0x30FF).contains($0.value) }
+    }
+
+    /// How wide `text` is in the bar's font, to check that a line fits.
+    public func width(of text: String) -> CGFloat {
+        NSAttributedString(string: text, attributes: [.font: Self.font]).size().width
     }
 }

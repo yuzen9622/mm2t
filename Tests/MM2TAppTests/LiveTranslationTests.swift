@@ -14,7 +14,7 @@ import Testing
         let waits = Box<[Duration]>([])
         let gate = Box(Gate<Bool>())
 
-        init(target: CaptionLanguage = .traditionalChinese) {
+        init(target: CaptionTarget = .traditionalChinese) {
             let clock = clock
             captions = LiveCaptions(now: { clock.get })
             let waits = waits
@@ -52,7 +52,7 @@ import Testing
         let segment = harness.captions.segments[0]
         #expect(segment.translation == "我們後面再說。", "Chinese output is converted to Traditional")
         #expect(harness.captions.mainText(of: segment) == "我們後面再說。")
-        #expect(harness.translator.calls.get == [.init(text: "Let's talk later.", source: .english, target: .traditionalChinese)])
+        #expect(harness.translator.calls.get == [.init(text: "Let's talk later.", languages: ["en", "zh_hant"])])
     }
 
     @Test func intoEnglishOnlyChineseIsTranslated() async throws {
@@ -61,30 +61,30 @@ import Testing
         harness.captions.receive(.final("下週再確認。"))
         harness.captions.receive(.final("2026."))
         #expect(await eventually { harness.captions.segments[1].translation == "⟨下週再確認。⟩" })
-        #expect(harness.translator.calls.get == [.init(text: "下週再確認。", source: .traditionalChinese, target: .english)])
+        #expect(harness.translator.calls.get == [.init(text: "下週再確認。", languages: ["zh_hant", "en"])])
         #expect(harness.captions.segments[0].translation == nil)
         #expect(harness.captions.segments[2].translation == nil, "digits and punctuation are left as they are")
     }
 
-    @Test func resultsAttachToTheirOwnSegmentWhateverOrderTheyReturnIn() async throws {
+    @Test func segmentsAreTranslatedOneAtATimeInTheOrderTheySettled() async throws {
         let harness = Harness()
         harness.translator.holds.set(true)
         harness.captions.receive(.final("First point."))
         harness.captions.receive(.final("Second point."))
-        #expect(await eventually { harness.translator.held == ["First point.", "Second point."] })
-        #expect(harness.texts == ["First point.", "Second point."], "sent in the order they settled")
+        harness.captions.receive(.final("Third point."))
         let ids = harness.captions.segments.map(\.id)
+        #expect(await eventually { harness.translator.held == ["First point."] })
+        #expect(harness.texts == ["First point."], "the next waits for the one before it")
         #expect(harness.captions.segments.allSatisfy { harness.captions.mainText(of: $0) == nil }, "nothing shown until translated")
+        #expect(harness.captions.awaitingTranslation == Set(ids))
 
-        await harness.translator.release("Second point.")
-        #expect(await eventually { harness.captions.segments[1].translation == "⟨Second point.⟩" })
-        #expect(harness.captions.segments[0].translation == nil)
-        #expect(harness.captions.awaitingTranslation == [ids[0]])
-
-        await harness.translator.release("First point.")
-        #expect(await eventually { harness.captions.segments[0].translation == "⟨First point.⟩" })
-        #expect(harness.captions.segments[1].translation == "⟨Second point.⟩")
-        #expect(harness.captions.awaitingTranslation.isEmpty)
+        for (index, text) in ["First point.", "Second point.", "Third point."].enumerated() {
+            #expect(await eventually { harness.translator.held == [text] })
+            await harness.translator.release(text)
+            #expect(await eventually { harness.captions.segments[index].translation == "⟨\(text)⟩" })
+            #expect(harness.captions.awaitingTranslation == Set(ids.dropFirst(index + 1)), "each lands on its own segment")
+        }
+        #expect(harness.texts == ["First point.", "Second point.", "Third point."])
     }
 
     @Test func onlyTheSettledPartOfAPartialIsSentAndItsTranslationIsNeverBlanked() async throws {
@@ -213,11 +213,87 @@ import Testing
     @Test func processingIgnoresTheTranslationSetting() throws {
         var settings = AppSettings()
         let before = settings.forProcessing
-        settings.captionTranslation = .english
+        settings.captionTranslation = CaptionTranslation(.english)
         #expect(settings.forProcessing == before)
         let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
-        #expect(decoded.captionTranslation == .english)
+        #expect(decoded.captionTranslation == CaptionTranslation(.english))
         #expect(try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8)).captionTranslation == .off)
+    }
+
+    @Test func otherTargetsRouteThroughEnglishAndKeepTheirOwnScript() async throws {
+        let harness = Harness(target: .japanese)
+        harness.translator.answers.set(["We agreed.": "合意しました。", "下週再確認。": "来週もう一度確認します。"])
+        harness.captions.receive(.final("We agreed."))
+        harness.captions.receive(.final("下週再確認。"))
+        #expect(await eventually { harness.captions.segments.allSatisfy { $0.translation != nil } })
+        #expect(harness.translator.calls.get == [.init(text: "We agreed.", languages: ["en", "ja"]),
+                                                  .init(text: "下週再確認。", languages: ["zh_hant", "en", "ja"])])
+        #expect(harness.captions.segments.map(\.translation) == ["合意しました。", "来週もう一度確認します。"],
+                "Japanese output is not run through the Traditional Chinese conversion")
+    }
+
+    @Test func simplifiedChineseConvertsChineseWithoutAModelAndTranslatesEnglish() async throws {
+        let harness = Harness(target: .simplifiedChinese)
+        harness.translator.answers.set(["See you later.": "回头见。"])
+        harness.captions.receive(.final("後面再說。"))
+        harness.captions.receive(.final("See you later."))
+        #expect(await eventually { harness.captions.segments.allSatisfy { $0.translation != nil } })
+        #expect(harness.captions.segments.map(\.translation) == ["后面再说。", "回头见。"])
+        #expect(harness.captions.segments[0].text == "後面再說。", "the original caption stays Traditional")
+        #expect(harness.translator.calls.get == [.init(text: "See you later.", languages: ["en", "zh"])],
+                "Chinese into Simplified is a script conversion only")
+    }
+
+    @Test func englishSpeechIntoEnglishShowsTheOriginalOnly() async throws {
+        let harness = Harness(target: .english)
+        harness.captions.receive(.final("We agreed."))
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(harness.translator.calls.get.isEmpty)
+        #expect(harness.captions.displaySegments.map(\.text) == ["We agreed."])
+    }
+
+    @Test func storedChoicesKeepLoadingAndUnknownOnesReadAsOff() throws {
+        func decode(_ json: String) throws -> CaptionTranslation {
+            try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8)).captionTranslation
+        }
+        #expect(try decode(#"{"captionTranslation":"traditionalChinese"}"#) == CaptionTranslation(.traditionalChinese))
+        #expect(try decode(#"{"captionTranslation":"english"}"#) == CaptionTranslation(.english))
+        #expect(try decode(#"{"captionTranslation":"off"}"#) == .off)
+        #expect(try decode(#"{"captionTranslation":"klingon"}"#) == .off)
+        #expect(try decode(#"{"captionTranslation":3}"#) == .off, "a malformed value does not lose the other settings")
+        for choice in CaptionTranslation.allCases {
+            var settings = AppSettings()
+            settings.captionTranslation = choice
+            let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+            #expect(decoded.captionTranslation == choice)
+        }
+        #expect(CaptionTranslation.allCases.map { $0.target?.name } ==
+                [nil, "繁體中文", "简体中文", "한국어", "日本語", "English", "Deutsch", "Čeština"])
+        #expect(CaptionTranslation.allCases.compactMap(\.target?.flag) == ["🇹🇼", "🇨🇳", "🇰🇷", "🇯🇵", "🇺🇸", "🇩🇪", "🇨🇿"])
+    }
+
+    @Test func choosingALanguageDownloadsOnlyItsModelsAndSwitchingKeepsTheOthers() async throws {
+        let world = try World()
+        await world.app.setCaptionTranslation(CaptionTranslation(.german))
+        #expect(world.translationInstaller.downloads.get == 1)
+        #expect(world.app.setup.translationModels == .downloaded)
+        #expect(world.app.setup.translationTarget == .german)
+        await world.app.setCaptionTranslation(.off)
+        #expect(world.app.setup.translationTarget == nil)
+        #expect(world.app.setup.translationModelBytes == 0)
+        #expect(world.catalog.translationDownloaded.get, "turning translation off deletes nothing")
+    }
+
+    @Test func aRecordingAsksForATranslatorForItsTarget() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.korean)
+        world.catalog.translationDownloaded.set(true)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.translatorTargets.get == [.korean])
+        #expect(world.capture.captions.translationTarget == .korean)
+        await world.capture.stop()
     }
 
     // MARK: Through the app
@@ -225,8 +301,8 @@ import Testing
     @Test func turningTranslationOnDownloadsTheModels() async throws {
         let world = try World()
         #expect(world.app.setup.translationModels == .notDownloaded)
-        await world.app.setCaptionTranslation(.traditionalChinese)
-        #expect(world.app.settings.settings.captionTranslation == .traditionalChinese)
+        await world.app.setCaptionTranslation(CaptionTranslation(.traditionalChinese))
+        #expect(world.app.settings.settings.captionTranslation == CaptionTranslation(.traditionalChinese))
         #expect(world.app.setup.translationModels == .downloaded)
         #expect(world.catalog.translationDownloaded.get)
     }
@@ -234,7 +310,7 @@ import Testing
     @Test func aRecordingTranslatesItsCaptionsOnceTheModelsAreThere() async throws {
         let world = try World()
         world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.captionTranslation = .english
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.english)
         world.catalog.translationDownloaded.set(true)
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         #expect(await eventually { world.capture.captions.status == .live })
@@ -249,7 +325,7 @@ import Testing
     @Test func withoutTheModelsCaptionsRunUntranslated() async throws {
         let world = try World()
         world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.captionTranslation = .english
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.english)
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         #expect(await eventually { world.capture.captions.status == .live })
         #expect(world.capture.captions.translationTarget == nil)

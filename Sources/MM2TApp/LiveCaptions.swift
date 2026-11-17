@@ -41,7 +41,7 @@ public final class LiveCaptions {
     public var isBarHidden = false
 
     /// The language captions are translated into for this recording; nil when translation is off.
-    public private(set) var translationTarget: CaptionLanguage?
+    public private(set) var translationTarget: CaptionTarget?
     /// Segments whose final translation has been asked for and has not come back.
     public private(set) var awaitingTranslation: Set<Int> = []
     /// The latest translation of the unfinished partial's settled part. It stays on screen while
@@ -134,7 +134,7 @@ public final class LiveCaptions {
 
     /// Translates this recording's captions into `target` from here on. Called once per recording,
     /// after `clear()`; the translator, and the model it holds, goes with the next `clear()`.
-    func translate(with translator: any CaptionTranslator, to target: CaptionLanguage,
+    func translate(with translator: any CaptionTranslator, to target: CaptionTarget,
                    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         translation?.stop()
         translationTarget = target
@@ -147,7 +147,7 @@ public final class LiveCaptions {
     /// The text needs translating: translation is on and it is in the other language.
     func needsTranslation(_ text: String) -> Bool {
         guard let target = translationTarget, let language = CaptionLanguage.of(text) else { return false }
-        return language != target
+        return target.route(from: language) != .none
     }
 
     /// The translation a surface shows for a finished segment: its own, or until that arrives the

@@ -1,19 +1,21 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "About %lld MB in total.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "總共約 %lld MB。" } } } },
+    "Microsoft 365 or Outlook.com": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Microsoft 365 或 Outlook.com" } } } },
+    "Open your browser to grant it.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請先開啟瀏覽器再授權。" } } } },
+    "Read this aloud at your normal speaking voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "用平常說話的聲音唸出這段文字。" } } } },
+    "Your primary Google calendar": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你的 Google 主要日曆" } } } },
     "Allow microphone access to continue.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "允許使用麥克風後才能繼續。" } } } },
     "Enter the language model server's URL and model name.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入語言模型伺服器的網址與模型名稱。" } } } },
     "Enter your transcription server's URL.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入轉錄伺服器的網址。" } } } },
     "On-device language model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機語言模型" } } } },
     "On-device transcription": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機轉錄" } } } },
-    "Read the passage aloud to continue.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "唸出這段文字後才能繼續。" } } } },
     "Starting model downloads…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在開始下載模型…" } } } },
     "Turn Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
-    "Turns your meeting audio into text on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在這台 Mac 上把會議音訊轉成文字。" } } } },
     "Use ElevenLabs": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用 ElevenLabs" } } } },
     "Use Your Server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用你的伺服器" } } } },
     "How do you want to use mm2t?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你想怎麼使用 mm2t？" } } } },
-    "You can change this later in Settings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "之後可以在「設定」中更改。" } } } },
     "Sign in": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "登入" } } } },
     "Coming soon": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即將推出" } } } },
     "Free plan, 250 minutes a month, processed after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "免費方案，每月 250 分鐘，會議結束後處理。" } } } },
@@ -22,25 +24,15 @@
     "Connect to your own server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連線到自己的伺服器" } } } },
     "Audio only travels between your machines.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "音訊只在你自己的機器之間傳送。" } } } },
     "Let mm2t hear your meetings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 聽見你的會議。" } } } },
-    "Recordings stay on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "錄音會留在這台 Mac 上。" } } } },
     "Download the models this Mac needs.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "下載這台 Mac 需要的模型。" } } } },
-    "Telling speakers apart and live translation both run on this Mac. About %lld MB in total. You can go on while they download.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "分辨說話者與即時翻譯都在這台 Mac 上執行，總共約 %lld MB。下載時可以先繼續。" } } } },
     "Speakers and voiceprints": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "說話者與聲紋" } } } },
-    "Tells speakers apart and recognizes your voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "分辨不同的說話者，並認出你的聲音。" } } } },
     "Translation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯" } } } },
-    "Translates live captions between Chinese and English.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在中文與英文之間翻譯即時字幕。" } } } },
     "Downloaded": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已下載" } } } },
     "Teach mm2t your voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 認識你的聲音。" } } } },
-    "Read this aloud at your normal speaking voice. The voiceprint stays on this Mac.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "用平常說話的聲音唸出這段文字。聲紋會留在這台 Mac 上。" } } } },
     "Waiting for the speaker model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在等待說話者模型… %lld%%" } } } },
     "Connect your services.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的服務。" } } } },
     "Connect your server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的伺服器" } } } },
-    "Keys are kept in this Mac's Keychain and only sent to their own service.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "金鑰保存在這台 Mac 的鑰匙圈中，只會傳送給各自的服務。" } } } },
-    "Tokens are kept in this Mac's Keychain and only sent to your servers.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "權杖保存在這台 Mac 的鑰匙圈中，只會傳送給你的伺服器。" } } } },
-    "Speech to text and live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "語音轉文字與即時字幕。" } } } },
-    "Cleans up transcripts, summaries and to-dos.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "整理逐字稿、摘要與待辦事項。" } } } },
     "Transcription server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "轉錄伺服器" } } } },
-    "Turns your meeting audio into text.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "把會議音訊轉成文字。" } } } },
     "Language model server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "語言模型伺服器" } } } },
     "Continue": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "繼續" } } } },
     "Start Using mm2t": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開始使用 mm2t" } } } },
@@ -52,9 +44,7 @@
     "Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
     "Downloading translation model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在下載翻譯模型… %lld%%" } } } },
     "Couldn't download the translation model.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法下載翻譯模型。" } } } },
-    "Translated on this Mac. Nothing is sent anywhere.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "在這台 Mac 上翻譯，不會傳送到任何地方。" } } } },
     "Open Live Page": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開啟即時頁面" } } } },
-    "Live captions are a preview. The saved transcript is produced after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕僅供預覽，儲存的逐字稿會在會議結束後產生。" } } } },
     "Listening…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中…" } } } },
     "Captions appear here as people speak.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "有人說話時，字幕會出現在這裡。" } } } },
     "Live captions are off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕已關閉" } } } },
@@ -66,20 +56,17 @@
     "Reconnecting": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "重新連線中" } } } },
     "Listening": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中" } } } },
     "Live captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕" } } } },
-    "Shows what is being said while you record. Audio is streamed to ElevenLabs; captions are not saved.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "錄音時顯示正在說的話。音訊會串流到 ElevenLabs，字幕不會儲存。" } } } },
     "Add an ElevenLabs key to use live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "加入 ElevenLabs 金鑰即可使用即時字幕。" } } } },
     "%lld assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 項交辦" } } } },
     "Assistant memory": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "助理記憶" } } } },
     "Checked assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "查詢交辦事項" } } } },
     "Conversation history": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "對話紀錄" } } } },
-    "Conversations stay on this Mac until you delete them. Relevant preferences, recent conversation context and meeting excerpts are sent to your selected cloud model. Local models process them on this Mac. Iterative searches may make several model requests.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "對話保存在這台 Mac，直到你主動刪除。使用雲端模型時，相關偏好、近期對話及會議摘錄會送至你選擇的模型；本機模型則在這台 Mac 處理。反覆檢索可能增加模型請求次數。" } } } },
     "Delete conversation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "刪除對話" } } } },
     "Delete this conversation?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要刪除這段對話嗎？" } } } },
     "Delete this preference?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要刪除這項偏好嗎？" } } } },
     "It will no longer be used in future requests. Earlier messages may still show it in conversation history.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "後續請求將不再使用這項偏好。對話紀錄中的舊訊息仍可能顯示原文。" } } } },
     "New conversation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "新對話" } } } },
     "No saved preferences": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "尚未保存偏好" } } } },
-    "Only saved after confirmation. Relevant preferences and conversation context are sent to your selected model when you ask a question.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "確認後才會保存。提問時，相關偏好與對話內容會送至你選擇的模型。" } } } },
     "Preference": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "偏好內容" } } } },
     "Project or topic (optional)": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "專案或主題（選填）" } } } },
     "Remember this preference?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要記住這項偏好嗎？" } } } },
@@ -132,7 +119,6 @@
     "Remove": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "移除" } } } },
     "Website": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "網站" } } } },
     "Websites": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "網站" } } } },
-    "When one that's on starts using the mic, mm2t offers to record.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開啟的 App 開始使用麥克風時，mm2t 會詢問是否要錄音。" } } } },
     "Selected": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已選取" } } } },
     "Not selected": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "未選取" } } } },
     "Add terms": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "新增詞彙" } } } },
@@ -1529,16 +1515,6 @@
         }
       }
     },
-    "Microsoft 365 or Outlook.com, read-only": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Microsoft 365 或 Outlook.com，唯讀"
-          }
-        }
-      }
-    },
     "Model installed": {
       "localizations": {
         "zh-Hant": {
@@ -1869,16 +1845,6 @@
         }
       }
     },
-    "Open your browser to grant it. It lets mm2t read the open tab's address.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請先開啟瀏覽器再授權。授權後 mm2t 才能讀取目前分頁的網址。"
-          }
-        }
-      }
-    },
     "Others": {
       "localizations": {
         "zh-Hant": {
@@ -2099,26 +2065,6 @@
         }
       }
     },
-    "Reads the meeting window's title to detect browser meetings.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "讀取會議視窗標題，用來偵測瀏覽器會議。"
-          }
-        }
-      }
-    },
-    "Reads the open tab's address to tell which meeting it is.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "讀取目前分頁的網址，判斷是哪一種會議。"
-          }
-        }
-      }
-    },
     "Ready": {
       "localizations": {
         "zh-Hant": {
@@ -2195,26 +2141,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在錄音"
-          }
-        }
-      }
-    },
-    "Records only the meeting app's sound. macOS asks the first time you record.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "只錄下會議 App 的聲音。第一次錄音時 macOS 會詢問。"
-          }
-        }
-      }
-    },
-    "Records your side of the meeting.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "錄下你這一方的聲音。"
           }
         }
       }
@@ -2409,16 +2335,6 @@
         }
       }
     },
-    "See each day's meetings here and join calls in one click. Connect as many as you use.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在這裡查看每天的會議，一鍵加入視訊。用到幾個就連結幾個。"
-          }
-        }
-      }
-    },
     "OpenAI-compatible": {
       "localizations": {
         "zh-Hant": {
@@ -2535,16 +2451,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "登入沒有完成，請再試一次。"
-          }
-        }
-      }
-    },
-    "Some keyboards keep their Fn key to themselves. If the shortcut does nothing, click it and press another, such as ⌃⌥R.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "有些鍵盤的 Fn 鍵不會傳給 Mac。如果快速鍵沒有作用，請點一下它，改按其他組合，例如 ⌃⌥R。"
           }
         }
       }
@@ -3139,26 +3045,6 @@
         }
       }
     },
-    "While on, screen shares, recordings and screenshots leave mm2t's windows out.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟時，螢幕分享、螢幕錄影與截圖都不會出現 mm2t 的視窗。"
-          }
-        }
-      }
-    },
-    "Works in any app. Press it once to start recording and again to stop.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在任何 App 中都能使用。按一下開始錄音，再按一下停止。"
-          }
-        }
-      }
-    },
     "Writing the summary": {
       "localizations": {
         "zh-Hant": {
@@ -3195,16 +3081,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "你的會議"
-          }
-        }
-      }
-    },
-    "Your primary Google calendar, read-only": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "你的 Google 主要日曆，唯讀"
           }
         }
       }
@@ -3355,16 +3231,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "mm2t 已經認得你的聲音"
-          }
-        }
-      }
-    },
-    "mm2t needs your permissions and keys before it can take notes.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "mm2t 需要先取得權限與 API 金鑰，才能開始記錄會議。"
           }
         }
       }

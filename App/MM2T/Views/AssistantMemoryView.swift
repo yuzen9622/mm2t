@@ -55,8 +55,6 @@ struct AssistantPreferenceProposal: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Remember this preference?").font(Typo.bodyStrong)
             TextField("Preference", text: $text, axis: .vertical).textFieldStyle(.roundedBorder)
-            Text("Only saved after confirmation. Relevant preferences and conversation context are sent to your selected model when you ask a question.")
-                .font(Typo.caption).foregroundStyle(Palette.secondary)
             HStack {
                 PillButton("Save", kind: .primary) { model.confirmPreference(turn: turn.id, text: text) }
                     .disabled(model.isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.count > 300)
@@ -81,8 +79,6 @@ struct AssistantMemorySettings: View {
             Toggle("Use saved preferences", isOn: Binding(get: { preferences.enabled }, set: { value in
                 perform { try preferences.setEnabled(value) }
             }))
-            Text("Conversations stay on this Mac until you delete them. Relevant preferences, recent conversation context and meeting excerpts are sent to your selected cloud model. Local models process them on this Mac. Iterative searches may make several model requests.")
-                .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
             if let message = preferences.error ?? error {
                 Text(verbatim: message).font(Typo.caption).foregroundStyle(Palette.danger)
             }
