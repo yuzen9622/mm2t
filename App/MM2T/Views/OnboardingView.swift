@@ -545,7 +545,10 @@ struct VoiceEnrollmentView: View {
                     PillButton("Done Reading", icon: "player-stop", kind: .primary) {
                         Task { await model.finish(passage: Self.passage, name: Copy.presentationLabels.me) }
                     }
-                    ProgressLine(fraction: model.level).frame(maxWidth: 160)
+                    Spacer(minLength: 0)
+                    MiniMeter(level: model.level, color: Palette.orange, restColor: Palette.muted,
+                              shape: MiniMeter.wideShape, barWidth: 5, spacing: 4, height: 28)
+                    Spacer(minLength: 0)
                 case .checking:
                     Text("Checking…").foregroundStyle(Palette.secondary)
                 case .enrolled:

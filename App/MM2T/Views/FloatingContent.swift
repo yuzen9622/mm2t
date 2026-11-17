@@ -267,20 +267,33 @@ struct RecordingDot: View {
     }
 }
 
-/// Four bars that follow the louder track, sized for the resting island's wing; flat while paused.
+/// Bars that follow a live input level; flat and dimmed while paused (nil). The defaults are the
+/// resting island's wing: four white bars that follow the louder track.
 struct MiniMeter: View {
     let level: Double?
-    private static let shape: [Double] = [0.55, 1, 0.75, 0.4]
+    var color: Color = .white
+    /// The colour while paused.
+    var restColor: Color = .white.opacity(0.45)
+    /// Each bar's share of the height at full level, left to right; its count is the bar count.
+    var shape: [Double] = [0.55, 1, 0.75, 0.4]
+    var barWidth: CGFloat = 2.5
+    var spacing: CGFloat = 2
+    var height: CGFloat = 14
+
+    /// Eleven bars for a meter twice the island's size, the same rise and fall from the middle out.
+    static let wideShape: [Double] = [0.35, 0.55, 0.8, 0.6, 1, 0.75, 0.9, 0.5, 0.7, 0.45, 0.3]
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Self.shape.indices, id: \.self) { index in
+        // A bar never drops below 3/14 of the height, so silence still reads as a meter.
+        let floor = height * 3 / 14
+        HStack(spacing: spacing) {
+            ForEach(shape.indices, id: \.self) { index in
                 Capsule()
-                    .fill(.white.opacity(level == nil ? 0.45 : 1))
-                    .frame(width: 2.5, height: 3 + 11 * (level ?? 0) * Self.shape[index])
+                    .fill(level == nil ? restColor : color)
+                    .frame(width: barWidth, height: floor + (height - floor) * (level ?? 0) * shape[index])
             }
         }
-        .frame(height: 14)
+        .frame(height: height)
         .animation(.easeOut(duration: 0.12), value: level)
         .accessibilityHidden(true)
     }
