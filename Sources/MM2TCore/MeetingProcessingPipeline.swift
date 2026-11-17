@@ -291,12 +291,14 @@ public struct MeetingProcessingPipeline: Sendable {
                 let known = meeting.speakers.reduce(into: [SpeakerID: String]()) { result, speaker in
                     if let name = speaker.person.flatMap({ names[$0] }) { result[speaker.id] = name }
                 }
+                let transcript = llmTranscript(meeting)
                 let guesses = try await llm.inferNames(NameInferenceRequest(
-                    transcript: llmTranscript(meeting), unnamedSpeakers: unnamed, knownNames: known))
+                    transcript: transcript, unnamedSpeakers: unnamed, knownNames: known))
                 inferred = guesses
-                    .filter { unnamed.contains($0.speaker) && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .map { NameGuess(speaker: $0.speaker, name: TraditionalChinese.convert($0.name), reason: $0.reason) }
+                    .filter { unnamed.contains($0.speaker) && Self.isSpoken($0.name, in: transcript) }
                     .map { NameSuggestion(speaker: $0.speaker, source: .inferred(
-                        name: TraditionalChinese.convert($0.name), reason: TraditionalChinese.convert($0.reason))) }
+                        name: $0.name, reason: TraditionalChinese.convert($0.reason))) }
             }
             meeting.suggestions = NameSuggestions(items: voiceprintSuggestions + inferred)
 
@@ -593,6 +595,23 @@ public struct MeetingProcessingPipeline: Sendable {
             LLMUtterance(id: $0.id, speaker: $0.speaker, range: $0.range, text: $0.text,
                          isHighlighted: meeting.isHighlighted($0))
         })
+    }
+
+    /// Answers a model gives in place of a name when the transcript has none.
+    private static let placeholderNames: Set<String> = [
+        "無", "无", "沒有", "没有", "未知", "不明", "不詳", "不详", "未提及", "無法判斷", "无法判断", "無名", "某人",
+        "none", "unknown", "n/a", "na", "null", "nil", "?", "？",
+    ]
+
+    /// An inferred name has to be something said in the meeting, so a model that answers with a
+    /// placeholder or invents a name gives no suggestion.
+    static func isSpoken(_ name: String, in transcript: LLMTranscript) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !name.isEmpty, !placeholderNames.contains(name.lowercased()) else { return false }
+        let squeezed = name.lowercased().filter { !$0.isWhitespace }
+        return transcript.utterances.contains { utterance in
+            utterance.text.lowercased().filter { !$0.isWhitespace }.contains(squeezed)
+        }
     }
 
     static func label(_ index: Int) -> String {
