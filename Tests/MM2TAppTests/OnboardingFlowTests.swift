@@ -424,4 +424,22 @@ import Testing
         world.app.closeSetup()
         #expect(world.app.showsSetup)
     }
+
+    @Test func setupCanBeClosedOnlyWhenOpenedAgainFromAFinishedApp() async throws {
+        let world = try World()
+        world.app.openSetup()
+        #expect(!world.app.canCloseSetup, "first run: never")
+
+        world.app.settings.settings.hasCompletedOnboarding = true
+        await world.app.enrollment.refresh()
+        world.app.closeSetup()
+        world.app.openSetup()
+        #expect(!world.app.canCloseSetup, "no voiceprint: setup still blocks the app")
+
+        try await world.app.voiceprints.enrollUser(name: "我", embeddings: [Embedding([0, 1, 0])])
+        await world.app.enrollment.refresh()
+        #expect(world.app.canCloseSetup)
+        world.app.closeSetup()
+        #expect(!world.app.showsSetup && !world.app.canCloseSetup)
+    }
 }

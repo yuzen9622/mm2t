@@ -317,6 +317,10 @@ public final class AppController {
         onboarding.open()
     }
 
+    /// Whether setup can be closed without finishing it: it was opened again after being finished,
+    /// and nothing it asks for blocks the app, such as a missing voiceprint.
+    public var canCloseSetup: Bool { onboarding.isOpenedAgain && !needsOnboarding }
+
     /// Leaves setup the user opened again without finishing it; unfinished setup stays.
     public func closeSetup() {
         onboarding.close()

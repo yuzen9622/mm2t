@@ -137,7 +137,7 @@ struct MainWindow: View {
         }
         .foregroundStyle(Palette.text)
         .font(Typo.body)
-        .background(WindowChrome(close: windowClosed, layout: stage.layout, settled: settled))
+        .background(WindowChrome(close: windowClosed, shouldClose: shouldClose, layout: stage.layout, settled: settled))
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             assistant.close()
         }
@@ -204,10 +204,20 @@ struct MainWindow: View {
         }
     }
 
-    /// Closing the window leaves setup the user opened again; unfinished setup stays.
     private func windowClosed() {
         assistant.close()
-        app.closeSetup()
+    }
+
+    /// The close button (and ⌘W) on setup opened again from the finished app leaves setup instead,
+    /// growing back into the app; anywhere else it closes the window. Ignored while the frame moves.
+    private func shouldClose() -> Bool {
+        switch stage {
+        case .toApp, .toSetup: return false
+        case .setup where app.canCloseSetup:
+            app.closeSetup()
+            return false
+        case .setup, .app: return true
+        }
     }
 
     @ViewBuilder private var appContent: some View {
@@ -464,6 +474,8 @@ enum WindowLayout: Equatable {
 /// background drag the window, and sizes the window for setup or the app.
 struct WindowChrome: NSViewRepresentable {
     let close: () -> Void
+    /// Asked before the window closes; false keeps it open.
+    let shouldClose: () -> Bool
     let layout: WindowLayout
     /// Called once the frame has reached a new layout.
     let settled: (WindowLayout) -> Void
@@ -471,6 +483,7 @@ struct WindowChrome: NSViewRepresentable {
     func makeNSView(context: Context) -> WindowHost {
         let view = WindowHost()
         view.close = close
+        view.shouldClose = shouldClose
         view.settled = settled
         view.animates = !context.environment.accessibilityReduceMotion
         view.request(layout)
@@ -496,6 +509,7 @@ struct WindowChrome: NSViewRepresentable {
 
     func updateNSView(_ view: WindowHost, context: Context) {
         view.close = close
+        view.shouldClose = shouldClose
         view.settled = settled
         view.animates = !context.environment.accessibilityReduceMotion
         view.request(layout)
@@ -503,6 +517,7 @@ struct WindowChrome: NSViewRepresentable {
 
     final class WindowHost: NSView {
         var close: () -> Void = {}
+        var shouldClose: () -> Bool = { true }
         var settled: (WindowLayout) -> Void = { _ in }
         var animates = true
         private var wanted = WindowLayout.app
@@ -518,6 +533,7 @@ struct WindowChrome: NSViewRepresentable {
             NotificationCenter.default.removeObserver(self)
             guard let window else { return }
             window.setFrameAutosaveName("")
+            interceptClose(window)
             let center = NotificationCenter.default
             center.addObserver(self, selector: #selector(windowClosed), name: NSWindow.willCloseNotification, object: window)
             center.addObserver(self, selector: #selector(frameChanged), name: NSWindow.didEndLiveResizeNotification, object: window)
@@ -536,7 +552,19 @@ struct WindowChrome: NSViewRepresentable {
 
         func request(_ layout: WindowLayout) {
             wanted = layout
+            if let window { interceptClose(window) }
             apply()
+        }
+
+        private var interceptor: CloseInterceptor?
+
+        /// Puts `CloseInterceptor` in front of the window's delegate, which SwiftUI owns, once,
+        /// and again should SwiftUI replace its delegate.
+        private func interceptClose(_ window: NSWindow) {
+            guard !(window.delegate is CloseInterceptor) else { return }
+            let interceptor = CloseInterceptor(original: window.delegate) { [weak self] in self?.shouldClose() ?? true }
+            self.interceptor = interceptor
+            window.delegate = interceptor
         }
 
         private func apply() {
@@ -610,6 +638,32 @@ struct WindowChrome: NSViewRepresentable {
             return NSRect(x: (screen.midX - size.width / 2).rounded(), y: (screen.midY - size.height / 2).rounded(),
                           width: size.width, height: size.height)
         }
+    }
+}
+
+/// Answers `windowShouldClose` first and hands every other delegate message to the delegate it
+/// replaced (SwiftUI's), untouched: `responds(to:)` and `forwardingTarget(for:)` pass them on.
+final class CloseInterceptor: NSObject, NSWindowDelegate {
+    /// Held strongly: the window only holds its delegate weakly.
+    private let original: (any NSWindowDelegate)?
+    private let allow: () -> Bool
+
+    init(original: (any NSWindowDelegate)?, allow: @escaping () -> Bool) {
+        self.original = original
+        self.allow = allow
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard allow() else { return false }
+        return original?.windowShouldClose?(sender) ?? true
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || original?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        original?.responds(to: selector) == true ? original : super.forwardingTarget(for: selector)
     }
 }
 
