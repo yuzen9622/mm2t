@@ -480,7 +480,7 @@ struct MeetingPrompt: View {
             .padding(.leading, 10)
             CapsulePill("Record", filled: true) { Task { await capture.startPrompted() } }
                 .keyboardShortcut(.defaultAction)
-            CircleButton("Not This Time", icon: "x") { capture.dismiss() }
+            CircleButton("Cancel", icon: "x") { capture.dismiss() }
         }
     }
 }

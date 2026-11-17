@@ -170,7 +170,7 @@ private struct CaptureCard: View {
                 }
                 HStack(spacing: 8) {
                     WideButton("Record", icon: "microphone") { Task { await capture.startPrompted() } }
-                    PillButton("Not This Time") { capture.dismiss() }
+                    PillButton("Cancel") { capture.dismiss() }
                 }
                 if meeting.isUnlisted {
                     HStack(spacing: 8) {

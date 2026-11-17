@@ -1699,16 +1699,6 @@
         }
       }
     },
-    "Not This Time": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "這次不用"
-          }
-        }
-      }
-    },
     "Not allowed": {
       "localizations": {
         "zh-Hant": {
