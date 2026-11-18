@@ -5,21 +5,41 @@ import SwiftUI
 
 struct AssistantCanvas: View {
     let model: AssistantModel
+    @State private var viewport: CGFloat = 0
+    @State private var tops: [UUID: CGFloat] = [:]
+    private static let top: CGFloat = 24
+    private static let bottom: CGFloat = 180
 
     var body: some View {
         FadingScrollView(ground: Palette.window) {
             VStack(alignment: .leading, spacing: 40) {
                 AssistantToolbar(model: model)
                 ForEach(model.turns) { turn in
-                    AssistantTurnView(model: model, turn: turn, isLast: turn.id == model.turns.last?.id,
+                    let isLast = turn.id == model.turns.last?.id
+                    AssistantTurnView(model: model, turn: turn, isLast: isLast,
                         toggle: { model.toggleActivity(turn.id) }, retry: { model.retry() },
                         setUp: { MainNavigation.shared.openSetup() })
+                        // The last section fills the view, so its question can reach the top.
+                        .frame(minHeight: isLast && model.turns.count > 1 ? max(0, viewport - Self.top - Self.bottom) : nil,
+                            alignment: .top)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { tops[turn.id] = $0 }
                 }
             }
             .frame(maxWidth: 680, alignment: .leading)
-            .padding(.horizontal, 32).padding(.top, 24).padding(.bottom, 180)
+            .padding(.leading, 32).padding(.trailing, 52).padding(.top, Self.top).padding(.bottom, Self.bottom)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(FollowScrollObserver(follow: Binding(get: { model.scroll }, set: { model.scroll = $0 })))
+            .coordinateSpace(.named(Self.space))
+            .background(FollowScrollObserver(follow: Binding(get: { model.scroll }, set: { model.scroll = $0 }),
+                heldTop: model.scroll.held.flatMap { tops[$0] }.map { $0 - Self.top }))
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+        .overlay(alignment: .trailing) {
+            if model.turns.count > 1 {
+                AssistantMinimap(turns: model.turns) { id in
+                    model.scroll = .init(holding: id)
+                }
+                .padding(.trailing, 14)
+            }
         }
         .onDisappear { model.pageDisappeared() }
         .onChange(of: model.turns.last?.state) {
@@ -29,6 +49,7 @@ struct AssistantCanvas: View {
             if let step = model.turns.last?.steps.last { announce(Copy.assistantStep(step) + " " + Copy.assistantDetail(step)) }
         }
     }
+    private static let space = "assistant-content"
     private func announce(_ text: String) {
         guard let window = NSApp.keyWindow else { return }
         NSAccessibility.post(element: window, notification: .announcementRequested, userInfo: [
@@ -48,7 +69,8 @@ private struct AssistantTurnView: View {
     @State private var unavailableSource = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let cited = turn.state == .finished ? turn.citedSources : []
+        return VStack(alignment: .leading, spacing: 0) {
             Text(verbatim: turn.question).font(Typo.title).foregroundStyle(Palette.text).lineLimit(3)
                 .onHover { questionHover = $0 }.tip(verbatim: turn.question, show: questionHover)
             if turn.state == .needsSetup {
@@ -59,13 +81,13 @@ private struct AssistantTurnView: View {
             } else {
                 activity.padding(.top, 14)
                 if !turn.answer.text.isEmpty {
-                    AssistantAnswer(turn: turn, settledOffset: model.shownContent.settledAnswerOffset(for: turn.id), openSource: openSource)
+                    AssistantAnswer(turn: turn, openSource: openSource)
                         .padding(.top, 16)
                 }
                 if turn.memoryProposal != nil {
                     AssistantPreferenceProposal(model: model, turn: turn).padding(.top, 16)
                 }
-                if turn.state == .finished && !turn.citedSources.isEmpty { sources.padding(.top, 20) }
+                if !cited.isEmpty { sources(cited).padding(.top, 20) }
                 if turn.state == .stopped { Text("Stopped").font(Typo.caption).foregroundStyle(Palette.muted).padding(.top, 12) }
                 if case .failed(let reason) = turn.state {
                     Text(verbatim: reason).font(Typo.caption).foregroundStyle(Palette.danger).padding(.top, 12)
@@ -114,10 +136,10 @@ private struct AssistantTurnView: View {
             }
         }
     }
-    private var sources: some View {
+    private func sources(_ cited: [AssistantSource]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sources").font(Typo.captionStrong).foregroundStyle(Palette.muted)
-            ForEach(Array(turn.citedSources.enumerated()), id: \.element.id) { index, source in
+            ForEach(Array(cited.enumerated()), id: \.element.id) { index, source in
                 Button { openSource(source) } label: {
                     HStack(alignment: .top, spacing: 10) {
                         Text(verbatim: "\(index + 1)").font(Typo.captionStrong).foregroundStyle(Palette.secondary)
@@ -273,25 +295,35 @@ private struct AssistantMeetingChips: View {
 /// when the user scrolls away or back. Placed as the scrolled content's background.
 struct FollowScrollObserver: NSViewRepresentable {
     let follow: Binding<AssistantFollowScroll>
+    /// Where the held turn should sit at the top of the view, in the scrolled content; nil until
+    /// it has been laid out.
+    var heldTop: CGFloat?
     func makeNSView(context: Context) -> ScrollProbe {
         let view = ScrollProbe()
         view.follow = follow
+        view.heldTop = heldTop
         return view
     }
     func updateNSView(_ view: ScrollProbe, context: Context) {
         view.follow = follow
+        view.heldTop = heldTop
         view.scheduleRestore()
     }
 }
 
 final class ScrollProbe: NSView {
     var follow: Binding<AssistantFollowScroll>?
+    var heldTop: CGFloat?
     private weak var observedScroll: NSScrollView?
     private var lastHeight: CGFloat = 0
     private var lastViewport: CGFloat = 0
     private var lastY: CGFloat = 0
     private var restoring = false
     private var restoreScheduled = false
+    private var risenTo: UUID?
+    private var rising = false
+    /// The user's gesture, its momentum and its rubber-band bounce are theirs: nothing is restored under them.
+    private var liveScrolling = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -309,7 +341,16 @@ final class ScrollProbe: NSView {
             name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(contentResized),
             name: NSView.frameDidChangeNotification, object: document)
+        NotificationCenter.default.addObserver(self, selector: #selector(liveScrollStarted),
+            name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        NotificationCenter.default.addObserver(self, selector: #selector(liveScrollEnded),
+            name: NSScrollView.didEndLiveScrollNotification, object: scroll)
         restore()
+    }
+    @objc private func liveScrollStarted() { liveScrolling = true }
+    @objc private func liveScrollEnded() {
+        liveScrolling = false
+        scheduleRestore()
     }
     func scheduleRestore() {
         guard !restoreScheduled else { return }
@@ -321,32 +362,121 @@ final class ScrollProbe: NSView {
         }
     }
     private func restore() {
-        guard !restoring, let scroll = observedScroll, let follow else { return }
+        guard !restoring, !rising, !liveScrolling, let scroll = observedScroll, let follow else { return }
+        let held = follow.wrappedValue.held
+        // A new section's question is not laid out yet: stay put rather than jump elsewhere first.
+        if held != nil && heldTop == nil { return }
         restoring = true
         defer { restoring = false }
         scroll.layoutSubtreeIfNeeded()
         let height = scroll.documentView?.frame.height ?? 0
         let viewport = scroll.contentView.bounds.height
-        let y = follow.wrappedValue.restoredOffset(contentHeight: height, viewportHeight: viewport)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
-        scroll.reflectScrolledClipView(scroll.contentView)
+        let insets = scroll.contentInsets
+        // The top inset lies under the header: `follow` counts in content shown below it, which
+        // starts at -insets.top when the view is at rest at its top.
+        let y = follow.wrappedValue.restoredOffset(contentHeight: height + insets.top + insets.bottom, viewportHeight: viewport,
+                                                   heldTop: heldTop.map(Double.init)) - insets.top
         lastHeight = height
         lastViewport = viewport
+        if let held, held != risenTo {
+            risenTo = held
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && abs(scroll.contentView.bounds.minY - y) > 1 {
+                rise(scroll, to: y)
+                return
+            }
+        }
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
         lastY = scroll.contentView.bounds.minY
+    }
+    /// Carries the view up to a new section's question, leaving the earlier ones above.
+    private func rise(_ scroll: NSScrollView, to y: CGFloat) {
+        rising = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.45
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0, 0, 1)
+            scroll.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        } completionHandler: { [weak self] in
+            guard let self else { return }
+            self.rising = false
+            self.restore()
+        }
     }
     @objc private func contentResized() { scheduleRestore() }
     @objc private func scrolled() {
-        guard !restoring, let scroll = observedScroll else { return }
+        guard !restoring, !rising, let scroll = observedScroll else { return }
         let height = scroll.documentView?.frame.height ?? 0
         let viewport = scroll.contentView.bounds.height
         let y = scroll.contentView.bounds.minY
-        if height != lastHeight || viewport != lastViewport {
+        let insets = scroll.contentInsets
+        // The clip view pulls the view in when the content shrinks under it; that is not the user.
+        let pulledIn = height < lastHeight && y < lastY && abs(y - (height + insets.bottom - viewport)) < 1
+        if viewport != lastViewport || pulledIn {
             scheduleRestore()
             return
         }
+        // A scroll while the answer grows is still the user's, not a change to undo.
         if y != lastY {
-            follow?.wrappedValue.userScrolled(offset: y, bottomDistance: height - scroll.contentView.bounds.maxY)
+            follow?.wrappedValue.userScrolled(offset: y + insets.top,
+                                              bottomDistance: height + insets.bottom - scroll.contentView.bounds.maxY,
+                                              towardEnd: y > lastY)
         }
         lastY = y
+        if height != lastHeight { scheduleRestore() }
+    }
+}
+
+/// A rail of lines, one per question, that maps the conversation. Pointing at a line opens a card
+/// with that question; clicking it scrolls there.
+private struct AssistantMinimap: View {
+    let turns: [AssistantTurn]
+    let jump: (UUID) -> Void
+    @State private var hovered: UUID?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            ForEach(turns) { turn in
+                Button { jump(turn.id) } label: {
+                    Capsule().fill(hovered == turn.id ? Palette.text : Palette.muted)
+                        .frame(width: width(turn) + (hovered == turn.id ? 8 : 0), height: 2)
+                        .frame(width: 28, height: 14, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).focusEffectDisabled()
+                .accessibilityLabel(turn.question)
+                .onHover { inside in
+                    withAnimation(Motion.reveal) {
+                        if inside { hovered = turn.id } else if hovered == turn.id { hovered = nil }
+                    }
+                }
+                .overlay(alignment: .trailing) {
+                    if hovered == turn.id { card(turn).offset(x: -36).allowsHitTesting(false) }
+                }
+                .zIndex(hovered == turn.id ? 1 : 0)
+            }
+        }
+    }
+
+    private func width(_ turn: AssistantTurn) -> CGFloat {
+        min(22, max(10, CGFloat(turn.answer.text.count) / 40 + 10))
+    }
+
+    private func card(_ turn: AssistantTurn) -> some View {
+        let summary = turn.answer.text.split(separator: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { String($0).replacingOccurrences(of: "[*#_`>]|\\[m[^\\]]*\\]", with: "", options: .regularExpression) }
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: turn.question).font(Typo.bodyStrong).foregroundStyle(Palette.text).lineLimit(2)
+            if let summary, !summary.isEmpty {
+                Text(verbatim: summary).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .frame(width: 220, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.hover))
+        .shadow(color: Palette.shadow, radius: 10, y: 4)
+        .transition(.scale(scale: 0.92, anchor: .trailing).combined(with: .opacity).combined(with: .offset(x: 8)))
     }
 }

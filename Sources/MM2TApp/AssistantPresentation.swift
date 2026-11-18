@@ -83,16 +83,31 @@ public struct AssistantBatcher: Codable, Sendable {
 public struct AssistantFollowScroll {
     public private(set) var follows = true
     public private(set) var offset: Double = 0
+    /// The turn whose question is held at the top of the view until the user scrolls: a new
+    /// section starts at the top, with the space below it left for its answer.
+    public private(set) var held: UUID?
     public init() {}
-    public mutating func userScrolled(offset: Double, bottomDistance: Double) {
-        self.offset = max(0, offset)
-        follows = bottomDistance <= 40
+    public init(holding turn: UUID) { follows = false; held = turn }
+    /// A conversation that has just begun is read from its top, not followed to its end.
+    public static var top: Self { var value = Self(); value.follows = false; return value }
+    /// How a conversation opens: its last question at the top, or its start when it has only one.
+    public static func opening(_ turns: [AssistantTurn]) -> Self {
+        guard turns.count > 1, let last = turns.last else { return .top }
+        return .init(holding: last.id)
     }
-    public func restoredOffset(contentHeight: Double, viewportHeight: Double) -> Double {
+    /// Only scrolling down onto the end resumes following; scrolling up near it never snaps back.
+    public mutating func userScrolled(offset: Double, bottomDistance: Double, towardEnd: Bool) {
+        self.offset = max(0, offset)
+        follows = bottomDistance <= 1 || (towardEnd && bottomDistance <= 40)
+        held = nil
+    }
+    /// `heldTop` is where the held turn's view begins, in the scrolled content.
+    public func restoredOffset(contentHeight: Double, viewportHeight: Double, heldTop: Double? = nil) -> Double {
         let bottom = max(0, contentHeight - viewportHeight)
+        if held != nil, let heldTop { return min(max(0, heldTop), bottom) }
         return follows ? bottom : min(offset, bottom)
     }
-    public mutating func sent() { follows = true }
+    public mutating func sent() { follows = true; held = nil }
 }
 
 public struct AssistantShownContent {

@@ -185,13 +185,13 @@ import Testing
         model.send("First")
         #expect(await eventually { model.turns.last?.answer.text == "First partial" })
         let firstID = model.turns.first?.id
-        model.scroll.userScrolled(offset: 240, bottomDistance: 500)
+        model.scroll.userScrolled(offset: 240, bottomDistance: 500, towardEnd: false)
         model.pageDisappeared()
         #expect(model.isActive && model.isRunning)
         llm.holdsStream.set(false)
         llm.answerChunks.set(["Second answer"])
         model.handoff("Second")
-        #expect(model.isActive && model.scroll.follows)
+        #expect(model.isActive && model.scroll.held == model.turns.last?.id)
         #expect(model.turns.first?.id == firstID)
         #expect(model.turns.count == 2)
         #expect(model.turns.first?.state == .stopped)
@@ -289,9 +289,9 @@ import Testing
         #expect(batcher.text == "你好世界")
         #expect(batcher.batches.map(\.endOffset) == [2, 4])
         var scroll = AssistantFollowScroll()
-        scroll.userScrolled(offset: 200, bottomDistance: 100)
+        scroll.userScrolled(offset: 200, bottomDistance: 100, towardEnd: true)
         #expect(!scroll.follows)
-        scroll.userScrolled(offset: 290, bottomDistance: 10)
+        scroll.userScrolled(offset: 290, bottomDistance: 10, towardEnd: true)
         #expect(scroll.follows)
         let world = try World()
         let first = try await world.recordedMeeting(title: "First")
@@ -319,7 +319,7 @@ import Testing
         if expandActivity { model.toggleActivity(turn.id) }
         let expanded = model.turns.last?.activityExpanded
         #expect(expanded == expandActivity)
-        model.scroll.userScrolled(offset: 240, bottomDistance: 500)
+        model.scroll.userScrolled(offset: 240, bottomDistance: 500, towardEnd: false)
         model.pageDisappeared()
         #expect(model.isActive && model.isRunning)
         #expect(model.turns.last?.id == turn.id)
@@ -340,19 +340,59 @@ import Testing
         #expect(model.isActive)
     }
 
+    @Test func markdownBlocksRenderFormattingAndSources() {
+        let document = AssistantMarkdown.blocks("""
+        ### 1. 標題
+        * **李婷娟** 報告了 `GIS` [m1]
+        1. 第一點 *斜體*
+        ```
+        code **x**
+        ```
+        結尾 [m2] [m99] [m
+        """, known: ["m1", "m2"])
+        let kinds = document.blocks.map(\.kind)
+        #expect(kinds == [.heading(3), .bullet(depth: 0), .ordered(number: 1, depth: 0), .code, .paragraph])
+        #expect(document.blocks[1].spans.first { $0.bold }?.text == "李婷娟")
+        #expect(document.blocks[1].spans.first { $0.code }?.text == "GIS")
+        #expect(document.blocks[1].spans.contains { $0.citation == "m1" })
+        #expect(document.blocks[3].plainText == "code **x**")
+        #expect(document.citationIDs == ["m1", "m2"])
+        #expect(document.blocks[4].plainText == "結尾 2  ")
+    }
+
+    @Test func newSectionHoldsItsQuestionAtTopUntilUserScrolls() {
+        #expect(AssistantFollowScroll.top.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 0)
+        #expect(AssistantFollowScroll.opening([]).held == nil)
+        let turn = UUID()
+        var scroll = AssistantFollowScroll(holding: turn)
+        #expect(scroll.held == turn && !scroll.follows)
+        #expect(scroll.restoredOffset(contentHeight: 2000, viewportHeight: 600, heldTop: 900) == 900)
+        #expect(scroll.restoredOffset(contentHeight: 1200, viewportHeight: 600, heldTop: 900) == 600)
+        scroll.userScrolled(offset: 700, bottomDistance: 700, towardEnd: false)
+        #expect(scroll.held == nil)
+        #expect(scroll.restoredOffset(contentHeight: 2000, viewportHeight: 600, heldTop: 900) == 700)
+        // The held question sits at the end; a small scroll up from it stays where the user put it.
+        var atEnd = AssistantFollowScroll(holding: turn)
+        atEnd.userScrolled(offset: 1395, bottomDistance: 5, towardEnd: false)
+        #expect(!atEnd.follows)
+        #expect(atEnd.restoredOffset(contentHeight: 2100, viewportHeight: 600) == 1395)
+        atEnd.userScrolled(offset: 1470, bottomDistance: 30, towardEnd: true)
+        #expect(atEnd.follows)
+    }
+
     @Test func rememberedScrollRestoresOffsetOrFollowsNewBottom() {
         var scroll = AssistantFollowScroll()
-        scroll.userScrolled(offset: 325, bottomDistance: 475)
+        scroll.userScrolled(offset: 325, bottomDistance: 475, towardEnd: false)
         let remembered = scroll
         #expect(remembered.offset == 325)
         #expect(!remembered.follows)
         #expect(remembered.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 325)
         #expect(remembered.restoredOffset(contentHeight: 700, viewportHeight: 600) == 100)
         #expect(remembered.restoredOffset(contentHeight: 300, viewportHeight: 600) == 0)
-        scroll.userScrolled(offset: 800, bottomDistance: 0)
+        scroll.userScrolled(offset: 800, bottomDistance: 0, towardEnd: true)
         #expect(scroll.follows)
         #expect(scroll.restoredOffset(contentHeight: 2000, viewportHeight: 600) == 1400)
-        scroll.userScrolled(offset: 325, bottomDistance: 475)
+        scroll.userScrolled(offset: 325, bottomDistance: 475, towardEnd: false)
         scroll.sent()
         #expect(scroll.follows)
         #expect(scroll.restoredOffset(contentHeight: 2500, viewportHeight: 600) == 1900)
@@ -381,9 +421,11 @@ import Testing
         #expect(model.shownContent.contains(activity))
         #expect(model.shownContent.contains(source))
         #expect(model.shownContent.settledAnswerOffset(for: turn.id) == "Answer".count)
+        #expect(model.scroll.held == nil && !model.scroll.follows)
         model.send("Follow-up")
         #expect(model.isActive)
         #expect(model.turns.count == 2)
+        #expect(model.scroll.held == model.turns.last?.id)
         #expect(await eventually { model.turns.last?.state == .finished })
         #expect(model.shownContent.contains(activity))
         #expect(!model.shownContent.contains(.source(turn: model.turns[1].id, id: "m1")))

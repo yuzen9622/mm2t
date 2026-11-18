@@ -105,7 +105,7 @@ public final class AssistantModel {
             restore(next)
             attached = true
             isActive = true
-            draft = ""; scroll = .init(); shownContent = .init()
+            draft = ""; shownContent = .init()
             shownContent.settleAnswers(turns)
         } catch { storageError = String(describing: error) }
     }
@@ -114,6 +114,7 @@ public final class AssistantModel {
         conversationID = record.id; turns = record.turns; ledger = record.ledger
         storageError = conversations?.isUnsaved(record.id) == true ? "Unsaved conversation recovered in memory. Retry saving before closing." : nil
         isActive = !turns.isEmpty
+        scroll = .opening(turns)
         shownContent.settleAnswers(turns)
     }
 
@@ -154,7 +155,6 @@ public final class AssistantModel {
         guard !isRunning, !question.isEmpty else { return }
         draft = ""
         isActive = true
-        scroll.sent()
         if !attached {
             let saved = conversations?.records.contains { $0.id == conversationID } == true
             openConversation(saved ? conversationID : nil)
@@ -165,6 +165,7 @@ public final class AssistantModel {
         turns.append(AssistantTurn(memoryRevision: revision, question: question))
         let position = turns.count - 1
         let turnID = turns[position].id
+        scroll = position == 0 ? .top : .init(holding: turnID)
         save()
         do {
             guard case .ready(let provider) = try build() else { turns[position].state = .needsSetup; save(); return }
