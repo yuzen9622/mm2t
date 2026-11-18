@@ -30,25 +30,30 @@ public struct SelfHostedTranscription: TranscriptionProvider {
         do {
             try await checkHealth()
             let upload = try AudioFile.upload(audio, for: .selfHosted)
-            var form = MultipartForm()
-            if let languageCode { form.add("language", languageCode) }
-            let vocabulary = hints.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            if !vocabulary.isEmpty {
-                let json = try JSONEncoder().encode(vocabulary)
-                form.add("vocabulary", String(decoding: json, as: UTF8.self))
-            }
-            form.addFile("file", filename: upload.filename, mimeType: upload.mimeType, data: upload.data)
-
-            var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: timeout))
-            request.httpMethod = "POST"
-            request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
-            request.httpBody = form.finished()
-            let response = try await session.send(request, for: .selfHosted)
-            guard response.status == 200 else { throw ProviderError(.selfHosted, Self.failure(response)) }
-            return .unlabeled(try Self.parse(response.body))
+            return .unlabeled(try await post(upload.data, filename: upload.filename, mimeType: upload.mimeType,
+                                             hints: hints, languageCode: languageCode))
         } catch let error as ProviderError {
             throw error.asTranscriptionError
         }
+    }
+
+    private func post(_ audio: Data, filename: String, mimeType: String, hints: [String], languageCode: String?) async throws -> [TimedWord] {
+        var form = MultipartForm()
+        if let languageCode { form.add("language", languageCode) }
+        let vocabulary = hints.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !vocabulary.isEmpty {
+            let json = try JSONEncoder().encode(vocabulary)
+            form.add("vocabulary", String(decoding: json, as: UTF8.self))
+        }
+        form.addFile("file", filename: filename, mimeType: mimeType, data: audio)
+
+        var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: timeout))
+        request.httpMethod = "POST"
+        request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = form.finished()
+        let response = try await session.send(request, for: .selfHosted)
+        guard response.status == 200 else { throw ProviderError(.selfHosted, Self.failure(response)) }
+        return try Self.parse(response.body)
     }
 
     /// `/v1/*` checks the token before routing, so a GET on the POST-only transcription route
@@ -140,5 +145,26 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             }
         }
         return words.sorted { $0.range.start < $1.range.start }
+    }
+}
+
+/// Live captions: each clip goes up as a small WAV to the same endpoint the recordings use.
+extension SelfHostedTranscription: ClipTranscriber {
+    public func prepare() async throws {
+        do {
+            try await checkHealth()
+        } catch let error as ProviderError {
+            throw error.asTranscriptionError
+        }
+    }
+
+    public func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest) async throws -> String {
+        do {
+            let words = try await post(wav(samples, sampleRate: request.sampleRate), filename: "clip.wav", mimeType: "audio/wav",
+                                       hints: request.hints, languageCode: request.languageCode)
+            return Alignment.joined(words)
+        } catch let error as ProviderError {
+            throw error.asTranscriptionError
+        }
     }
 }

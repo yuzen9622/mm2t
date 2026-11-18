@@ -25,6 +25,30 @@ import Testing
         #expect(upload.bodyText.contains(#"name="file"; filename="mic.m4a""#))
     }
 
+    @Test func captionClipsGoUpAsWAVToTheSameEndpointAndComeBackAsText() async throws {
+        let server = healthy { _ in .status(200, Fixture.selfHosted) }
+        let provider = SelfHostedTranscription(baseURL: base, token: "tok", session: server.session)
+        try await provider.prepare()
+        let text = try await provider.transcribe(
+            clip: [Float](repeating: 0.1, count: 1_600),
+            request: StreamingTranscriptionRequest(languageCode: "zh", hints: ["王小明"], sampleRate: 16_000))
+
+        #expect(text == "大家好我是小明Kubernetes cluster")
+        let upload = try #require(server.requests.last)
+        #expect(upload.url.path == "/v1/transcriptions" && upload.headers["Authorization"] == "Bearer tok")
+        #expect(upload.field("language") == ["zh"])
+        #expect(upload.field("vocabulary") == [#"["王小明"]"#])
+        #expect(upload.bodyText.contains(#"name="file"; filename="clip.wav""#))
+        #expect(upload.body.count > 44 + 3_200)
+    }
+
+    @Test func anOfflineServerIsSkippedForCaptions() async throws {
+        let server = StubServer { _ in .failure(.timedOut) }
+        let provider = SelfHostedTranscription(baseURL: base, token: nil, session: server.session)
+        let error = await #expect(throws: TranscriptionError.self) { try await provider.prepare() }
+        guard case .unreachable = error else { Issue.record("got \(String(describing: error))"); return }
+    }
+
     @Test func omitsOptionalFieldsAndTokenWhenUnset() async throws {
         let server = healthy { _ in .status(200, Fixture.selfHosted) }
         let provider = SelfHostedTranscription(baseURL: base, token: Secret(""), session: server.session)

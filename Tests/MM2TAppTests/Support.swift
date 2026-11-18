@@ -309,6 +309,17 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return streaming
     }
 
+    let selfHostedStreaming = FakeStreamingSTT()
+    func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider {
+        selfHostedURLs.update { $0.append(url) }
+        return selfHostedStreaming
+    }
+
+    let localStreaming = FakeStreamingSTT()
+    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
+        offlineDownloaded[.transcription]!.get ? localStreaming : nil
+    }
+
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
         openAIEndpoints.update { $0.append("\(baseURL.absoluteString)|\(apiKey?.revealed ?? "-")|\(model)") }
         return llm

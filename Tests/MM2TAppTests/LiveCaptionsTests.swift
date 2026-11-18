@@ -215,12 +215,55 @@ import Testing
         await world.capture.stop()
     }
 
-    @Test func captionsNeedAnElevenLabsKey() async throws {
+    @Test func withNoTranscriptionSourceSetUpCaptionsOpenNothing() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.transcriptionOrder = [.cloud]
+        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         try await Task.sleep(for: .milliseconds(20))
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        #expect(world.catalog.selfHostedStreaming.requests.get.isEmpty)
+        #expect(world.catalog.localStreaming.requests.get.isEmpty)
+        #expect(world.capture.captions.status == .off)
+        await world.capture.stop()
+    }
+
+    @Test func captionsFollowTheTranscriptionOrderStartingWithTheServer() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
+        world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.selfHostedURLs.get.contains(URL(string: "http://gpu.tailnet:8123")!))
+        #expect(world.catalog.selfHostedStreaming.sessions.get.count == 1)
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
+    @Test func anOfflineServerFallsToElevenLabsThenThisMac() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
+        world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        world.catalog.selfHostedStreaming.openFailures.set([.unreachable("offline")])
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.streaming.sessions.get.count == 1)
+        #expect(world.catalog.localStreaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
+    @Test func withoutAnElevenLabsKeyCaptionsRunOnThisMac() async throws {
+        let world = try World(keys: false)
+        world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.transcriptionOrder = [.cloud, .local]
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.localStreaming.sessions.get.count == 1)
         #expect(world.catalog.streaming.requests.get.isEmpty)
         await world.capture.stop()
     }

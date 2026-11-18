@@ -45,6 +45,9 @@ public protocol ProviderCatalog: Sendable {
     func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider
     /// Live captions while recording; display only.
     func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider
+    func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider
+    /// nil until the model is on disk.
+    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)?
     func llm(apiKey: Secret) -> any LLMProvider
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
@@ -89,7 +92,7 @@ public struct PipelineSetup: Sendable {
         for source in settings.transcriptionOrder {
             switch source {
             case .cloud:
-                if let key = try nonEmpty(.elevenLabsAPIKey) {
+                if let key = try? nonEmpty(.elevenLabsAPIKey) {
                     routes.append(.init(.cloud, catalog.cloudTranscription(apiKey: key, language: settings.transcriptionLanguage)))
                 } else {
                     issues.append(.missingCredential(.elevenLabsAPIKey))
@@ -129,6 +132,27 @@ public struct PipelineSetup: Sendable {
             runsConcurrently: settings.llmLocation == .cloud,
             transcribesConcurrently: !settings.transcriptionOrder.contains(.local),
             micCleaner: EchoRemover()))
+    }
+
+    /// Live captions try the sources in the transcription order, skipping any not set up; nil when none is.
+    public func buildCaptions(_ settings: AppSettings) -> StreamingTranscriptionChain? {
+        var routes: [StreamingTranscriptionChain.Route] = []
+        for source in settings.transcriptionOrder {
+            switch source {
+            case .cloud:
+                if let key = try? nonEmpty(.elevenLabsAPIKey) {
+                    routes.append(.init(.cloud, catalog.streamingTranscription(apiKey: key)))
+                }
+            case .selfHosted:
+                // The token is optional; only an unreadable one skips the server.
+                if let url = settings.selfHostedURL, case .success(let token) = Result(catching: { try nonEmpty(.selfHostedToken) }) {
+                    routes.append(.init(.selfHosted, catalog.selfHostedStreamingTranscription(url: url, token: token)))
+                }
+            case .local:
+                if let local = catalog.localStreamingTranscription() { routes.append(.init(.local, local)) }
+            }
+        }
+        return routes.isEmpty ? nil : StreamingTranscriptionChain(routes)
     }
 
     /// Text-only tasks need the selected LLM, independently of recording and speaker setup.

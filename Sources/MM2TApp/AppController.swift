@@ -190,16 +190,16 @@ public final class AppController {
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
             makeCaptions: { captions in
-                // Opt-in, and only with an ElevenLabs key; otherwise nothing runs and no socket opens.
+                // Opt-in, from the transcription sources in their order; with none set up nothing runs.
                 let current = settings.settings
-                guard current.liveCaptions, let key = try? credentials.read(.elevenLabsAPIKey), !key.isEmpty else { return nil }
+                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
                 if let target = current.captionTranslation.target, let translator = catalog.captionTranslator(for: target) {
                     captions.translate(with: translator, to: target)
                 }
                 let names = await voiceprints.spokenNames()
                 return CaptionStream(
-                    provider: catalog.streamingTranscription(apiKey: key),
+                    provider: provider,
                     languageCode: current.transcriptionLanguage.code,
                     hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
             },

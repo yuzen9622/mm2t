@@ -65,7 +65,7 @@ enum SettingsRow: Hashable {
         case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local)]
-        case .liveCaptions: [String(localized: "Live captions"), "ElevenLabs"]
+        case .liveCaptions: [String(localized: "Live captions"), Copy.source(.selfHosted), Copy.source(.cloud), Copy.source(.local)]
         case .captionTranslation: [String(localized: "Translate captions")] + CaptionTarget.all.map(\.name)
         case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
@@ -330,9 +330,9 @@ struct SettingsRowView: View {
                 OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
             }
         case .liveCaptions:
-            LiveCaptionsRow(store: store, key: app.setup.field(.elevenLabsAPIKey))
+            LiveCaptionsRow(app: app)
         case .captionTranslation:
-            CaptionTranslationRow(app: app, key: app.setup.field(.elevenLabsAPIKey))
+            CaptionTranslationRow(app: app)
         case .diarizationModel:
             ModelDownloadView(setup: app.setup)
         case .summaryBackend:
@@ -673,27 +673,31 @@ struct IssueRow: View {
     }
 }
 
-/// Captions need a stored ElevenLabs key; without one the switch is off and cannot be turned on.
+/// Captions run on the first transcription source that is on and set up; with none the switch is off.
 private struct LiveCaptionsRow: View {
-    let store: SettingsStore
-    let key: CredentialField
-
-    private var hasKey: Bool {
-        switch key.state {
-        case .empty, .storageFailed: false
-        default: true
-        }
-    }
+    let app: AppController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle("Live captions", isOn: Binding(
-                get: { hasKey && store.settings.liveCaptions },
-                set: { store.settings.liveCaptions = $0 }))
-                .disabled(!hasKey)
-            if !hasKey {
-                Text("Add an ElevenLabs key to use live captions.")
-                    .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+        let available = app.hasCaptionSource
+        Toggle("Live captions", isOn: Binding(
+            get: { available && app.settings.settings.liveCaptions },
+            set: { app.settings.settings.liveCaptions = $0 }))
+            .disabled(!available)
+    }
+}
+
+private extension AppController {
+    /// The same sources `buildCaptions` would chain, read from what the settings window shows.
+    var hasCaptionSource: Bool {
+        settings.settings.transcriptionOrder.contains { source in
+            switch source {
+            case .selfHosted: settings.settings.selfHostedURL != nil
+            case .cloud:
+                switch setup.field(.elevenLabsAPIKey).state {
+                case .empty, .storageFailed: false
+                default: true
+                }
+            case .local: setup.offlineModels[.transcription] == .downloaded
             }
         }
     }
@@ -705,14 +709,8 @@ private struct LiveCaptionsRow: View {
 /// segmented control.
 private struct CaptionTranslationRow: View {
     let app: AppController
-    let key: CredentialField
 
-    private var enabled: Bool {
-        switch key.state {
-        case .empty, .storageFailed: false
-        default: app.settings.settings.liveCaptions
-        }
-    }
+    private var enabled: Bool { app.hasCaptionSource && app.settings.settings.liveCaptions }
 
     var body: some View {
         let choice = app.settings.settings.captionTranslation

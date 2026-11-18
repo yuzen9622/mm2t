@@ -125,6 +125,13 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
         ElevenLabsRealtime(apiKey: apiKey)
     }
+    /// An offline server fails its 3 s health check and the captions move to the next source.
+    public func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider {
+        WindowedStreamingTranscription(SelfHostedTranscription(baseURL: url, token: token, probeTimeout: 3, timeout: 30))
+    }
+    public func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
+        transcriptionModel.snapshot.isDownloaded ? WindowedStreamingTranscription(transcription) : nil
+    }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
     public func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
         OpenAICompatibleLLM(baseURL: baseURL, apiKey: apiKey, model: model)

@@ -94,11 +94,7 @@ public struct ElevenLabsRealtime: StreamingTranscriptionProvider {
 
     /// Samples become 16-bit little-endian PCM exactly as the recorder writes them to its WAV files.
     static func audioMessage(_ samples: [Float], sampleRate: Int, previousText: String? = nil) -> String {
-        var pcm = Data(capacity: samples.count * 2)
-        for sample in samples {
-            let clamped = sample.isNaN ? 0 : max(-1, min(1, sample))
-            withUnsafeBytes(of: Int16(clamped * Float(Int16.max)).littleEndian) { pcm.append(contentsOf: $0) }
-        }
+        let pcm = pcm16(samples)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let chunk = AudioChunk(audio_base_64: pcm.base64EncodedString(), sample_rate: sampleRate, previous_text: previousText)

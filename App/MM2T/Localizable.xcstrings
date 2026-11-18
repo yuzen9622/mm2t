@@ -56,7 +56,6 @@
     "Reconnecting": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "重新連線中" } } } },
     "Listening": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中" } } } },
     "Live captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕" } } } },
-    "Add an ElevenLabs key to use live captions.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "加入 ElevenLabs 金鑰即可使用即時字幕。" } } } },
     "%lld assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 項交辦" } } } },
     "Assistant memory": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "助理記憶" } } } },
     "Checked assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "查詢交辦事項" } } } },
