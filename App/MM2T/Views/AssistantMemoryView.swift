@@ -23,7 +23,7 @@ struct AssistantToolbar: View {
                     }
                 }
                 Spacer()
-                IconButton("Assistant memory", icon: "adjustments-horizontal") {
+                IconButton("Personalized memory", icon: "adjustments-horizontal") {
                     MainNavigation.shared.settingsSection = .assistant
                     MainNavigation.shared.settingsOpen = true
                 }
@@ -46,6 +46,25 @@ struct AssistantToolbar: View {
     }
 }
 
+private struct MemoryTextField: View {
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Preference", text: $text,
+                  prompt: Text("For example: List meeting decisions first, then action items.")
+                    .foregroundColor(Palette.secondary), axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(Typo.body)
+            .lineLimit(3, reservesSpace: true)
+            .focused($focused)
+            .padding(12)
+            .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+    }
+}
+
 struct AssistantPreferenceProposal: View {
     let model: AssistantModel
     let turn: AssistantTurn
@@ -54,7 +73,7 @@ struct AssistantPreferenceProposal: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Remember this preference?").font(Typo.bodyStrong)
-            TextField("Preference", text: $text, axis: .vertical).textFieldStyle(.roundedBorder)
+            MemoryTextField(text: $text)
             HStack {
                 PillButton("Save", kind: .primary) { model.confirmPreference(turn: turn.id, text: text) }
                     .disabled(model.isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.count > 300)
@@ -76,13 +95,12 @@ struct AssistantMemorySettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Toggle("Use saved preferences", isOn: Binding(get: { preferences.enabled }, set: { value in
+            Toggle("Use my preferences in replies", isOn: Binding(get: { preferences.enabled }, set: { value in
                 perform { try preferences.setEnabled(value) }
             }))
             if let message = preferences.error ?? error {
                 Text(verbatim: message).font(Typo.caption).foregroundStyle(Palette.danger)
             }
-            if preferences.items.isEmpty { Text("No saved preferences").foregroundStyle(Palette.muted) }
             ForEach(preferences.items) { item in
                 HStack(alignment: .top) {
                     Toggle(isOn: Binding(get: { item.enabled }, set: { value in
@@ -93,20 +111,25 @@ struct AssistantMemorySettings: View {
                             if !item.scope.isEmpty { Text(verbatim: item.scope).font(Typo.caption).foregroundStyle(Palette.muted) }
                         }
                     }
-                    Button("Edit") { editing = item.id; text = item.text; scope = item.scope }
-                    Button("Delete", role: .destructive) { deleting = item.id }
+                    PillButton("Edit") { editing = item.id; text = item.text; scope = item.scope }
+                    PillButton("Delete", kind: .danger) { deleting = item.id }
                 }
             }
-            TextField("Preference", text: $text, axis: .vertical).textFieldStyle(.roundedBorder)
-            TextField("Project or topic (optional)", text: $scope).textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 8) {
+                MemoryTextField(text: $text)
+                FieldBox {
+                    TextField("Project or topic (optional)", text: $scope)
+                }
+            }
             HStack {
+                Spacer()
+                if editing != nil { PillButton("Cancel") { editing = nil; text = ""; scope = "" } }
                 PillButton("Save", kind: .primary) {
                     perform {
                         try preferences.put(id: editing, text: text, scope: scope)
                         editing = nil; text = ""; scope = ""
                     }
                 }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.count > 300)
-                if editing != nil { PillButton("Cancel") { editing = nil; text = ""; scope = "" } }
             }
             if !conversations.errors.isEmpty {
                 Text("Some conversations could not be loaded. Their files have been preserved.")

@@ -29,7 +29,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
-        case .assistant: String(localized: "Assistant memory")
+        case .assistant: String(localized: "Personalized memory")
         case .permissions: String(localized: "Permissions")
         case .about: String(localized: "About")
         }
@@ -72,7 +72,7 @@ enum SettingsRow: Hashable {
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
         case .geminiKey: [Copy.credentialName(.geminiAPIKey)]
         case .localSummaries: [String(localized: "Generate on this Mac")]
-        case .assistantMemory: [String(localized: "Assistant memory"), String(localized: "Conversation history"), String(localized: "Preference")]
+        case .assistantMemory: [String(localized: "Personalized memory"), String(localized: "Conversation history"), String(localized: "Preference")]
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
         case .recordShortcut: [String(localized: "Start or stop recording")]
@@ -102,7 +102,7 @@ struct SettingsGroup: Identifiable {
 
     static var all: [SettingsGroup] {
         [
-            SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Assistant memory"), rows: [.assistantMemory]),
+            SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
                                  .liveCaptions, .captionTranslation]),
@@ -266,8 +266,10 @@ struct SettingsPage: View {
             }
             ForEach(groups) { group in
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(searching ? "\(group.section.title) › \(group.title)" : group.title)
-                        .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
+                    if group.title != group.section.title || searching {
+                        Text(searching && group.title != group.section.title ? "\(group.section.title) › \(group.title)" : group.title)
+                            .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
+                    }
                     // Rows are set apart by space, not lines.
                     VStack(alignment: .leading, spacing: 20) {
                         ForEach(group.rows, id: \.self) { row in
