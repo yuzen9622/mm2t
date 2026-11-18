@@ -2,45 +2,28 @@ export type Locale = "zh" | "en";
 
 /** Shared keys keep the App's Traditional Chinese terminology consistent. */
 export const english: Record<string, string> = {
-  "取消麥克風請求": "Cancel microphone request",
-  "暫停麥克風": "Pause microphone",
-  "開啟麥克風試試": "Try your microphone",
-  "結束麥克風體驗": "Finish microphone demo",
-  "請允許麥克風權限，再點一下重試。": "Allow microphone access, then click to try again.",
-  "無法使用麥克風，請確認裝置與瀏覽器設定後重試。": "Microphone unavailable. Check your device and browser settings, then try again.",
-  "等待麥克風權限": "Waiting for microphone permission",
-  "麥克風已開啟，聲音僅在此裝置分析，不會儲存或上傳。": "Microphone on. Audio is analyzed only on this device, never saved or uploaded.",
-  "點擊麥克風，讓波形跟著你的聲音。": "Click the microphone to see your voice move the waveform.",
-  錄音膠囊互動示範: "Interactive recording capsule demo",
-  播放波形動畫: "Play waveform",
-  暫停波形動畫: "Pause waveform",
-  "按說話者整理觀點，保留對應時間點。":
-    "Each person's perspective, with timestamps back to the conversation.",
-  "決議、討論重點與待辦事項，沿用 App 的原始排版。":
-    "Decisions, discussion points, and tasks, exactly as they appear in the app.",
-  "你的會議，有不同讀法": "THE SAME MEETING. A CLEARER VIEW.",
-  "逐字稿、整理版、依人彙整與摘要。":
-    "Transcripts, cleaned transcripts, speaker notes, and summaries.",
-  "App 畫面，可橫向捲動查看": "App capture; scroll horizontally to explore",
-  "人物與聲紋的實際 App 畫面":
-    "The actual People and voiceprints screen in mm2t",
-  "個人詞彙庫的實際 App 畫面": "The actual Vocabulary screen in mm2t",
-  使用體驗: "Experience",
-  功能: "Features",
+  // Header and navigation
+  跳至主要內容: "Skip to content",
+  主要導覽: "Main navigation",
+  使用流程: "How it works",
+  四種讀法: "Four views",
   隱私: "Privacy",
   常見問題: "FAQ",
   "mm2t 首頁": "mm2t home",
   "下載 mm2t": "Download mm2t",
-  跳至主要內容: "Skip to content",
-  主要導覽: "Main navigation",
   "在 GitHub 查看 mm2t 原始碼": "View mm2t on GitHub",
   開啟導覽選單: "Open navigation",
   網站導覽: "Navigation",
   "選擇想查看的官網章節。": "Choose a section to explore.",
   關閉導覽選單: "Close navigation",
   手機版導覽: "Mobile navigation",
-  "macOS 14.2 以上 · 免費開放原始碼": "macOS 14.2+ · Free & open source",
-  觀看示範: "Watch demo",
+
+  // Hero
+  "直接錄下麥克風與會議 App 的聲音，不需要機器人進會議。會後在 Mac 上分出說話者，整理成逐字稿與摘要。":
+    "Records your microphone and the meeting app directly, with no bot in the call. Afterwards your Mac tells the speakers apart and writes the transcript and summary.",
+  "免費開源 · macOS 14.2 以上": "Free and open source · macOS 14.2 or later",
+  "錄得到這些會議 App": "Records calls in",
+  觀看示範: "Watch the demo",
   "一分鐘看懂 mm2t": "Meet mm2t in 44 seconds",
   關閉示範影片: "Close demo",
   "mm2t 的實際操作示範：錄音、命名說話者與查看摘要。影片以畫面文字說明，沒有口述。":
@@ -49,160 +32,60 @@ export const english: Record<string, string> = {
   繁體中文: "English",
   "你的瀏覽器無法播放影片，請": "Your browser cannot play this video. Please ",
   下載示範影片: "download the demo",
-  陳志明: "Zhiming Chen",
-  陳: "C",
-  林佳怡: "Jiayi Lin",
-  林: "L",
-  王建宏: "Jianhong Wang",
-  王: "W",
-  "我們今天針對新產品的上市，討論一下目標客群與行銷方向。":
-    "Let's talk about the audience and marketing direction for our new product launch.",
-  "這款手機的外觀比較時尚，我覺得不必把客群侷限在單一年齡層。":
-    "The phone has a stylish design. I don't think we need to limit it to a single age group.",
-  "我覺得還是要有明確的受眾，才能決定後續的廣告與通路策略。":
-    "We still need a clear audience to guide our advertising and distribution strategy.",
-  正在記錄會議: "Recording meeting",
-  "mm2t 會議逐字稿介面預覽，顯示不同說話者與時間戳記":
-    "mm2t transcript preview with named speakers and timestamps",
-  首頁: "Home",
-  會議: "Meetings",
-  人物: "People",
-  詞彙: "Vocabulary",
-  設定: "Settings",
-  新款手機上市行銷與通路規劃: "New phone launch strategy",
-  會議紀錄: "Meeting notes",
-  已完成整理: "Ready to review",
-  逐字稿: "Transcript",
-  依人彙整: "By speaker",
-  摘要: "Summary",
-  整理版逐字稿: "Clean transcript",
-  "從對話，整理出下一步。": "From conversation to next steps.",
-  "討論重點、決議與待辦，都在同一處。":
-    "Key points, decisions, and tasks. All together.",
-  認出熟悉的聲音: "A familiar voice",
-  已套用陳志明的聲紋: "Zhiming Chen's voiceprint matched",
-  "為 macOS 而生的開源工具": "OPEN SOURCE. MADE FOR macOS.",
-  "Mac 上的": "Meeting notes.",
-  "會議記錄，": "Made for Mac.",
-  交給: "Meet ",
-  "開會時專心說話。": "Stay in the conversation. ",
-  "從錄音、辨識說話者，到逐字稿與摘要，":
-    "Recording, speaker recognition, transcripts, and summaries. ",
-  "mm2t 替你接著整理。": "Let mm2t take it from here.",
-  免費開放原始碼: "Free & open source",
-  "macOS 14.2 以上": "macOS 14.2+",
-  融入你習慣的會議: "Works where you meet",
-  向下查看使用體驗: "Scroll to explore the experience",
-  往下看看: "Keep scrolling",
-  "會議開始，輕按一下。": "Meeting starts. One click.",
-  "偵測到會議時，選單列的小膠囊會詢問是否錄音。直接擷取 Mac 音訊，不需要 Bot 加入。":
-    "A small menu bar capsule asks if you'd like to record when a meeting is detected. Capture audio directly on your Mac. No bot needs to join.",
-  "mm2t 偵測到 Zoom 會議，顯示錄音膠囊":
-    "mm2t recording capsule after detecting a Zoom meeting",
-  "叫得出名字的逐字稿。": "Put a name to every voice.",
-  "麥克風與遠端聲音分軌錄製，再於 Mac 上辨識說話者。命名一次，下次自動套用聲紋。":
-    "Your microphone and remote audio are recorded on separate tracks. Speakers are identified on your Mac. Name a voice once, and recognize it next time.",
-  "mm2t 逐字稿中的說話者姓名與時間戳記":
-    "Named speakers and timestamps in an mm2t transcript",
-  "會議結束，接著整理。": "Meeting ends. Clarity begins.",
-  "討論重點、決議與待辦整理成摘要，附上時間點，方便回到當時的對話。":
-    "Turn discussions into key points, decisions, and tasks, with timestamps that take you back to the conversation.",
-  "mm2t 自動整理的會議摘要": "A meeting summary created by mm2t",
-  "會議在進行。": "The conversation flows.",
-  "紀錄，也跟得上。": "Your notes keep up.",
-  "你的會議，有四種讀法": "ONE MEETING. FOUR WAYS TO READ IT.",
-  "找回那句話。": "Find the exact words.",
-  "或直接看重點。": "Or get to the point.",
-  "保留完整的對話脈絡，也整理出可執行的下一步。":
-    "Keep the full context. Find your next steps.",
-  "切換下方頁籤，看看 mm2t 怎麼整理。":
-    "Try the tabs to see your meeting from every angle.",
-  最近的會議: "Recent meetings",
-  新款手機上市規劃: "New phone launch",
-  行銷與通路討論: "Marketing & distribution",
-  整理完成: "Ready",
+
+  // Recording capsule demo
+  錄音膠囊互動示範: "Interactive recording capsule demo",
+  取消麥克風請求: "Cancel microphone request",
+  暫停麥克風: "Pause microphone",
+  開啟麥克風試試: "Try your microphone",
+  結束麥克風體驗: "Finish microphone demo",
+  "請允許麥克風權限，再點一下重試。": "Allow microphone access, then click to try again.",
+  "無法使用麥克風，請確認裝置與瀏覽器設定後重試。":
+    "Microphone unavailable. Check your device and browser settings, then try again.",
+  等待麥克風權限: "Waiting for microphone permission",
+  "麥克風已開啟，聲音僅在此裝置分析，不會儲存或上傳。":
+    "Microphone on. Audio is analyzed only on this device, never saved or uploaded.",
+  "點擊麥克風，讓波形跟著你的聲音。": "Click the microphone to see your voice move the waveform.",
+
+  // Flow scene
+  "錄下會議，": "Record the meeting,",
+  標出每位說話者: "name every speaker",
+  "偵測到會議，一按就錄": "Spots the meeting, records on one click",
+  "Google Meet、Teams、Zoom 或 Webex 開始時，選單列的膠囊會問你要不要錄音。":
+    "When Google Meet, Teams, Zoom or Webex starts, a capsule in the menu bar asks whether to record.",
+  分出每位說話者: "Tells each speaker apart",
+  "麥克風與遠端聲音分兩軌錄，在 Mac 上辨識說話者。命名一次，下次自動套用聲紋。":
+    "Your mic and the remote audio are recorded on two tracks and sorted by speaker on your Mac. Name a voice once and it is matched next time.",
+  整理成逐字稿: "Writes the transcript",
+  "每句話附上說話者與時間，點一下就從那裡重播。":
+    "Every line carries its speaker and time. Click one to play the meeting back from there.",
+
+  // Views
+  "同一場會議，四種讀法": "One meeting, four ways to read it",
+  "要找原話時看逐字稿，只要結論時看摘要。點上方的分頁切換，這就是 App 裡的畫面。":
+    "Read the transcript for the exact words, or the summary for the decisions. Switch the tabs above: this is the screen in the app.",
   選擇會議紀錄格式: "Choose a meeting note format",
-  "逐句保留原話，依時間與說話者排列。":
-    "The original words, organized by time and speaker.",
-  "今天主要討論新款手機上市的目標客群、行銷方向，以及通路規劃。":
-    "Today's discussion covers the target audience, marketing direction, and distribution plan for the new phone.",
-  "手機外觀較為時尚，不宜把目標客群限定在單一年齡層，應從使用需求進一步區分。":
-    "The phone's stylish design could appeal to several age groups. Segment the audience by their needs instead.",
-  "仍需定義明確的核心受眾，作為廣告訴求與通路選擇的依據。":
-    "Define a clear core audience to guide advertising messages and distribution choices.",
-  "聚焦新款手機的上市討論，確認目標客群與行銷規劃方向。":
-    "Focused the discussion on the new phone launch, its audience, and marketing direction.",
-  上市規劃: "Launch planning",
-  會議方向: "Meeting focus",
-  "建議從產品外觀與使用需求切入，讓目標客群涵蓋不同年齡層。":
-    "Suggested using design and user needs to reach customers across age groups.",
-  目標客群: "Target audience",
-  產品定位: "Positioning",
-  "主張先界定核心受眾，讓廣告與通路策略有明確依據。":
-    "Recommended defining the core audience before planning advertising and distribution.",
-  受眾分析: "Audience analysis",
-  通路策略: "Distribution",
-  會議重點: "Key takeaways",
-  新產品的客群與上市方向: "Audience and launch direction",
-  "團隊討論新款手機的產品定位，並評估不同年齡層的需求，作為後續行銷與通路規劃的基礎。":
-    "The team explored product positioning and the needs of different age groups to inform marketing and distribution plans.",
-  "從外觀與使用情境切入，進一步釐清核心受眾。":
-    "Use design preferences and use cases to clarify the core audience.",
-  行銷方向: "Marketing direction",
-  "讓廣告訴求與通路策略對應目標族群。":
-    "Align advertising and distribution with the target audience.",
-  後續待辦: "Next steps",
-  確認目標客群範圍: "Define the target audience",
-  整理產品主打特色: "List key product features",
-  擬定通路溝通方向: "Plan distribution messaging",
-  "把討論，接成下一步。": "Turn discussion into action.",
-  "儲存於這部 Mac": "Saved on this Mac",
-  "越用，越熟悉你的會議": "A LITTLE MORE FAMILIAR, EVERY MEETING",
-  "記住聲音，": "Knows the voices.",
-  "也記住你的用語。": "Learns your vocabulary.",
-  "從常見的與會者，到團隊自己的專有名詞。":
-    "Familiar people. Your team's own terminology.",
-  "每次整理，都有熟悉的依據。":
-    "Context that carries into the next conversation.",
-  "一次命名，下次就認得。": "Name once. Recognize again.",
-  "聲紋留在你的 Mac。現場與線上通話，":
-    "Voiceprints stay on your Mac. Separate profiles ",
-  "分別記住同一個人的聲音。": "for the same person, in person and online.",
-  已建立聲紋: "Voiceprint saved",
-  已辨識: "Recognized",
-  會議室現場: "In person",
-  線上通話: "Online call",
-  "團隊的詞彙，說得準。": "Your team's words, understood.",
-  "將專有名詞加入個人詞彙庫，": "Add specialist terms to your vocabulary ",
-  "讓轉錄與整理時有參考依據。": "to guide transcription and summaries.",
-  個人詞彙庫: "Your vocabulary",
-  產品名稱: "Product",
-  聲紋辨識: "Voice recognition",
-  技術用語: "Technical term",
-  產品路線圖: "Product roadmap",
-  團隊詞彙: "Team term",
-  "你的用語，留下自己的版本。": "Your words. Your vocabulary.",
-  "資料的去向，由你決定": "YOUR DATA. YOUR CHOICE.",
-  "你的會議，": "Your meetings.",
-  "留在你的 Mac。": "At home on your Mac.",
-  "錄音、聲紋與會議紀錄儲存在本機。":
-    "Recordings, voiceprints, and notes are stored locally.",
-  "mm2t 沒有自己的伺服器，也不代管你的資料。":
-    "mm2t has no servers of its own and doesn't host your data.",
-  "API 金鑰存放於 macOS 鑰匙圈": "API keys secured in macOS Keychain",
+
+  // Memory
+  記住常見的與會者和團隊用語: "Remembers your regulars and your team's words",
+  "同一個人在會議室和線上通話各存一份聲紋。會議中聽到的專有名詞，以及你改過的字，會自動加進詞彙庫。":
+    "Each person keeps one voiceprint for the meeting room and one for calls. Names heard in meetings, and words you correct, join your vocabulary on their own.",
+
+  // Privacy
+  隱私與資料: "Privacy and your data",
+  "錄音、聲紋和會議紀錄都存在": "Recordings, voiceprints and notes stay on",
+  "這台 Mac": "this Mac",
+  "。mm2t 沒有自己的伺服器：轉錄和摘要用你自己的 API 金鑰直接連到服務商，也可以改用你自架的轉錄伺服器。":
+    ". mm2t runs no servers of its own: transcription and summaries go straight to the provider with your own API key, or to a transcription server you host.",
+  "API 金鑰存在 macOS 鑰匙圈": "API keys are kept in the macOS Keychain",
   "聲紋辨識在 Mac 本機完成": "Speaker recognition runs on your Mac",
+  "不錄螢幕，視窗也不會出現在螢幕分享": "No screen recording, and its windows stay out of screen shares",
   閱讀隱私權政策: "Read the privacy policy",
-  "你的 Mac": "Your Mac",
-  錄音: "Audio",
-  聲紋: "Voices",
-  紀錄: "Notes",
-  保存在本機: "Stored locally",
-  "你選擇的 API": "Your choice of API",
-  使用自己的金鑰: "Bring your own key",
-  直接連線至服務商: "Connect directly to providers",
-  自架轉錄伺服器: "Self-hosted transcription",
-  音訊在自己的: "Audio travels between",
-  設備之間傳輸: "your own devices",
+
+  // FAQ
+  "安裝步驟、支援的服務與每項設定，都寫在 GitHub 的使用文件。":
+    "Installation, supported services and every setting are covered in the docs on GitHub.",
+  閱讀使用文件: "Read the docs",
   "mm2t 是免費的嗎？": "Is mm2t free?",
   "mm2t 免費、開放原始碼，採用 AGPL-3.0 授權。選用 ElevenLabs、Google Gemini 等雲端服務時，需填入自己的 API 金鑰，使用費由服務商直接計算。也可以使用自己的轉錄伺服器。":
     "mm2t is free and open source under AGPL-3.0. Cloud services such as ElevenLabs and Google Gemini require your own API keys and bill you directly for usage. You can also connect your own transcription server.",
@@ -221,26 +104,98 @@ export const english: Record<string, string> = {
   "目前版本尚未有 Developer ID 簽章與 Apple 公證。請先核對 GitHub Release 來源，再依該版本說明，在「系統設定 → 隱私權與安全性」選擇「仍要打開」。":
     "The current release is not yet Developer ID signed or notarized by Apple. Verify that you downloaded it from the official GitHub release, then follow that release's instructions to choose Open Anyway in System Settings → Privacy & Security.",
   查看版本與安裝步驟: "Release and installation steps",
-  開始之前: "BEFORE YOU BEGIN",
-  "關於 mm2t，": "A few things",
-  "你可能想知道。": "you might wonder.",
-  "更多設定與使用方式，": "More about setup and everyday use ",
-  "都整理在 GitHub 文件裡。": "in the documentation on GitHub.",
-  閱讀使用文件: "Read the docs",
+
+  // Close and footer
   "mm2t 應用程式圖示": "mm2t app icon",
-  "把注意力留給對話。": "Be there for the conversation.",
-  "打開 mm2t，開始你的第一份會議記錄。":
-    "Open mm2t. Let your first meeting become your first notes.",
-  "為每一場值得記下的對話。": "For every conversation worth remembering.",
-  "在 GitHub 給顆星": "Star on GitHub",
+  "下一場會議，": "Your next meeting,",
+  "交給 mm2t 記錄": "noted by mm2t",
+  "在 GitHub 查看原始碼": "View the source on GitHub",
+  頁尾連結: "Footer links",
   隱私權政策: "Privacy policy",
   使用條款: "Terms of use",
   版本紀錄: "Releases",
-  "聲音，成為清楚的下一步。": "From sound to a clear next step.",
-  "散落的對話，逐一歸位。": "The conversation comes together.",
-  繼續探索: "Keep exploring",
-  本機辨識: "Recognized locally",
-  帶著名字: "With a name",
-  帶著脈絡: "With context",
-  帶著下一步: "With next steps",
+  原始碼: "Source code",
+
+  // The rebuilt App
+  首頁: "Home",
+  會議: "Meetings",
+  人物: "People",
+  詞彙: "Vocabulary",
+  設定: "Settings",
+  逐字稿: "Transcript",
+  整理版逐字稿: "Clean transcript",
+  依人彙整: "By speaker",
+  摘要: "Summary",
+  說話者: "Speaker",
+  全部: "All",
+  自動新增: "Auto-added",
+  新品發表會: "Launch event",
+  新增: "Add",
+  會議室現場: "In person",
+  線上通話: "Online call",
+  "1 個聲紋": "1 voiceprint",
+  "2 個聲紋": "2 voiceprints",
+  "3 個聲紋": "3 voiceprints",
+
+  // The demo meeting (src/lib/meeting.ts)
+  陳志明: "Zhiming Chen",
+  陳: "C",
+  林佳怡: "Jiayi Lin",
+  林: "L",
+  王建宏: "Jianhong Wang",
+  王: "W",
+  張雅婷: "Yating Zhang",
+  張: "Z",
+  新款手機上市行銷與通路規劃: "New phone launch: marketing and channels",
+  "好，嗯，我們今天針對新產品的上市，呃，討論一下目標客群跟行銷方向。":
+    "OK, um, today we're, uh, going over the audience and marketing direction for the new launch.",
+  "我們今天針對新產品的上市，討論一下目標客群與行銷方向。":
+    "Today we're going over the audience and marketing direction for the new launch.",
+  "我覺得這款手機的外觀比較時尚嘛，所以不必、不必把客群侷限在單一年齡層。":
+    "I think the phone looks pretty stylish, so we don't, we don't need to tie it to one age group.",
+  "這款手機的外觀比較時尚，我覺得不必把客群侷限在單一年齡層。":
+    "The phone looks stylish, so I don't think we need to tie it to one age group.",
+  "嗯，我覺得還是要有明確的受眾，才能決定後面的廣告跟通路策略。":
+    "Hmm, I still think we need a clear audience before we pick the ads and the channels.",
+  "我覺得還是要有明確的受眾，才能決定後續的廣告與通路策略。":
+    "I still think we need a clear audience before we decide on ads and channels.",
+  "對，那我建議先鎖定 18 到 45 歲的中青年，呃，再看長輩需要哪些規格。":
+    "Right, so I'd start with 18 to 45, uh, then see what older buyers need.",
+  "我建議先鎖定 18 至 45 歲的中青年客群，再評估長輩需要的規格。":
+    "I suggest we start with 18 to 45, then look at what older buyers need.",
+  "主持新手機上市討論，確認目標客群鎖定在 18 至 45 歲之間。":
+    "Led the launch discussion and settled the target audience at ages 18 to 45.",
+  "提出可考慮電商、電信商合作或找大 V 直播帶貨。":
+    "Proposed online stores, carrier deals or livestream sales with major creators.",
+  "認為客群不必劃分太嚴格，長輩也能接受亮色系外觀。":
+    "Argued the audience need not be narrow; older buyers like bright colours too.",
+  "擔心多平台同時直播影響利潤，建議推廣排定完整流程。":
+    "Worried that livestreams on several platforms would cut margins; asked for a full schedule.",
+  "主張客群設定要有明確針對性，這款手機更適合年輕人。":
+    "Wants a clearly defined audience; sees the phone as a better fit for younger buyers.",
+  "提議贈送印有品牌 LOGO 的限量手機殼或盲盒。": "Suggested limited branded cases or blind boxes as gifts.",
+  "建議鎖定 18 至 45 歲客群，為長輩另做字體與音量設計。":
+    "Suggested ages 18 to 45, with larger type and louder audio settings for older buyers.",
+  "建議贈品成本控制在 50 元以內，可洽談盲盒廠商合作。":
+    "Suggested keeping each gift under 50 dollars and talking to blind-box makers.",
+  決議: "Decisions",
+  討論重點: "Discussion",
+  待辦事項: "Action items",
+  "目標客群鎖定為 18 至 45 歲的中青年與年輕族群，產品設計主推年輕化。":
+    "Target buyers aged 18 to 45, with a design aimed at younger buyers.",
+  "促銷通路以主流電商平台與網紅直播帶貨為主，暫不聘請高價明星代言。":
+    "Sell through major online stores and creator livestreams; no celebrity endorsement for now.",
+  "贈品採「盲盒」形式，單個贈品成本控制在 50 元以內。": "Gifts come as blind boxes, each under 50 dollars.",
+  "目標客群範圍：林佳怡主張放寬到年長者；王建宏與張雅婷認為應集中在 18 至 45 歲。":
+    "Audience: Jiayi Lin wants to include older buyers; Jianhong Wang and Yating Zhang prefer 18 to 45.",
+  "通路與價格：多平台同時促銷可能造成價格混亂，團隊討論分時段秒殺與直播限定價。":
+    "Channels and pricing: parallel promotions could muddle prices; the team discussed timed flash sales and livestream-only prices.",
+  "聯繫贈品與盲盒製造商比價，並準備直播用樣品。": "Get quotes from gift and blind-box makers, and prepare livestream samples.",
+  "請設計團隊提出主打色的多版配色方案。": "Ask the design team for several colourways of the lead colour.",
+  "各部門於下週二前提出推廣執行方案與進度表。": "Each team sends its launch plan and timeline by next Tuesday.",
+  大V: "KOL",
+  直播帶貨: "Livestream sales",
+  合約機: "Contract phone",
+  雙十一: "Singles' Day",
+  盲盒: "Blind box",
 };

@@ -6,7 +6,7 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct MeetingListTests {
-    @Test func searchesTitlesAndTranscriptsAndDeletesWithTheAudio() async throws {
+    @Test func listsAllMeetingsAndDeletesWithTheAudio() async throws {
         let world = try World()
         let budget = try await world.recordedMeeting(title: "預算會議")
         _ = try await world.recordedMeeting(title: "週會")
@@ -16,18 +16,11 @@ import Testing
         #expect(Set(list.rows.map(\.title)) == ["預算會議", "週會"])
         #expect(list.rows.allSatisfy { $0.status == .completed })
 
-        list.query = "預算"
-        await list.reload()
-        #expect(list.rows.map(\.title).contains("預算會議"))
-        list.query = "那就這樣"
-        await list.reload()
-        #expect(list.rows.count == 2, "both transcripts contain the phrase")
-        list.query = "不存在的字"
-        await list.reload()
-        #expect(list.rows.isEmpty)
+        #expect(try await world.library.search("預算", names: [:]).map(\.metadata.title).contains("預算會議"))
+        #expect(try await world.library.search("那就這樣", names: [:]).count == 2)
+        #expect(try await world.library.search("不存在的字", names: [:]).isEmpty)
 
         let folder = await world.library.audioURL(budget, track: .me).deletingLastPathComponent()
-        list.query = ""
         await list.delete(budget.id)
         #expect(list.rows.map(\.title) == ["週會"])
         #expect(!FileManager.default.fileExists(atPath: folder.path), "story 55: recording and text are gone")
@@ -141,6 +134,28 @@ import Testing
         await detail.rename(SpeakerID("r2"), to: .existing(existing))
         #expect(detail.speakers.first { $0.id == SpeakerID("r2") }?.displayName == "陳經理")
         #expect(await world.app.voiceprints.allPersons().count == 1)
+    }
+
+    @Test func namingASpeakerAndTeachingTheirVoiceprintAreSeparateChoices() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let id = SpeakerID("r1")
+        func row() throws -> SpeakerRow { try #require(detail.speakers.first { $0.id == id }) }
+        #expect(try row().hasVoice && !row().canLearnVoice && !row().canForgetVoice)
+
+        await detail.rename(id, to: .newPerson(name: "Amy"), learn: false)
+        #expect(try row().displayName == "Amy" && row().canLearnVoice && !row().canForgetVoice)
+        #expect(detail.people.first?.embeddings.isEmpty == true)
+
+        await detail.learnVoice(of: id)
+        #expect(try !row().canLearnVoice && row().canForgetVoice)
+        #expect(detail.people.first?.embeddings.isEmpty == false)
+
+        await detail.forgetVoice(of: id)
+        #expect(try row().canLearnVoice && !row().canForgetVoice)
+        #expect(detail.errorMessage == nil)
     }
 
     @Test func editsAreRefusedWhileTheMeetingIsRegenerating() async throws {
@@ -326,7 +341,8 @@ import Testing
         defaults.set(Data(#"{"vocabulary":["舊"]}"#.utf8), forKey: SettingsStore.key)
         let migrated = SettingsStore(defaults: defaults).settings
         #expect(migrated.vocabulary == ["舊"])
-        #expect(migrated.transcriptionOrder == [.cloud] && migrated.diarizationOrder == [.local, .transcription])
+        #expect(migrated.transcriptionOrder == [.cloud])
+        #expect(AppSettings.diarizationOrder == [.local])
         #expect(migrated.hidesFromScreenCapture)
 
         #expect(AppSettings.selfHostedURL(from: "gpu:8000") == nil)

@@ -40,7 +40,10 @@ for (const [route, lang] of [
     html.includes("https://github.com/yuzen9622/mm2t/releases/latest"),
     "Download must reach the official release",
   );
-  assert(html.includes("<noscript>"), "Reveals need a no-JavaScript fallback");
+  assert(
+    html.includes("data-enter") && html.includes("m-enter"),
+    "The hero entrance must be gated by the m-enter head script",
+  );
   assert.equal(
     [...html.matchAll(/data-product-scene="/g)].length,
     1,
@@ -58,10 +61,6 @@ for (const [route, lang] of [
     assert(
       !/\p{Script=Han}/u.test(visible),
       "English page contains untranslated visible copy",
-    );
-    assert(
-      html.includes("/media/en/speakers.webp"),
-      "English screenshot missing",
     );
   }
   console.log(

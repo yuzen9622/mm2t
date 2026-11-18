@@ -267,20 +267,33 @@ struct RecordingDot: View {
     }
 }
 
-/// Four bars that follow the louder track, sized for the resting island's wing; flat while paused.
+/// Bars that follow a live input level; flat and dimmed while paused (nil). The defaults are the
+/// resting island's wing: four white bars that follow the louder track.
 struct MiniMeter: View {
     let level: Double?
-    private static let shape: [Double] = [0.55, 1, 0.75, 0.4]
+    var color: Color = .white
+    /// The colour while paused.
+    var restColor: Color = .white.opacity(0.45)
+    /// Each bar's share of the height at full level, left to right; its count is the bar count.
+    var shape: [Double] = [0.55, 1, 0.75, 0.4]
+    var barWidth: CGFloat = 2.5
+    var spacing: CGFloat = 2
+    var height: CGFloat = 14
+
+    /// Eleven bars for a meter twice the island's size, the same rise and fall from the middle out.
+    static let wideShape: [Double] = [0.35, 0.55, 0.8, 0.6, 1, 0.75, 0.9, 0.5, 0.7, 0.45, 0.3]
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Self.shape.indices, id: \.self) { index in
+        // A bar never drops below 3/14 of the height, so silence still reads as a meter.
+        let floor = height * 3 / 14
+        HStack(spacing: spacing) {
+            ForEach(shape.indices, id: \.self) { index in
                 Capsule()
-                    .fill(.white.opacity(level == nil ? 0.45 : 1))
-                    .frame(width: 2.5, height: 3 + 11 * (level ?? 0) * Self.shape[index])
+                    .fill(level == nil ? restColor : color)
+                    .frame(width: barWidth, height: floor + (height - floor) * (level ?? 0) * shape[index])
             }
         }
-        .frame(height: 14)
+        .frame(height: height)
         .animation(.easeOut(duration: 0.12), value: level)
         .accessibilityHidden(true)
     }
@@ -448,19 +461,50 @@ struct MeetingPrompt: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 7) {
                     Icon("video", size: 16)
-                    Text("\(meeting.platform.displayName) meeting")
+                    Text(Copy.detectedCall(meeting, name: capture.displayName(of: meeting)))
                 }
                 if meeting.client == .browser {
                     Text("The whole browser is recorded. Don't play other audio in it during the meeting.")
                         .font(Typo.caption)
                         .foregroundStyle(.white.opacity(0.65))
                 }
+                if meeting.isUnlisted {
+                    // Asked once per app or site, as quiet text so the card keeps one main action.
+                    HStack(spacing: 12) {
+                        PromptLearnButton("Always ask") { capture.alwaysPrompt() }
+                        PromptLearnButton("Never ask") { capture.neverAsk() }
+                    }
+                    .padding(.top, 2)
+                }
             }
             .padding(.leading, 10)
             CapsulePill("Record", filled: true) { Task { await capture.startPrompted() } }
                 .keyboardShortcut(.defaultAction)
-            CircleButton("Not This Time", icon: "x") { capture.dismiss() }
+            CircleButton("Cancel", icon: "x") { capture.dismiss() }
         }
+    }
+}
+
+/// One of the prompt's two learn choices: caption text that brightens on hover.
+private struct PromptLearnButton: View {
+    let title: LocalizedStringKey
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ title: LocalizedStringKey, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Typo.caption)
+                .foregroundStyle(.white.opacity(hovering ? 0.95 : 0.65))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .motion(Motion.touch, value: hovering)
     }
 }
 
@@ -473,6 +517,8 @@ struct RecordingCapsule: View {
             isPaused: isPaused, level: level, elapsed: capture.meters.elapsed,
             remoteSilent: capture.meters.remoteSilentWhilePlaying, showsHighlight: hovering || isPaused,
             hasHighlights: capture.meters.highlightCount > 0,
+            captionsShown: capture.captions.isActive ? !capture.captions.isBarHidden : nil,
+            toggleCaptions: { capture.captions.isBarHidden.toggle() },
             toggle: { Task { if isPaused { await capture.resume() } else { await capture.pause() } } },
             highlight: { Task { await capture.markHighlight() } },
             finish: { Task { await capture.stop() } })
@@ -497,6 +543,9 @@ struct CapsuleBar: View {
     let remoteSilent: Bool
     let showsHighlight: Bool
     let hasHighlights: Bool
+    /// Whether the caption bar shows; nil when captions are off, which hides its button.
+    var captionsShown: Bool?
+    var toggleCaptions: () -> Void = {}
     let toggle: () -> Void
     let highlight: () -> Void
     let finish: () -> Void
@@ -529,8 +578,13 @@ struct CapsuleBar: View {
                 CircleButton("Highlight", icon: hasHighlights ? "star-filled" : "star", action: highlight)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
+            if let captionsShown {
+                CircleButton(captionsShown ? "Hide Captions" : "Show Captions", icon: "badge-cc", action: toggleCaptions)
+                    .transition(.opacity)
+            }
             CircleButton("Finish", icon: "check", kind: .primary, action: finish)
         }
+        .motion(Motion.reveal, value: captionsShown == nil)
         .motion(Motion.select, value: showsHighlight)
         .motion(Motion.reveal, value: isPaused)
         .motion(Motion.reveal, value: remoteSilent)

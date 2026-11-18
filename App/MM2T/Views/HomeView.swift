@@ -15,7 +15,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader { EmptyView() }
-            FadingScrollView {
+            FadingScrollView(ground: Palette.window) {
                 VStack(alignment: .leading, spacing: 14) {
                     CalendarCard(model: model)
                     // Overlays fill the sibling's height without contributing their content's ideal height.
@@ -436,10 +436,8 @@ private struct ConnectCalendars: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Bring in your calendar").font(Typo.bodyStrong)
-            Text("See each day's meetings here and join calls in one click. Connect as many as you use.")
-                .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 8)
             CalendarSourceList(model: model)
+                .padding(.top, 8)
         }
     }
 }

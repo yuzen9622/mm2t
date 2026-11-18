@@ -19,6 +19,8 @@ public protocol RecordingSession: AnyObject, Sendable {
     func resume() async
     func markHighlight() async throws -> Highlight
     func stop() async throws -> Recording
+    /// Both tracks mixed to mono at the recording's rate as they are captured, for live captions.
+    func audioStream() async -> AsyncStream<[Float]>
 }
 
 public protocol Recorder: Sendable {
@@ -63,12 +65,28 @@ public struct LivePermissions: PermissionsProviding {
 
 public protocol ModelInstalling: Sendable {
     var isDownloaded: Bool { get }
+    /// What a download from nothing fetches, for the setup screen's total.
+    var downloadBytes: Int64 { get }
     func download(progress: @escaping @Sendable (Double) -> Void) async throws
+    /// Some of it is on disk and an update needs the rest, which the app then fetches on its own.
+    var needsCompleting: Bool { get }
+}
+
+extension ModelInstalling {
+    public var needsCompleting: Bool { false }
 }
 
 extension DiarizationModels: ModelInstalling {}
 
+extension TranslationModels: ModelInstalling {
+    public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        try await download(configuration: .default, progress: progress)
+    }
+}
+
 extension ModelSnapshot: ModelInstalling {
+    public var downloadBytes: Int64 { approximateBytes }
+
     public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
         try await download(configuration: .default, progress: progress)
     }
@@ -80,17 +98,20 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public let models: DiarizationModels
     public let transcriptionModel: LocalTranscriptionModel
     public let llmModel: LocalLLMModel
+    public let translationModels: TranslationModels
     private let speakerModels: LocalSpeakerModels
     private let transcription: LocalTranscription
 
-    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel) {
+    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel,
+                translationModels: TranslationModels) {
         self.models = models
         self.transcriptionModel = transcriptionModel
         self.llmModel = llmModel
+        self.translationModels = translationModels
         // Kept for the app's lifetime like the diarizer: preparing the speech model for the Neural
         // Engine takes minutes, so it happens once per launch, on the first offline transcription.
         transcription = LocalTranscription(model: transcriptionModel)
-        let embedder = WeSpeakerEmbedder(models: models)
+        let embedder = VoiceprintEmbedder(models: models)
         // One diarizer for the app's lifetime so the CoreML models load once, not per meeting.
         speakerModels = LocalSpeakerModels(diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder)
     }
@@ -100,6 +121,16 @@ public final class LiveProviderCatalog: ProviderCatalog {
     }
     public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
+    }
+    public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
+        ElevenLabsRealtime(apiKey: apiKey)
+    }
+    /// An offline server fails its 3 s health check and the captions move to the next source.
+    public func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider {
+        WindowedStreamingTranscription(SelfHostedTranscription(baseURL: url, token: token, probeTimeout: 3, timeout: 30))
+    }
+    public func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
+        transcriptionModel.snapshot.isDownloaded ? WindowedStreamingTranscription(transcription) : nil
     }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
     public func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
@@ -112,7 +143,12 @@ public final class LiveProviderCatalog: ProviderCatalog {
     /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
     /// while a meeting is being processed rather than while the app idles in the menu bar.
     public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
-    public var thresholds: MatchThresholds { .weSpeaker }
+    /// A fresh translator per recording, so its model is freed when the recording's captions end.
+    public func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+        let needed = translationModels.for(target)
+        return needed.isDownloaded ? BergamotTranslator(models: needed) : nil
+    }
+    public var thresholds: MatchThresholds { .campPlus }
 }
 
 /// One "verify" press; the self-hosted token can only be checked against a configured server.

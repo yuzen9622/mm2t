@@ -90,7 +90,7 @@ public struct EchoProfile: Hashable, Sendable {
     }
 }
 
-/// A mic track with the speakers' echo removed. The caller deletes `audio` when done.
+/// A mic track with the speakers' echo removed. The caller deletes `audio` or keeps it as the `PlaybackMic`.
 public struct CleanedMic: Sendable {
     public let audio: URL
     public let echo: EchoProfile
@@ -105,6 +105,43 @@ public protocol MicCleaner: Sendable {
     func clean(mic: URL, remote: URL) throws -> CleanedMic?
 }
 
+/// The echo-free mic track kept beside a meeting's recording, so playback does not clean the whole
+/// recording again each time the meeting is opened. An empty file records that the mic heard no
+/// echo and plays as recorded.
+public enum PlaybackMic {
+    public static func url(beside mic: URL) -> URL {
+        mic.deletingLastPathComponent().appending(path: "playback-mic.wav")
+    }
+
+    /// The track playback should use for `mic`; nil when none has been kept yet.
+    public static func kept(beside mic: URL) -> URL? {
+        let url = url(beside: mic)
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int else { return nil }
+        return size > 0 ? url : mic
+    }
+
+    /// Moves `cleaned` into place, or records that there was no echo to remove when it is nil.
+    public static func keep(_ cleaned: URL?, beside mic: URL) {
+        let url = url(beside: mic)
+        try? FileManager.default.removeItem(at: url)
+        guard let cleaned else {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            return
+        }
+        // Staged beside its destination first: a move from another volume is a copy, and playback
+        // must never find a track that is only partly there.
+        let staged = url.appendingPathExtension("partial")
+        try? FileManager.default.removeItem(at: staged)
+        do {
+            try FileManager.default.moveItem(at: cleaned, to: staged)
+            try FileManager.default.moveItem(at: staged, to: url)
+        } catch {
+            try? FileManager.default.removeItem(at: cleaned)
+            try? FileManager.default.removeItem(at: staged)
+        }
+    }
+}
+
 public protocol Diarizer: Sendable {
     func diarize(track: URL) async throws -> Diarization
 }
@@ -112,7 +149,20 @@ public protocol Diarizer: Sendable {
 /// Voice vectors for speaker turns another source segmented, so voiceprints still match
 /// when the local diarizer did not produce the segments.
 public protocol SpeakerEmbedder: Sendable {
+    /// Length of every vector it makes. Vectors of another length came from an earlier model.
+    var dimensions: Int { get }
     func embeddings(track: URL, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]]
+    /// `kept` are vectors to store and match by; `brief` are those of clusters with too little clean
+    /// speech for that, which only a user's confirmation may store.
+    func voiceprints(track: URL, segments: [Diarization.Segment], includingBrief: Bool) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]])
+}
+
+extension SpeakerEmbedder {
+    public func voiceprints(track: URL, segments: [Diarization.Segment], includingBrief: Bool) async throws
+        -> (kept: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]]) {
+        (try await embeddings(track: track, segments: segments), [:])
+    }
 }
 
 /// Where the remote track's who-spoke-when comes from.
@@ -253,6 +303,8 @@ public struct SummaryRequest: Hashable, Sendable {
 public protocol LLMProvider: Sendable {
     /// Pins completed background context once for a group of concurrently generated outputs.
     func forGeneration() async -> any LLMProvider
+    func generateText(system: String, input: String) async throws -> String
+    func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error>
     func inferNames(_ request: NameInferenceRequest) async throws -> [NameGuess]
     func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript
     func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest]

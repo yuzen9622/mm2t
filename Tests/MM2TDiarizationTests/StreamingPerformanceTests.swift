@@ -29,7 +29,7 @@ struct StreamingPerformanceTests {
         try report.write(to: inputs.report)
         let clock = ContinuousClock()
         let loadStart = clock.now
-        let embedder = WeSpeakerEmbedder(models: inputs.models)
+        let embedder = VoiceprintEmbedder(models: inputs.models)
         let factory = NemotronDiarizer(models: inputs.models, embedder: embedder)
         let session = try await factory.makeStreamingSession()
         report.modelLoadWallSeconds = seconds(loadStart.duration(to: clock.now))

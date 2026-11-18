@@ -10,6 +10,8 @@ final class TrackPipeline {
     private(set) var aligner: TrackAligner
     private let resampler: Resampler
     private var levels = AudioLevel.Accumulator()
+    /// While live captions run: what was written since the last `takeWritten()`, and where it starts in the file.
+    private var written: (start: Int, samples: [Float])?
 
     init(track: Track, url: URL, sampleRate: Int) throws {
         self.track = track
@@ -31,8 +33,8 @@ final class TrackPipeline {
                 // The converter holds some audio back; what comes out ends that far before the input did.
                 let end = position + Double(count) / chunk.sampleRate - buffered
                 let placement = aligner.place(frames: output.count, at: end - Double(output.count) / resampler.outputRate)
-                if placement.padding > 0 { writer.appendSilence(frames: placement.padding) }
-                writer.append(UnsafeBufferPointer(rebasing: output[placement.skip...]))
+                if placement.padding > 0 { appendSilence(frames: placement.padding) }
+                append(UnsafeBufferPointer(rebasing: output[placement.skip...]))
             }
         }
     }
@@ -47,7 +49,30 @@ final class TrackPipeline {
     /// the same span even when one device had stopped delivering.
     func padSilence(upTo position: TimeInterval) {
         guard position > 0 else { return }
-        writer.appendSilence(frames: aligner.padding(toReach: position))
+        appendSilence(frames: aligner.padding(toReach: position))
+    }
+
+    /// Starts or stops keeping a copy of what is written, for `takeWritten()`.
+    func setTapping(_ on: Bool) {
+        written = on ? (writer.framesAppended, []) : nil
+    }
+
+    /// The samples written since the last call and the file frame the first one is at; nil when not tapping.
+    func takeWritten() -> (start: Int, samples: [Float])? {
+        guard let taken = written else { return nil }
+        written = (writer.framesAppended, [])
+        return taken
+    }
+
+    private func append(_ samples: UnsafeBufferPointer<Float>) {
+        writer.append(samples)
+        written?.samples.append(contentsOf: samples)
+    }
+
+    private func appendSilence(frames: Int) {
+        guard frames > 0 else { return }
+        writer.appendSilence(frames: frames)
+        written?.samples.append(contentsOf: repeatElement(0, count: frames))
     }
 
     func finish(duration: TimeInterval) throws {

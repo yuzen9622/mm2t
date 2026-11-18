@@ -105,6 +105,7 @@ struct ScriptedCleaner: MicCleaner {
 /// Hears the voices of `Script.diarization`: each cluster gets the vectors of the scripted
 /// voice it overlaps most.
 struct ScriptedEmbedder: SpeakerEmbedder {
+    let dimensions = 3
     let calls = Box<[[String]]>([])
     let fails = Box(false)
 

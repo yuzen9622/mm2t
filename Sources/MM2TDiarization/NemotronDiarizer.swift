@@ -13,10 +13,10 @@ public actor NemotronDiarizer: MM2TCore.Diarizer, StreamingDiarizerFactory {
     public static let gapBridging: TimeInterval = 0.5
 
     public let models: DiarizationModels
-    public let embedder: WeSpeakerEmbedder
+    public let embedder: VoiceprintEmbedder
     private var diarizer: Nemotron3Diarizer?
 
-    public init(models: DiarizationModels, embedder: WeSpeakerEmbedder) {
+    public init(models: DiarizationModels, embedder: VoiceprintEmbedder) {
         self.models = models
         self.embedder = embedder
     }

@@ -75,6 +75,8 @@ public final class VoiceEnrollmentModel {
     public private(set) var level = 0.0
     /// Whether the user has a voiceprint, from this run or an earlier one.
     public private(set) var hasVoice = false
+    /// False until the voiceprints were read once; `hasVoice` means nothing before that.
+    public private(set) var hasCheckedVoice = false
 
     @ObservationIgnored private let voiceprints: VoiceprintStore
     @ObservationIgnored private let recorder: any VoiceSampleRecording
@@ -102,7 +104,9 @@ public final class VoiceEnrollmentModel {
     }
 
     public func refresh() async {
-        hasVoice = await voiceprints.user() != nil
+        // An update that changed the voiceprint model drops the enrollment, which it cannot re-derive.
+        hasVoice = await voiceprints.user()?.embeddings.isEmpty == false
+        hasCheckedVoice = true
         if hasVoice, state == .idle { state = .enrolled }
     }
 

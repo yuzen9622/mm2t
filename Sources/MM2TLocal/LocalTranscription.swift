@@ -64,9 +64,49 @@ public struct LocalTranscription: TranscriptionProvider {
     }
 }
 
+/// Live captions on this Mac: each clip is decoded from memory by the model the recordings use.
+extension LocalTranscription: ClipTranscriber {
+    public func prepare() async throws {
+        do {
+            try await engine.prepare()
+        } catch let error as ProviderError {
+            throw error.asTranscriptionError
+        }
+    }
+
+    public func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest) async throws -> String {
+        do {
+            let clip = Self.resampled(samples, from: request.sampleRate, to: WhisperKit.sampleRate)
+            return Alignment.joined(try await engine.transcribe(clip: clip, hints: request.hints, languageCode: request.languageCode))
+        } catch let error as ProviderError {
+            throw error.asTranscriptionError
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw ProviderError(.localTranscription, .audioUnreadable).asTranscriptionError
+        }
+    }
+
+    /// Linear interpolation; recordings are already at Whisper's 16 kHz, so this is normally a pass-through.
+    static func resampled(_ samples: [Float], from rate: Int, to target: Int) -> [Float] {
+        guard rate != target, rate > 0, samples.count > 1 else { return samples }
+        let step = Double(rate) / Double(target)
+        let count = Int(Double(samples.count) / step)
+        return (0..<count).map { index in
+            let position = Double(index) * step
+            let lower = min(Int(position), samples.count - 1), upper = min(lower + 1, samples.count - 1)
+            let fraction = Float(position - Double(lower))
+            return samples[lower] + (samples[upper] - samples[lower]) * fraction
+        }
+    }
+}
+
 actor WhisperEngine {
     private let folder: URL
     private var whisper: WhisperKit?
+    /// One decode at a time: captions and a meeting being processed share the loaded model.
+    private var isBusy = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     init(folder: URL) {
         self.folder = folder
@@ -74,13 +114,43 @@ actor WhisperEngine {
 
     /// With no language code Whisper detects the language itself from the first window.
     func transcribe(audio: URL, hints: [String], language: TranscriptionLanguage) async throws -> [TimedWord] {
-        let whisper = try await load()
-        var options = DecodingOptions(
-            task: .transcribe, language: language.code, temperatureFallbackCount: 3, usePrefillPrompt: true,
-            detectLanguage: language.code == nil, skipSpecialTokens: true, wordTimestamps: true, chunkingStrategy: .vad)
-        options.promptTokens = Self.promptTokens(hints, tokenizer: whisper.tokenizer)
-        let results = try await whisper.transcribe(audioPath: audio.path, decodeOptions: options)
-        return Self.words(results.flatMap(\.segments))
+        try await exclusively {
+            let whisper = try await load()
+            var options = DecodingOptions(
+                task: .transcribe, language: language.code, temperatureFallbackCount: 3, usePrefillPrompt: true,
+                detectLanguage: language.code == nil, skipSpecialTokens: true, wordTimestamps: true, chunkingStrategy: .vad)
+            options.promptTokens = Self.promptTokens(hints, tokenizer: whisper.tokenizer)
+            return Self.words(try await whisper.transcribe(audioPath: audio.path, decodeOptions: options).flatMap(\.segments))
+        }
+    }
+
+    /// Loading runs under the same lock as decoding, so callers arriving together load the model once.
+    func prepare() async throws {
+        guard whisper == nil else { return }
+        try await exclusively { _ = try await load() }
+    }
+
+    /// A clip under 30 s is one Whisper window: no chunking or word timings, and a single
+    /// temperature fallback, so a caption is never held up by retries.
+    func transcribe(clip: [Float], hints: [String], languageCode: String?) async throws -> [TimedWord] {
+        try await exclusively {
+            let whisper = try await load()
+            var options = DecodingOptions(
+                task: .transcribe, language: languageCode, temperatureFallbackCount: 1, usePrefillPrompt: true,
+                detectLanguage: languageCode == nil, skipSpecialTokens: true, withoutTimestamps: true)
+            options.promptTokens = Self.promptTokens(hints, tokenizer: whisper.tokenizer)
+            return Self.words(try await whisper.transcribe(audioArray: clip, decodeOptions: options).flatMap(\.segments))
+        }
+    }
+
+    private func exclusively<T: Sendable>(_ body: () async throws -> T) async throws -> T {
+        while isBusy { await withCheckedContinuation { waiting.append($0) } }
+        isBusy = true
+        defer {
+            isBusy = false
+            if !waiting.isEmpty { waiting.removeFirst().resume() }
+        }
+        return try await body()
     }
 
     private func load() async throws -> WhisperKit {
@@ -91,6 +161,8 @@ actor WhisperEngine {
         do {
             let config = WhisperKitConfig(
                 modelFolder: folder.path, tokenizerFolder: folder,
+                // The GPU measured 9-10x slower on 180 s of meeting audio, run back to back on an
+                // M4 Air: 524-563 s against 55 s here, with 4 GB peak against 1.6 GB.
                 computeOptions: ModelComputeOptions(audioEncoderCompute: .cpuAndNeuralEngine, textDecoderCompute: .cpuAndNeuralEngine),
                 verbose: false, logLevel: .error, prewarm: false, load: true, download: false)
             let whisper = try await WhisperKit(config)

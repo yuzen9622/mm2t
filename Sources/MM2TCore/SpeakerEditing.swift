@@ -11,10 +11,14 @@ public enum SpeakerEditError: Error, Equatable {
     case meetingIsProcessing
     /// Only a voice the mic heard can be the user; a call's remote speakers are other people.
     case notHeardOnMic(SpeakerID)
+    /// A voiceprint belongs to a person, so a speaker has to be named before their voice is learned.
+    case unnamed(SpeakerID)
 }
 
-/// User edits to a meeting's speakers. Each edit writes the speaker's voiceprints back to the
-/// store so the next meeting recognizes the person; this is the store's only write path from a meeting.
+/// User edits to a meeting's speakers. Who a speaker is and whether their voice teaches that
+/// person's voiceprint are separate choices: naming, accepting a suggestion and "this is me" can
+/// teach, a merge never does, and `learnVoice` and `forgetVoice` change it afterwards. These are
+/// the store's only write paths from a meeting.
 public struct SpeakerEditing: Sendable {
     public enum Target: Hashable, Sendable {
         case existing(PersonID)
@@ -29,12 +33,15 @@ public struct SpeakerEditing: Sendable {
         self.voiceprints = voiceprints
     }
 
-    /// Renaming touches no LLM output: names are substituted when views render.
+    /// Renaming touches no LLM output: names are substituted when views render. With `learn` off
+    /// the speaker is only labelled. A speaker moved off another person takes back what this
+    /// meeting taught that person, so a wrong name does not stay in their voiceprint.
     @discardableResult
-    public func rename(_ speaker: SpeakerID, in meetingID: MeetingID, to target: Target) async throws -> Meeting {
+    public func rename(_ speaker: SpeakerID, in meetingID: MeetingID, to target: Target, learn: Bool = true) async throws -> Meeting {
         var meeting = try await editableMeeting(meetingID)
         let index = try speakerIndex(speaker, in: meeting)
-        let embeddings = meeting.speakers[index].embeddings
+        let previous = meeting.speakers[index].person
+        let embeddings = learn ? meeting.speakers[index].learnableEmbeddings : []
         let person: PersonID
         switch target {
         case .existing(let id):
@@ -43,11 +50,26 @@ public struct SpeakerEditing: Sendable {
         case .newPerson(let name):
             person = try await voiceprints.addPerson(name: name, embeddings: embeddings)
         }
+        if let previous, previous != person {
+            try await voiceprints.removeEmbeddings(meeting.speakers[index].learnableEmbeddings, from: previous)
+        }
         let id = meeting.speakers[index].id
         meeting.speakers[index].person = person
         meeting.suggestions.items.removeAll { $0.speaker == id }
         try await library.save(meeting)
         return meeting
+    }
+
+    /// Adds the speaker's vectors to the voiceprint of the person they are named as.
+    public func learnVoice(of speaker: SpeakerID, in meetingID: MeetingID) async throws {
+        let (person, embeddings) = try await namedSpeaker(speaker, in: meetingID)
+        try await voiceprints.addEmbeddings(embeddings, to: person)
+    }
+
+    /// Takes the speaker's vectors back out of their person's voiceprint; the name stays.
+    public func forgetVoice(of speaker: SpeakerID, in meetingID: MeetingID) async throws {
+        let (person, embeddings) = try await namedSpeaker(speaker, in: meetingID)
+        try await voiceprints.removeEmbeddings(embeddings, from: person)
     }
 
     /// An inferred name reuses an existing person with the same name before creating one.
@@ -69,7 +91,8 @@ public struct SpeakerEditing: Sendable {
     }
 
     /// Folds `source` into `target`. Generated outputs and suggestions were computed with two
-    /// speakers, so they become stale until the user regenerates them.
+    /// speakers, so they become stale until the user regenerates them. No voiceprint changes: a
+    /// merged speaker is often a fragment, and its voice is learned only when the user asks.
     @discardableResult
     public func merge(_ source: SpeakerID, into target: SpeakerID, in meetingID: MeetingID) async throws -> Meeting {
         var meeting = try await editableMeeting(meetingID)
@@ -80,12 +103,11 @@ public struct SpeakerEditing: Sendable {
 
         let person = into.person ?? from.person
         let embeddings = into.embeddings + from.embeddings.filter { !into.embeddings.contains($0) }
-        if let person {
-            try await voiceprints.addEmbeddings(embeddings, to: person)
-        }
 
         meeting.speakers[targetIndex].person = person
         meeting.speakers[targetIndex].embeddings = embeddings
+        let brief = (into.briefEmbeddings ?? []) + (from.briefEmbeddings ?? []).filter { !(into.briefEmbeddings ?? []).contains($0) }
+        meeting.speakers[targetIndex].briefEmbeddings = brief.isEmpty ? nil : brief
         meeting.speakers.remove(at: sourceIndex)
         meeting.mergedSpeakers[from.id] = into.id
         for index in meeting.utterances.indices where meeting.utterances[index].speaker == from.id {
@@ -117,7 +139,7 @@ public struct SpeakerEditing: Sendable {
         let claimed = meeting.speakers[index]
         guard meeting.separatedTrack == .me || meeting.micSegments?.contains(where: { $0.speaker == claimed.id }) == true
         else { throw SpeakerEditError.notHeardOnMic(claimed.id) }
-        try await voiceprints.addUserEmbeddings(claimed.embeddings)
+        try await voiceprints.addUserEmbeddings(claimed.learnableEmbeddings)
 
         meeting.speakers.remove(at: index)
         meeting.mergedSpeakers[claimed.id] = .me
@@ -145,6 +167,13 @@ public struct SpeakerEditing: Sendable {
         let meeting = try await library.meeting(id)
         if case .pending = meeting.status { throw SpeakerEditError.meetingIsProcessing }
         return meeting
+    }
+
+    private func namedSpeaker(_ speaker: SpeakerID, in meetingID: MeetingID) async throws -> (PersonID, [Embedding]) {
+        let meeting = try await editableMeeting(meetingID)
+        let named = meeting.speakers[try speakerIndex(speaker, in: meeting)]
+        guard let person = named.person else { throw SpeakerEditError.unnamed(named.id) }
+        return (person, named.learnableEmbeddings)
     }
 
     private func speakerIndex(_ speaker: SpeakerID, in meeting: Meeting) throws -> Int {

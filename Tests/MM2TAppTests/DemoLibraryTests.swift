@@ -24,7 +24,7 @@ struct DemoLibraryTests {
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
         let models = DiarizationModels(directory: Self.evaluation.appending(path: "models"))
         try #require(models.isDownloaded, "run Evaluation/diarization/run_all.sh first")
-        let embedder = WeSpeakerEmbedder(models: models)
+        let embedder = VoiceprintEmbedder(models: models)
 
         let staging = root.appending(path: "staging")
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -45,7 +45,7 @@ struct DemoLibraryTests {
             library: library, voiceprints: voiceprints,
             diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder,
             transcription: TranscriptionChain([.init(.cloud, transcript)]), llm: DemoLLM(),
-            thresholds: .weSpeaker, vocabulary: [])
+            thresholds: .campPlus, vocabulary: [])
         let processed = try await pipeline.process(meeting.id)
         try? FileManager.default.removeItem(at: staging)
 

@@ -4,7 +4,8 @@ import Testing
 
 /// Runs against the real login keychain under a throwaway service name.
 @Suite(.serialized) struct KeychainCredentialStoreTests {
-    @Test func storesUpdatesAndDeletesEachCredentialSeparately() throws {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_TESTS"] == "1"))
+    func storesUpdatesAndDeletesEachCredentialSeparately() throws {
         let store = KeychainCredentialStore(service: "app.mm2t.tests.\(UUID().uuidString)")
         defer { for credential in Credential.allCases { try? store.delete(credential) } }
 
@@ -27,7 +28,8 @@ import Testing
         #expect(try store.read(.elevenLabsAPIKey) == nil)
     }
 
-    @Test func storesAreIsolatedByServiceName() throws {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MM2T_KEYCHAIN_TESTS"] == "1"))
+    func storesAreIsolatedByServiceName() throws {
         let a = KeychainCredentialStore(service: "app.mm2t.tests.\(UUID().uuidString)")
         let b = KeychainCredentialStore(service: "app.mm2t.tests.\(UUID().uuidString)")
         defer { try? a.delete(.selfHostedToken) }

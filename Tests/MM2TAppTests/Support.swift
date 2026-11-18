@@ -89,11 +89,14 @@ struct FakeSTT: TranscriptionProvider {
     enum Behavior: Sendable { case words, unreachable, failed }
     let behavior: Box<Behavior>
     let calls = Box<[(file: String, hints: [String])]>([])
+    /// Whether each call asked for speaker labels.
+    let labelRequests = Box<[Bool]>([])
 
     init(_ behavior: Behavior = .words) { self.behavior = Box(behavior) }
 
     func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         calls.update { $0.append((audio.lastPathComponent, hints)) }
+        labelRequests.update { $0.append(labelSpeakers) }
         switch behavior.get {
         case .unreachable: throw TranscriptionError.unreachable("connection refused")
         case .failed: throw TranscriptionError.failed("invalid API key")
@@ -102,12 +105,97 @@ struct FakeSTT: TranscriptionProvider {
     }
 }
 
+/// A scripted streaming speech service: each `open` hands out a session the test drives.
+final class FakeStreamingSTT: StreamingTranscriptionProvider, @unchecked Sendable {
+    let requests = Box<[StreamingTranscriptionRequest]>([])
+    let sessions = Box<[FakeStreamingSession]>([])
+    /// Thrown by the next opens, in order, before any succeeds.
+    let openFailures = Box<[TranscriptionError]>([])
+
+    func open(_ request: StreamingTranscriptionRequest) async throws -> any StreamingTranscriptionSession {
+        requests.update { $0.append(request) }
+        var failure: TranscriptionError?
+        openFailures.update { if !$0.isEmpty { failure = $0.removeFirst() } }
+        if let failure { throw failure }
+        let session = FakeStreamingSession()
+        sessions.update { $0.append(session) }
+        return session
+    }
+
+    var last: FakeStreamingSession? { sessions.get.last }
+}
+
+final class FakeStreamingSession: StreamingTranscriptionSession, @unchecked Sendable {
+    let events: AsyncThrowingStream<StreamingTranscriptEvent, Error>
+    private let continuation: AsyncThrowingStream<StreamingTranscriptEvent, Error>.Continuation
+    let sent = Box<[[Float]]>([])
+    let closed = Box(false)
+
+    init() { (events, continuation) = AsyncThrowingStream.makeStream() }
+
+    func send(_ samples: [Float]) async throws { sent.update { $0.append(samples) } }
+    func close() async {
+        closed.set(true)
+        continuation.finish()
+    }
+
+    func say(_ event: StreamingTranscriptEvent) { continuation.yield(event) }
+    func drop(_ error: Error = TranscriptionError.unreachable("connection lost")) { continuation.finish(throwing: error) }
+    var sentSeconds: Double { Double(sent.get.reduce(0) { $0 + $1.count }) / 16_000 }
+}
+
+func assistantDecision(_ action: String, query: String = "", people: [String] = [], from: String? = nil,
+                       to: String? = nil, cursor: String? = nil, handles: [String] = [], status: String = "unmarked") -> String {
+    let object: [String: Any] = ["reasoning": "查詢會議", "action": action, "query": query, "people": people,
+        "owner": "me", "status": status, "sort": "due", "dateFrom": from as Any? ?? NSNull(),
+        "dateTo": to as Any? ?? NSNull(), "dueFrom": NSNull(), "dueTo": NSNull(), "cursor": cursor as Any? ?? NSNull(), "handles": handles]
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+}
+
 struct FakeLLMError: Error, CustomStringConvertible {
     var description: String { "Gemini 暫時無法服務" }
 }
 
 /// Echoes the transcript back in each output shape, naming speakers only by token.
-struct FakeLLM: LLMProvider {
+struct FakeLLM: LLMProvider, StructuredGenerator {
+    let decisions = Box([assistantDecision("search_meetings", query: "預算"), assistantDecision("read_meeting"), assistantDecision("answer")])
+    let generationInputs = Box<[String]>([])
+    let memoryJSON = Box(#"{"preference":null}"#)
+    let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
+    let resumedAnswerChunks = Box<[String]>([])
+    let answerInputs = Box<[String]>([])
+    let streamCancelled = Box(false)
+    let holdsStream = Box(false)
+    let failsStream = Box(false)
+    let lateAfterCancellation = Box<[String]>([])
+    var service: Service { .gemini }
+    func generate(system: String, input: String, schema: JSON) async throws -> String {
+        if system.hasPrefix("Memory intent:") { return memoryJSON.get }
+        generationInputs.update { $0.append(input) }
+        try await record("plan")
+        var result = assistantDecision("answer")
+        decisions.update { if !$0.isEmpty { result = $0.removeFirst() } }
+        return result
+    }
+    func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
+        answerInputs.update { $0.append(input) }
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                for text in answerChunks.get { continuation.yield(text) }
+                if let gate = holds.get["answer"] { _ = await gate.wait() }
+                for text in resumedAnswerChunks.get { continuation.yield(text) }
+                if holdsStream.get {
+                    do { try await Task.sleep(for: .seconds(60)) } catch {
+                        for text in lateAfterCancellation.get { continuation.yield(text) }
+                        streamCancelled.set(true)
+                    }
+                }
+                if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
+                else { continuation.finish() }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
     let calls = Box<[String]>([])
     let failNext = Box<Set<String>>([])
     let corrections = Box<[VocabularyCorrection]>([])
@@ -182,6 +270,7 @@ struct ScriptedDiarizer: Diarizer {
 }
 
 struct ScriptedEmbedder: SpeakerEmbedder {
+    let dimensions = 3
     func embeddings(track: URL, segments: [Diarization.Segment]) async throws -> [ClusterID: [Embedding]] {
         Script.diarization.embeddings
     }
@@ -214,6 +303,23 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return selfHosted
     }
 
+    let streaming = FakeStreamingSTT()
+    func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
+        keysUsed.update { $0.append("captions:" + apiKey.revealed) }
+        return streaming
+    }
+
+    let selfHostedStreaming = FakeStreamingSTT()
+    func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider {
+        selfHostedURLs.update { $0.append(url) }
+        return selfHostedStreaming
+    }
+
+    let localStreaming = FakeStreamingSTT()
+    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
+        offlineDownloaded[.transcription]!.get ? localStreaming : nil
+    }
+
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
         openAIEndpoints.update { $0.append("\(baseURL.absoluteString)|\(apiKey?.revealed ?? "-")|\(model)") }
         return llm
@@ -235,6 +341,14 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
 
     func localLLM() -> (any LLMProvider)? {
         offlineDownloaded[.llm]!.get ? onDeviceLLM : nil
+    }
+
+    let translator = FakeTranslator()
+    let translationDownloaded = Box(false)
+    let translatorTargets = Box<[CaptionTarget]>([])
+    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+        translatorTargets.update { $0.append(target) }
+        return translationDownloaded.get ? translator : nil
     }
 
     var thresholds: MatchThresholds { MatchThresholds(autoName: 0.9, suggest: 0.6) }
@@ -272,14 +386,56 @@ final class FakePermissions: PermissionsProviding, @unchecked Sendable {
 }
 
 final class FakeInstaller: ModelInstalling, @unchecked Sendable {
+    struct Failed: Error {}
     let downloaded: Box<Bool>
-    init(_ downloaded: Box<Bool>) { self.downloaded = downloaded }
+    let downloadBytes: Int64
+    /// When set, a download stops half way until the gate opens; true lets it finish, false fails it.
+    let hold = Box<Gate<Bool>?>(nil)
+    let downloads = Box(0)
+    init(_ downloaded: Box<Bool>, bytes: Int64 = 100_000_000) {
+        self.downloaded = downloaded
+        downloadBytes = bytes
+    }
     var isDownloaded: Bool { downloaded.get }
     func download(progress: @escaping @Sendable (Double) -> Void) async throws {
+        downloads.update { $0 += 1 }
         progress(0.5)
+        if let gate = hold.get, !(await gate.wait()) { throw Failed() }
         downloaded.set(true)
         progress(1)
     }
+}
+
+/// A caption translator whose answers the test controls: each call waits for its own release,
+/// so results can come back in any order. Unless `holds` is set, it answers at once.
+final class FakeTranslator: CaptionTranslator, @unchecked Sendable {
+    struct Call: Equatable { let text: String; let languages: [String] }
+    let calls = Box<[Call]>([])
+    let holds = Box(false)
+    let failing = Box<Set<String>>([])
+    /// Fixed answers by input; anything else comes back bracketed.
+    let answers = Box<[String: String]>([:])
+    private let gates = Box<[String: Gate<Bool>]>([:])
+
+    func translate(_ text: String, through languages: [String]) async throws -> String {
+        calls.update { $0.append(Call(text: text, languages: languages)) }
+        if holds.get {
+            let gate = Gate<Bool>()
+            gates.update { $0[text] = gate }
+            _ = await gate.wait()
+        }
+        if failing.get.contains(text) { throw CaptionTranslationError.engine("model failed") }
+        return answers.get[text] ?? "⟨\(text)⟩"
+    }
+
+    /// Lets the held call for `text` return.
+    func release(_ text: String) async {
+        let gate = gates.get[text]
+        gates.update { $0[text] = nil }
+        await gate?.open(true)
+    }
+
+    var held: [String] { gates.get.keys.sorted() }
 }
 
 struct FakeValidator: KeyValidating {
@@ -299,6 +455,8 @@ actor FakeSession: RecordingSession {
     private(set) var isPaused = false
     private var highlights: [Highlight] = []
     private var clock: TimeInterval = 0
+    private var audio: AsyncStream<[Float]>.Continuation?
+    private(set) var audioRequests = 0
 
     init(_ configuration: RecorderConfiguration) throws {
         self.configuration = configuration
@@ -309,6 +467,16 @@ actor FakeSession: RecordingSession {
     }
 
     nonisolated func send(_ event: RecorderEvent) { continuation.yield(event) }
+
+    func audioStream() -> AsyncStream<[Float]> {
+        audioRequests += 1
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        audio = continuation
+        return stream
+    }
+
+    /// Plays `seconds` of mixed audio into the caption stream, as the recorder would.
+    func speak(seconds: Double = 0.25) { audio?.yield([Float](repeating: 0.1, count: Int(16_000 * seconds))) }
 
     var elapsed: TimeInterval { clock }
     func advance(_ seconds: TimeInterval) { clock += seconds }
@@ -323,6 +491,7 @@ actor FakeSession: RecordingSession {
 
     func stop() throws -> Recording {
         continuation.finish()
+        audio?.finish()
         let directory = configuration.directory
         for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
             let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)
@@ -389,6 +558,9 @@ struct World {
     let recorder = FakeRecorder()
     let permissions = FakePermissions()
     let validator = FakeValidator()
+    let speakerInstaller: FakeInstaller
+    let translationInstaller: FakeInstaller
+    let offlineInstallers: [OfflineModel: FakeInstaller]
     let defaults: UserDefaults
     let now: Box<Date>
     let app: AppController
@@ -404,10 +576,15 @@ struct World {
         }
         let now = Box(Date(timeIntervalSince1970: 1_800_000_000))
         self.now = now
+        speakerInstaller = FakeInstaller(catalog.modelsDownloaded, bytes: 220_000_000)
+        let translation = FakeInstaller(catalog.translationDownloaded, bytes: 75_000_000)
+        translationInstaller = translation
+        offlineInstallers = catalog.offlineDownloaded.mapValues { FakeInstaller($0, bytes: 1_000_000_000) }
         app = try AppController(
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
-            recorder: recorder, permissions: permissions, installer: FakeInstaller(catalog.modelsDownloaded),
-            offlineInstallers: catalog.offlineDownloaded.mapValues(FakeInstaller.init),
+            recorder: recorder, permissions: permissions, installer: speakerInstaller,
+            offlineInstallers: offlineInstallers,
+            translationInstaller: { _ in translation },
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
     }
 

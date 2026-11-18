@@ -19,7 +19,7 @@ const server = http.createServer((req, res) => {
   try {
     const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
     file = path.resolve(root, `.${pathname}`);
-    if (!file.startsWith(root)) throw new Error("Invalid path");
+    if (file !== path.resolve(root) && !file.startsWith(root)) throw new Error("Invalid path");
     if (statSync(file).isDirectory()) file = path.join(file, "index.html");
   } catch {
     res.statusCode = 404;

@@ -1,0 +1,229 @@
+import AppKit
+import SwiftUI
+
+/// One choice of a `Dropdown`.
+struct DropdownOption<ID: Hashable>: Identifiable {
+    let id: ID
+    /// A flag or other emoji before the title; read by nobody, the title says it all.
+    var leading: String?
+    let title: String
+}
+
+/// A choice drawn in the window instead of a system menu: the selected option and a chevron,
+/// which open a list under it. The list is drawn by the nearest `dropdownLayer()`, so no card,
+/// scroll view or clip around the trigger cuts it off. One list is open at a time.
+struct Dropdown<ID: Hashable>: View {
+    /// What the trigger is, for accessibility.
+    let label: LocalizedStringKey
+    let options: [DropdownOption<ID>]
+    @Binding var selection: ID
+    @State private var id = UUID()
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+
+    private var isOpen: Bool { DropdownState.shared.open == id }
+    private var selected: DropdownOption<ID>? { options.first { $0.id == selection } }
+
+    var body: some View {
+        Button { DropdownState.shared.open = isOpen ? nil : id } label: {
+            HStack(spacing: 6) {
+                if let leading = selected?.leading { Text(verbatim: leading) }
+                Text(verbatim: selected?.title ?? "")
+                Icon("chevron-down", size: 12).foregroundStyle(Palette.secondary)
+            }
+            .font(Typo.body)
+            .lineLimit(1)
+            // The hover tint reaches past the text without moving it.
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(hovering || isOpen ? Palette.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, -6)
+            .padding(.vertical, -3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .focusEffectDisabled()
+        .opacity(enabled ? 1 : 0.5)
+        .onHover { hovering = $0 && enabled }
+        .motion(Motion.touch, value: hovering)
+        .accessibilityLabel(label)
+        .accessibilityValue(Text(verbatim: selected?.title ?? ""))
+        .anchorPreference(key: DropdownKey.self, value: .bounds) { anchor in
+            isOpen ? DropdownRequest(id: id, anchor: anchor, list: AnyView(list)) : nil
+        }
+        .onDisappear { if isOpen { DropdownState.shared.open = nil } }
+        .onChange(of: enabled) { if !enabled, isOpen { DropdownState.shared.open = nil } }
+    }
+
+    private var list: some View {
+        DropdownList(options: options, selection: selection) { choice in
+            selection = choice
+            DropdownState.shared.open = nil
+        }
+    }
+}
+
+/// Which dropdown is open, so opening one closes any other and its host can close it.
+@MainActor @Observable
+final class DropdownState {
+    static let shared = DropdownState()
+    var open: UUID?
+}
+
+struct DropdownRequest {
+    let id: UUID
+    let anchor: Anchor<CGRect>
+    let list: AnyView
+}
+
+struct DropdownKey: PreferenceKey {
+    static var defaultValue: DropdownRequest? { nil }
+    static func reduce(value: inout DropdownRequest?, nextValue: () -> DropdownRequest?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// The open list's rows: a check on the selected one, then its flag and title.
+private struct DropdownList<ID: Hashable>: View {
+    let options: [DropdownOption<ID>]
+    let selection: ID
+    let choose: (ID) -> Void
+    @State private var highlight: ID?
+    @FocusState private var focused: Bool
+
+    private var reservesLeading: Bool { options.contains { $0.leading != nil } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(options) { option in
+                Button { choose(option.id) } label: {
+                    HStack(spacing: 0) {
+                        Icon("check", size: 14)
+                            .foregroundStyle(Palette.orange)
+                            .opacity(option.id == selection ? 1 : 0)
+                        Spacer().frame(width: 8)
+                        if reservesLeading {
+                            Text(verbatim: option.leading ?? "").frame(width: 20, alignment: .leading)
+                            Spacer().frame(width: 6)
+                        }
+                        Text(verbatim: option.title).foregroundStyle(Palette.text).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .font(Typo.body)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(highlight == option.id ? Palette.selected : .clear,
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusEffectDisabled()
+                .onHover { if $0 { highlight = option.id } }
+                .accessibilityLabel(Text(verbatim: option.title))
+                .accessibilityAddTraits(option.id == selection ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(minWidth: 180)
+        .fixedSize()
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Palette.shadow, radius: 32, y: 14)
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onAppear {
+            highlight = selection
+            focused = true
+        }
+        .onKeyPress(.upArrow) { move(-1) }
+        .onKeyPress(.downArrow) { move(1) }
+        .onKeyPress(.return) { chooseHighlight() }
+        .onKeyPress(.space) { chooseHighlight() }
+        .onKeyPress(.escape) {
+            DropdownState.shared.open = nil
+            return .handled
+        }
+    }
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        let ids = options.map(\.id)
+        let index = highlight.flatMap(ids.firstIndex) ?? 0
+        highlight = ids[min(max(index + step, 0), ids.count - 1)]
+        return .handled
+    }
+
+    private func chooseHighlight() -> KeyPress.Result {
+        if let highlight { choose(highlight) }
+        return .handled
+    }
+}
+
+/// Draws the open dropdown of the views inside it, above all of them, and closes it on a click
+/// or scroll anywhere else. Apply at the root of a surface whose content is clipped or scrolls.
+private struct DropdownLayer: ViewModifier {
+    @State private var listHeight: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    /// Kept between the list and the layer's edge.
+    private static let margin: CGFloat = 8
+
+    func body(content: Content) -> some View {
+        content.overlayPreferenceValue(DropdownKey.self) { request in
+            GeometryReader { proxy in
+                ZStack(alignment: .topLeading) {
+                    Color.clear.frame(width: proxy.size.width, height: proxy.size.height)
+                    if let request {
+                        DismissCatcher { DropdownState.shared.open = nil }
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                        list(request, rect: proxy[request.anchor], bounds: proxy.size)
+                    }
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            }
+        }
+    }
+
+    private func list(_ request: DropdownRequest, rect: CGRect, bounds: CGSize) -> some View {
+        // Its top-trailing corner 6 pt under the trigger's bottom-trailing one, or above the
+        // trigger when there is no room below.
+        let upward = rect.maxY + 6 + listHeight > bounds.height - Self.margin
+            && rect.minY - 6 - listHeight >= Self.margin
+        let anchor: UnitPoint = upward ? .bottomTrailing : .topTrailing
+        return request.list
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+            .alignmentGuide(.leading) { d in d.width - rect.maxX }
+            .alignmentGuide(.top) { d in upward ? d.height - (rect.minY - 6) : -(rect.maxY + 6) }
+            .id(request.id)
+            .transition(.asymmetric(
+                insertion: (reduce ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .scale(scale: 0.96, anchor: anchor)))
+                    .animation(reduce ? .easeOut(duration: 0.12) : Motion.reveal),
+                removal: .opacity.animation(.easeOut(duration: 0.12))))
+    }
+}
+
+/// Covers the layer while a list is open: a click or a scroll there closes the list and goes no further.
+private struct DismissCatcher: NSViewRepresentable {
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.dismiss = dismiss
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) { view.dismiss = dismiss }
+
+    final class CatcherView: NSView {
+        var dismiss: () -> Void = {}
+        override func mouseDown(with event: NSEvent) { dismiss() }
+        override func rightMouseDown(with event: NSEvent) { dismiss() }
+        override func otherMouseDown(with event: NSEvent) { dismiss() }
+        override func scrollWheel(with event: NSEvent) { dismiss() }
+    }
+}
+
+extension View {
+    func dropdownLayer() -> some View { modifier(DropdownLayer()) }
+}

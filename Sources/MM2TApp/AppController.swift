@@ -5,7 +5,9 @@ import MM2TDiarization
 import MM2TLocal
 import MM2TProviders
 import MM2TSystem
+import MM2TWidgetData
 import Observation
+import OSLog
 
 /// Where the app keeps its data. `MM2TDataRoot` in UserDefaults (or `-MM2TDataRoot <path>` on the
 /// command line) moves everything, for development against a scratch library.
@@ -14,6 +16,9 @@ public struct AppPaths: Sendable {
     public var meetings: URL { root.appending(path: "Meetings") }
     public var recordings: URL { root.appending(path: "Recordings") }
     public var voiceprints: URL { root.appending(path: "voiceprints.json") }
+    public var searchIndex: URL { root.appending(path: "search.sqlite") }
+    public var assistantConversations: URL { root.appending(path: "Assistant/Conversations") }
+    public var assistantPreferences: URL { root.appending(path: "Assistant/preferences.json") }
     /// Same place as `DiarizationModels.applicationSupport` for the default root.
     public var models: URL { root.appending(path: "Models") }
 
@@ -35,6 +40,8 @@ public final class AppController {
     public let paths: AppPaths
     public let settings: SettingsStore
     public let library: MeetingLibrary
+    public let searchIndex: MeetingIndex
+    private let searchSync: SearchIndexSync
     public let voiceprints: VoiceprintStore
     public let queue: ProcessingQueue
     public let capture: CaptureController
@@ -43,18 +50,50 @@ public final class AppController {
     public let people: VoiceprintsModel
     public let dashboard: DashboardModel
     public let todoStatus: TodoStatus
+    public let assistantConversations: AssistantConversations
+    public let assistantPreferences: AssistantPreferences
     public let reminders: RemindersSync
     public let enrollment: VoiceEnrollmentModel
+    /// First-run setup's screens; reopened at its first incomplete screen each time the window opens.
+    public let onboarding: OnboardingFlow
+    /// Nil when this copy cannot share data with the desktop widget (an ad-hoc build has no team).
+    public let widget: WidgetPublisher?
 
     /// The app is not usable until setup is finished and the user's voice is enrolled.
     public var needsOnboarding: Bool { !settings.settings.hasCompletedOnboarding || !enrollment.hasVoice }
+    /// Whether the main window shows setup instead of the app: while setup is unfinished, or after
+    /// the user opened it again. Until the voiceprints are read, a finished setup counts as still
+    /// finished, so a launch never shows setup for a moment before the app.
+    public var showsSetup: Bool {
+        onboarding.isOpenedAgain || !settings.settings.hasCompletedOnboarding
+            || (enrollment.hasCheckedVoice && !enrollment.hasVoice)
+    }
     /// Recordings repaired at launch (or left unprocessed by a quit), offered for processing.
     public private(set) var recovered: [MeetingID] = []
+    /// Set while an update to the voiceprint model fetches it and rebuilds stored voices.
+    public private(set) var voiceprintUpdate: VoiceprintUpdate?
     public private(set) var recoveryFailures: [URL: String] = [:]
 
     @ObservationIgnored private let pipelineSetup: PipelineSetup
+    @ObservationIgnored private let migrateVoiceprints: @Sendable (_ progress: @escaping @Sendable (Int, Int) async -> Void) async -> Void
+    private nonisolated static let logger = Logger(subsystem: "dev.mm2t.app", category: "Voiceprints")
     @ObservationIgnored private var monitor: SystemSignalMonitor?
     @ObservationIgnored private var watchMeetings = false
+    @ObservationIgnored private var hotkey: GlobalHotkeyMonitor?
+    @ObservationIgnored private let recordingTitle: String
+    /// Set while the shortcut field in Settings is listening, so pressing the current shortcut
+    /// there to replace it does not also start or stop a recording.
+    public var suspendsRecordShortcut: Bool {
+        get { hotkey?.isSuspended ?? false }
+        set { hotkey?.isSuspended = newValue }
+    }
+
+    public func makeAssistant() -> AssistantModel {
+        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints,
+                                               todos: { [todoStatus] in await todoStatus.snapshot }),
+                       conversations: assistantConversations, preferences: assistantPreferences,
+                       build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
+    }
 
     public init(
         paths: AppPaths,
@@ -65,38 +104,60 @@ public final class AppController {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
+        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
         machine: MachineProfile = .current,
         validator: any KeyValidating,
         calendars: [any CalendarSource] = [],
         reminders: any ReminderStore = SystemReminders(),
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
         runningBrowsers: @escaping @MainActor () -> [String] = { [] },
+        widgetFile: URL? = nil,
         now: @escaping () -> Date = Date.init,
-        endCountdown: Duration = CaptureController.endCountdown
+        endCountdown: Duration = CaptureController.endCountdown,
+        recordingTitle: String = "Recording"
     ) throws {
         self.paths = paths
+        assistantConversations = AssistantConversations(directory: paths.assistantConversations)
+        assistantPreferences = AssistantPreferences(file: paths.assistantPreferences)
+        self.recordingTitle = recordingTitle
         let settings = SettingsStore(defaults: defaults)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
         let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
+        migrateVoiceprints = { progress in
+            guard let models = catalog.localSpeakerModels() else { return }
+            let migration = VoiceprintMigration(library: library, voiceprints: voiceprints, embedder: models.embedder)
+            guard (try? await migration.isNeeded()) == true else { return }
+            let started = Date()
+            do {
+                let outcome = try await migration.run(progress: progress)
+                let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+                Self.logger.notice("event=voiceprint_migration meetings=\(outcome.meetings) unreadable=\(outcome.unreadable) dropped=\(outcome.dropped) userCalls=\(outcome.userCalls) seconds=\(seconds, privacy: .public)")
+            } catch {
+                Self.logger.error("event=voiceprint_migration_failed error=\(String(describing: error), privacy: .public)")
+            }
+        }
         let queue = ProcessingQueue(
             makePipeline: { try pipelineSetup.build(settings.settings) },
             makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
         self.settings = settings
         self.library = library
+        let searchIndex = MeetingIndex(fileURL: paths.searchIndex)
+        self.searchIndex = searchIndex
+        searchSync = SearchIndexSync(library: library, index: searchIndex, voiceprints: voiceprints)
         self.voiceprints = voiceprints
         self.pipelineSetup = pipelineSetup
         self.queue = queue
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
+            rules: { settings.settings.detectionRules },
+            saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
                 // Only with hosted speech recognition and the on-device speaker model: an on-device
-                // speech model would compete with the meeting for the machine, and pieces carry no
-                // speaker labels for the fallback separation to use.
+                // speech model would compete with the meeting for the machine.
                 let current = settings.settings
-                guard current.diarizationOrder.first == .local,
-                      case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
+                guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
                       let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
                 let pipeline: MeetingProcessingPipeline
                 if current.llmLocation == .cloud, let gemini = configured.llm as? GeminiLLM {
@@ -111,7 +172,7 @@ public final class AppController {
                     ? [current.cloudLLM == .gemini ? Credential.geminiAPIKey : .openAICompatibleAPIKey] : [])
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
-                    settings.settings == current && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
+                    settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let processing: LiveRecordingProcessor?
@@ -128,6 +189,20 @@ public final class AppController {
                     chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
+            makeCaptions: { captions in
+                // Opt-in, from the transcription sources in their order; with none set up nothing runs.
+                let current = settings.settings
+                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
+                // Translation on this Mac, only once its models are downloaded.
+                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator(for: target) {
+                    captions.translate(with: translator, to: target)
+                }
+                let names = await voiceprints.spokenNames()
+                return CaptionStream(
+                    provider: provider,
+                    languageCode: current.transcriptionLanguage.code,
+                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
+            },
             onRecorded: { id, live in
                 let prepared = live?.processing
                 if let live, let meeting = try? await library.meeting(id),
@@ -143,6 +218,7 @@ public final class AppController {
             })
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
+            translationInstaller: translationInstaller,
             suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
             settings: settings, runningBrowsers: runningBrowsers,
             checkSetup: {
@@ -159,6 +235,11 @@ public final class AppController {
         dashboard = DashboardModel(
             library: library, voiceprints: voiceprints, settings: settings, calendars: calendars,
             todosFile: paths.root.appending(path: "todos.json"), status: todoStatus, now: now)
+        if let widgetFile {
+            widget = WidgetPublisher(file: widgetFile, dashboard: dashboard, capture: capture, now: now)
+        } else {
+            widget = nil
+        }
         enrollment = VoiceEnrollmentModel(
             voiceprints: voiceprints, recorder: voiceRecorder, permissions: permissions,
             scratch: paths.recordings.appending(path: "enrollment.wav"),
@@ -173,14 +254,17 @@ public final class AppController {
                 let segment = Diarization.Segment(cluster: voice, range: TimeRange(start: 0, end: duration))
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
+        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;
-    /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones).
+    /// `calendars` replaces the live calendar sources (the snapshot hook passes sample ones);
+    /// `recordingTitle` names a recording the global shortcut starts with no meeting to name it.
     public static func live(
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
-        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil,
-        recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions()
+        signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil, recordingTitle: String = "Recording",
+        recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions(),
+        shareWidget: Bool = true
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
@@ -188,11 +272,14 @@ public final class AppController {
         let models = DiarizationModels(directory: paths.models)
         let transcription = LocalTranscriptionModel.breeze(in: paths.models)
         let llm = LocalLLMModel.qwen35(in: paths.models)
+        let translation = TranslationModels.mozilla(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
-            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm),
+            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm,
+                                         translationModels: translation),
             recorder: recorder, permissions: permissions,
             installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
+            translationInstaller: { translation.for($0) },
             validator: LiveKeyValidator(),
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
@@ -203,11 +290,15 @@ public final class AppController {
             runningBrowsers: {
                 let running = Set(RunningApps.recordable().map(\.bundleID))
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
-            })
+            },
+            widgetFile: shareWidget ? WidgetLink.snapshotFile() : nil,
+            recordingTitle: recordingTitle)
     }
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
+        // Indexing reads every meeting; the rest of launch does not wait for it.
+        Task { [searchSync] in await searchSync.start() }
         let scanner = RecordingRecoveryScanner(recordingsDirectory: paths.recordings, library: library)
         let outcome = await scanner.recoverAll()
         recoveryFailures = outcome.failures
@@ -215,15 +306,55 @@ public final class AppController {
         recovered = outcome.recovered + unprocessed.filter { !outcome.recovered.contains($0) }
         await meetings.reload()
         await enrollment.refresh()
+        // Re-deriving voiceprints after a model change reads every meeting's audio, about 85 s for
+        // 15 meetings, so the app opens first and shows the result when it is done.
+        Task {
+            if setup.needsCompletingModels { voiceprintUpdate = .fetchingModel }
+            await setup.completeModelsAfterUpdate()
+            await migrateVoiceprints { done, total in
+                await MainActor.run { self.voiceprintUpdate = .rebuilding(done: done, of: total) }
+            }
+            voiceprintUpdate = nil
+            await meetings.reload()
+            await enrollment.refresh()
+        }
         reminders.start()
+        widget?.start()
         self.watchMeetings = watchMeetings
         startMonitorIfReady()
     }
 
-    /// Marks setup finished; from here the app watches for meetings.
+    /// Live caption translation: the models the chosen language needs download when it is first
+    /// chosen; other languages' models stay on disk. It applies from the next recording.
+    public func setCaptionTranslation(_ choice: CaptionTranslation) async {
+        settings.settings.captionTranslation = choice
+        setup.refreshTranslation()
+        guard choice != .off else { return }
+        switch setup.translationModels {
+        case .notDownloaded, .failed: await setup.downloadTranslationModels()
+        case .downloading, .downloaded: break
+        }
+    }
+
+    /// Marks setup finished and leaves it; from here the app watches for meetings.
     public func completeOnboarding() {
         settings.settings.hasCompletedOnboarding = true
+        onboarding.close()
         startMonitorIfReady()
+    }
+
+    /// Shows setup in the main window again, at its first incomplete screen.
+    public func openSetup() {
+        onboarding.open()
+    }
+
+    /// Whether setup can be closed without finishing it: it was opened again after being finished,
+    /// and nothing it asks for blocks the app, such as a missing voiceprint.
+    public var canCloseSetup: Bool { onboarding.isOpenedAgain && !needsOnboarding }
+
+    /// Leaves setup the user opened again without finishing it; unfinished setup stays.
+    public func closeSetup() {
+        onboarding.close()
     }
 
     public func processRecovered(_ id: MeetingID) async {
@@ -243,7 +374,8 @@ public final class AppController {
             learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 
-    /// Meetings are not offered for recording until setup is done.
+    /// Meetings are not offered for recording until setup is done, and the record shortcut, like
+    /// the record buttons, waits for the same.
     private func startMonitorIfReady() {
         guard watchMeetings, monitor == nil, !needsOnboarding else { return }
         let monitor = SystemSignalMonitor()
@@ -251,5 +383,17 @@ public final class AppController {
             Task { await self?.capture.handle(signals) }
         }
         self.monitor = monitor
+        let hotkey = GlobalHotkeyMonitor(hotkey: { [settings] in settings.settings.recordShortcut }) { [weak self] in
+            guard let self else { return }
+            Task { await self.capture.toggle(title: self.recordingTitle) }
+        }
+        hotkey.start()
+        self.hotkey = hotkey
     }
+}
+
+/// What the app shows while an update to the voiceprint model is applied.
+public enum VoiceprintUpdate: Equatable, Sendable {
+    case fetchingModel
+    case rebuilding(done: Int, of: Int)
 }

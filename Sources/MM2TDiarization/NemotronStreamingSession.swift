@@ -33,13 +33,13 @@ actor NemotronStreamingSession: StreamingDiarizationSession {
     }
 
     private let states: [Track: TrackState]
-    private let embedder: WeSpeakerEmbedder
+    private let embedder: VoiceprintEmbedder
     private var finished = false
     private var failure: (any Error)?
     private var snapshotBusy = false
     private var snapshotWaiters: [CheckedContinuation<Void, Never>] = []
 
-    init(models: sending Nemotron3Models, embedder: WeSpeakerEmbedder) {
+    init(models: sending Nemotron3Models, embedder: VoiceprintEmbedder) {
         states = Dictionary(uniqueKeysWithValues: Track.allCases.map { ($0, TrackState(models: models)) })
         self.embedder = embedder
     }

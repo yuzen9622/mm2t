@@ -58,7 +58,7 @@ struct StreamingDiarizationRealAudioTests {
                            settings: wavSettings(sampleRate: 16_000, channels: 1, float: true))
             urls[track] = url
         }
-        let embedder = WeSpeakerEmbedder(models: data.models)
+        let embedder = VoiceprintEmbedder(models: data.models)
         let factory = NemotronDiarizer(models: data.models, embedder: embedder)
         let session = try await factory.makeStreamingSession()
         #expect(await session.processedSeconds() == [.me: 0, .remote: 0])

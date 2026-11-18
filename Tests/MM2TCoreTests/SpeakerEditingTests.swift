@@ -109,14 +109,64 @@ import Testing
         #expect(second.speaker(SpeakerID("r3"))?.person == world.bobID)
     }
 
-    @Test func mergeIntoANamedSpeakerWritesBackTheMergedVoice() async throws {
+    @Test func mergeLeavesVoiceprintsAloneUntilTheVoiceIsLearned() async throws {
         let world = try await World()
         let first = try await world.processed()
 
         _ = try await world.editing.merge(SpeakerID("r2"), into: SpeakerID("r1"), in: first.id)
-        let second = try await world.processed()
+        #expect(await world.voiceprints.person(world.aliceID)?.embeddings.count == 1)
+        #expect(try await world.processed().speaker(SpeakerID("r2"))?.person == nil)
 
-        #expect(second.speaker(SpeakerID("r2"))?.person == world.aliceID)
+        try await world.editing.learnVoice(of: SpeakerID("r1"), in: first.id)
+        #expect(try await world.processed().speaker(SpeakerID("r2"))?.person == world.aliceID)
+    }
+
+    @Test func aSpeakerCanBeNamedWithoutTeachingTheVoiceprint() async throws {
+        let world = try await World()
+        let first = try await world.processed()
+
+        let named = try await world.editing.rename(SpeakerID("r2"), in: first.id, to: .newPerson(name: "Carol"), learn: false)
+        _ = try await world.editing.rename(SpeakerID("r3"), in: first.id, to: .existing(world.bobID), learn: false)
+
+        let carol = try #require(await world.voiceprints.person(named: "Carol"))
+        #expect(named.speaker(SpeakerID("r2"))?.person == carol.id)
+        #expect(carol.embeddings.isEmpty)
+        #expect(await world.voiceprints.person(world.bobID)?.embeddings.count == 1)
+        #expect(try await world.processed().speaker(SpeakerID("r2"))?.person == nil)
+    }
+
+    @Test func aSpeakerRenamedToSomeoneElseTakesTheirVoiceBack() async throws {
+        let world = try await World()
+        let meeting = try await world.processed()
+        _ = try await world.editing.rename(SpeakerID("r2"), in: meeting.id, to: .existing(world.aliceID))
+        #expect(await world.voiceprints.person(world.aliceID)?.embeddings.count == 3)
+
+        _ = try await world.editing.rename(SpeakerID("r2"), in: meeting.id, to: .newPerson(name: "Carol"))
+
+        #expect(await world.voiceprints.person(world.aliceID)?.embeddings.count == 1)
+        #expect(await world.voiceprints.person(named: "Carol")?.embeddings.count == 2)
+    }
+
+    @Test func aLearnedVoiceCanBeForgottenWhileTheNameStays() async throws {
+        let world = try await World()
+        let first = try await world.processed()
+        _ = try await world.editing.rename(SpeakerID("r2"), in: first.id, to: .newPerson(name: "Carol"))
+
+        try await world.editing.forgetVoice(of: SpeakerID("r2"), in: first.id)
+
+        let carol = try #require(await world.voiceprints.person(named: "Carol"))
+        #expect(carol.embeddings.isEmpty)
+        #expect(try await world.library.meeting(first.id).speaker(SpeakerID("r2"))?.person == carol.id)
+        #expect(try await world.processed().speaker(SpeakerID("r2"))?.person == nil)
+    }
+
+    @Test func onlyANamedSpeakerHasAVoiceprintToTeach() async throws {
+        let world = try await World()
+        let meeting = try await world.processed()
+
+        await #expect(throws: SpeakerEditError.unnamed(SpeakerID("r3"))) {
+            try await world.editing.learnVoice(of: SpeakerID("r3"), in: meeting.id)
+        }
     }
 
     @Test func theMicSpeakerCannotBeEdited() async throws {

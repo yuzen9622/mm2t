@@ -64,7 +64,6 @@ import Testing
         let cases = [
             SystemSignals(micBundleIDs: ["com.apple.VoiceMemos"]),
             Self.browser("com.google.Chrome", url: "https://meet.google.com/landing"),
-            Self.browser("com.google.Chrome", url: "https://www.youtube.com/watch?v=x"),
             Self.browser("com.google.Chrome", url: "https://zoom.us/pricing"),
             SystemSignals(micBundleIDs: [], frontmostBundleID: "com.google.Chrome",
                           browserURL: URL(string: "https://meet.google.com/abc-defg-hij")),

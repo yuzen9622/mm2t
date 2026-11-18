@@ -14,17 +14,45 @@
 		A10000000000000000000104 /* MM2TProviders in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000204 /* MM2TProviders */; };
 		A10000000000000000000106 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000205 /* Sparkle */; };
 		A10000000000000000000105 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */; };
+		A10000000000000000000108 /* MM2TWidgetData in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000206 /* MM2TWidgetData */; };
+		A10000000000000000000109 /* mm2tWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000305 /* mm2tWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000001101 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000702;
+			remoteInfo = mm2tWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000805 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000109 /* mm2tWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000304 /* MM2T.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = MM2T.icon; path = "DesignAssets/mm2t-icon/MM2T.icon"; sourceTree = "<group>"; };
 		A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = THIRD_PARTY_NOTICES.md; path = ../THIRD_PARTY_NOTICES.md; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000302 /* mm2t.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mm2t.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000303 /* Config */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Config; sourceTree = "<group>"; };
+		A10000000000000000000305 /* mm2tWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = mm2tWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000401 /* MM2T */ = {isa = PBXFileSystemSynchronizedRootGroup; path = MM2T; sourceTree = "<group>"; };
+		A10000000000000000000402 /* Widget */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Widget; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +68,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000502 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000108 /* MM2TWidgetData in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -47,6 +83,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000401 /* MM2T */,
+				A10000000000000000000402 /* Widget */,
 				A10000000000000000000304 /* MM2T.icon */,
 				A10000000000000000000303 /* Config */,
 				A10000000000000000000301 /* THIRD_PARTY_NOTICES.md */,
@@ -58,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000302 /* mm2t.app */,
+				A10000000000000000000305 /* mm2tWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,10 +110,12 @@
 				A10000000000000000000801 /* Sources */,
 				A10000000000000000000501 /* Frameworks */,
 				A10000000000000000000802 /* Resources */,
+				A10000000000000000000805 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10000000000000000001201 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000401 /* MM2T */,
@@ -91,6 +131,29 @@
 			productName = mm2t;
 			productReference = A10000000000000000000302 /* mm2t.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000702 /* mm2tWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000903 /* Build configuration list for PBXNativeTarget "mm2tWidget" */;
+			buildPhases = (
+				A10000000000000000000803 /* Sources */,
+				A10000000000000000000502 /* Frameworks */,
+				A10000000000000000000804 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000402 /* Widget */,
+			);
+			name = mm2tWidget;
+			packageProductDependencies = (
+				A10000000000000000000206 /* MM2TWidgetData */,
+			);
+			productName = mm2tWidget;
+			productReference = A10000000000000000000305 /* mm2tWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -122,6 +185,7 @@
 			projectRoot = "";
 			targets = (
 				A10000000000000000000701 /* mm2t */,
+				A10000000000000000000702 /* mm2tWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -136,6 +200,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000804 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -146,7 +217,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000803 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000001201 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000702 /* mm2tWidget */;
+			targetProxy = A10000000000000000001101 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A10000000000000000000911 /* Debug */ = {
@@ -237,6 +323,54 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000931 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/MM2TWidget.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				MARKETING_VERSION = 0.1.0;
+				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mm2t.app.widget;
+				PRODUCT_NAME = mm2tWidget;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A10000000000000000000932 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/MM2TWidget.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				MARKETING_VERSION = 0.1.0;
+				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.mm2t.app.widget;
+				PRODUCT_NAME = mm2tWidget;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -254,6 +388,15 @@
 			buildConfigurations = (
 				A10000000000000000000921 /* Debug */,
 				A10000000000000000000922 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000903 /* Build configuration list for PBXNativeTarget "mm2tWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000931 /* Debug */,
+				A10000000000000000000932 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -299,6 +442,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000001002 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		A10000000000000000000206 /* MM2TWidgetData */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MM2TWidgetData;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

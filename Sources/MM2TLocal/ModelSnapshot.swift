@@ -179,7 +179,7 @@ final class ByteCounter: @unchecked Sendable {
 
 /// One file streamed straight into its destination folder, so a multi-gigabyte model never
 /// passes through the system temporary directory.
-private final class StreamedFile: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class StreamedFile: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let handle: FileHandle
     private let offset: Int64
     private let counter: ByteCounter

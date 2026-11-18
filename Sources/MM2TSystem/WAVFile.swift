@@ -7,6 +7,8 @@ public final class WAVWriter {
     public let url: URL
     public let sampleRate: Int
     public private(set) var framesWritten = 0
+    /// Frames appended so far, flushed to the file or not.
+    public var framesAppended: Int { framesWritten + pending.count / 2 }
     private let handle: FileHandle
     private var pending = Data()
     private var flushesSinceSync = 0

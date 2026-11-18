@@ -25,15 +25,26 @@ const icons = {
   calendar: "calendar-event",
   github: "brand-github",
   star: "star",
-  menu: "adjustments-horizontal",
+  menu: "dots",
+  messages: "messages",
+  pencil: "pencil",
+  copy: "copy",
+  upload: "upload",
+  trash: "trash",
+  plus: "plus",
+  back: "chevron-left",
+  playFilled: "player-play-filled",
+  key: "key",
+  video: "video",
 } as const;
+export type IconName = keyof typeof icons;
 export function Icon({
   name,
   size = 20,
   className,
   style,
 }: {
-  name: keyof typeof icons;
+  name: IconName;
   size?: number;
   className?: string;
   style?: CSSProperties;

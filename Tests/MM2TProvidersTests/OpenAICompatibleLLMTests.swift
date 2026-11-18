@@ -83,10 +83,11 @@ extension Fixture {
         let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
         _ = try await llm(server).cleanTranscript(transcript)
         let request = try #require(server.requests.first)
-        #expect(request.json["max_tokens"] as? Int == 8192)
+        #expect(request.json["max_completion_tokens"] as? Int == 8192)
         #expect(request.json["chat_template_kwargs"] == nil)
         #expect(request.json["reasoning_effort"] as? String == "low")
         #expect(request.json["reasoning_budget_tokens"] as? Int == 512)
+        #expect(request.json["temperature"] as? Double == 0.2)
     }
 
     @Test func requestsLowReasoningForArbitraryModelAliases() async throws {
@@ -94,10 +95,11 @@ extension Fixture {
         let provider = OpenAICompatibleLLM(baseURL: base, apiKey: nil, model: "llama", session: server.session)
         _ = try await provider.cleanTranscript(transcript)
         let request = try #require(server.requests.first)
-        #expect(request.json["max_tokens"] as? Int == 8192)
+        #expect(request.json["max_completion_tokens"] as? Int == 8192)
         #expect(request.json["chat_template_kwargs"] == nil)
         #expect(request.json["reasoning_effort"] as? String == "low")
         #expect(request.json["reasoning_budget_tokens"] as? Int == 512)
+        #expect(request.json["temperature"] as? Double == 0.2)
     }
 
     @Test(arguments: [400, 422]) func dropsExplicitlyRejectedReasoningEffort(status: Int) async throws {
@@ -110,7 +112,7 @@ extension Fixture {
         _ = try await llm(server).cleanTranscript(transcript)
         #expect(server.requests.count == 2)
         #expect(server.requests[1].json["reasoning_effort"] == nil)
-        #expect(server.requests.allSatisfy { $0.json["max_tokens"] as? Int == 8192 })
+        #expect(server.requests.allSatisfy { $0.json["max_completion_tokens"] as? Int == 8192 })
         #expect(server.requests.allSatisfy { $0.json["chat_template_kwargs"] == nil })
         #expect(server.requests.allSatisfy {
             ($0.json["response_format"] as? [String: Any])?["type"] as? String == "json_schema"
@@ -128,7 +130,7 @@ extension Fixture {
         #expect(server.requests.count == 2)
         #expect(server.requests[1].json["reasoning_budget_tokens"] == nil)
         #expect(server.requests[1].json["reasoning_effort"] as? String == "low")
-        #expect(server.requests[1].json["max_tokens"] as? Int == 8192)
+        #expect(server.requests[1].json["max_completion_tokens"] as? Int == 8192)
     }
 
     @Test func dropsBothOptionalFieldsWhenRejectedSequentially() async throws {
@@ -140,7 +142,72 @@ extension Fixture {
         }
         _ = try await llm(server).cleanTranscript(transcript)
         #expect(server.requests.count == 3)
-        #expect(server.requests[2].json["max_tokens"] as? Int == 8192)
+        #expect(server.requests[2].json["max_completion_tokens"] as? Int == 8192)
+    }
+
+    @Test(arguments: [400, 422]) func dropsOnlyExplicitlyRejectedTemperature(status: Int) async throws {
+        let server = StubServer { request in
+            if request.json["temperature"] != nil {
+                return .status(status, #"{"error":{"param":"temperature","message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported."}}"#)
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        _ = try await llm(server).cleanTranscript(transcript)
+        #expect(server.requests.count == 2)
+        #expect(server.requests.first?.json["temperature"] as? Double == 0.2)
+        let retry = try #require(server.requests.last)
+        #expect(retry.json["temperature"] == nil)
+        #expect(retry.json["reasoning_effort"] as? String == "low")
+        #expect(retry.json["reasoning_budget_tokens"] as? Int == 512)
+        #expect(retry.json["max_completion_tokens"] as? Int == 8192)
+        #expect((retry.json["response_format"] as? [String: Any])?["type"] as? String == "json_schema")
+    }
+
+    @Test func dropsThreeOptionalFieldsWhenRejectedSequentially() async throws {
+        let server = StubServer { request in
+            for field in ["reasoning_budget_tokens", "reasoning_effort", "temperature"] where request.json[field] != nil {
+                return .status(400, "{\"error\":{\"message\":\"Unsupported parameter: \(field)\"}}")
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        _ = try await llm(server).cleanTranscript(transcript)
+        #expect(server.requests.count == 4)
+        #expect(server.requests[1].json["reasoning_budget_tokens"] == nil)
+        #expect(server.requests[1].json["reasoning_effort"] as? String == "low")
+        #expect(server.requests[1].json["temperature"] as? Double == 0.2)
+        #expect(server.requests[2].json["reasoning_effort"] == nil)
+        #expect(server.requests[2].json["temperature"] as? Double == 0.2)
+        #expect(server.requests[3].json["temperature"] == nil)
+        #expect(server.requests.allSatisfy { $0.json["max_completion_tokens"] as? Int == 8192 })
+        #expect(server.requests.allSatisfy {
+            ($0.json["response_format"] as? [String: Any])?["type"] as? String == "json_schema"
+        })
+    }
+
+    @Test func remembersRejectedOptionalFieldsForLaterRequests() async throws {
+        let server = StubServer { request in
+            for field in ["reasoning_budget_tokens", "temperature"] where request.json[field] != nil {
+                return .status(400, "{\"error\":{\"message\":\"Unknown parameter: '\(field)'.\"}}")
+            }
+            return .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        }
+        let provider = llm(server)
+        _ = try await provider.cleanTranscript(transcript)
+        #expect(server.requests.count == 3)
+        _ = try await provider.cleanTranscript(LLMTranscript(utterances: [utterance("u9", "me", 0, "另一段")]))
+        #expect(server.requests.count == 4)
+        #expect(server.requests[3].json["reasoning_effort"] as? String == "low")
+        #expect(server.requests[3].json["temperature"] == nil)
+    }
+
+    @Test func doesNotRetryNonParameterFailuresMentioningTemperature() async throws {
+        for (status, kind) in [(401, ProviderError.Kind.invalidCredential), (403, .permissionDenied), (429, .rateLimited), (503, .unavailable)] {
+            let server = StubServer(status: status, body: #"{"error":{"message":"unsupported temperature"}}"#)
+            await #expect(throws: ProviderError(.openAICompatible, kind)) {
+                try await llm(server).cleanTranscript(transcript)
+            }
+            #expect(server.requests.count == 1)
+        }
     }
 
     @Test func doesNotRetryServerFailureMentioningReasoning() async throws {
@@ -230,7 +297,7 @@ extension Fixture {
         }
         #expect(await llm(noModels).validateKey() == .valid)
         #expect(noModels.requests.map(\.url.path) == ["/v1/models", "/v1/chat/completions"])
-        #expect(noModels.requests.last?.json["max_tokens"] as? Int == 1)
+        #expect(noModels.requests.last?.json["max_completion_tokens"] as? Int == 1)
 
         let offline = StubServer { _ in .failure(.timedOut) }
         guard case .inconclusive = await llm(offline).validateKey() else { Issue.record("expected inconclusive"); return }

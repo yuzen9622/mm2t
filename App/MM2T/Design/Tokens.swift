@@ -4,6 +4,7 @@ import SwiftUI
 /// Every color the app draws with. Two values each: light, dark.
 enum Palette {
     static let window = dynamic(0xF6F5F1, 0x1B1B1D)
+    static let backdrop = Color.black.opacity(0.28)
     static let sidebar = dynamic(0xEEEDE8, 0x151516)
     static let card = dynamic(0xFFFFFF, 0x262628)
     static let field = dynamic(0xEDECE7, 0x303033)
@@ -73,6 +74,11 @@ enum Motion {
     static let page = Animation.spring(response: 0.44, dampingFraction: 0.88)
     /// Content appearing or leaving in place: banners, tooltips, capsule states.
     static let reveal = Animation.spring(response: 0.30, dampingFraction: 0.84)
+
+    /// The main window growing from setup into the app, or shrinking back. AppKit animates a
+    /// window's frame, so this is a duration and a curve close to `page`'s spring.
+    static let windowDuration: TimeInterval = 0.45
+    static var windowCurve: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.25, 0.9, 0.3, 1) }
 }
 
 extension View {

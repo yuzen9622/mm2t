@@ -8,7 +8,7 @@ import MM2TSystem
 public enum SetupIssue: Hashable, Sendable {
     case missingCredential(Credential)
     case missingSelfHostedURL
-    /// The OpenAI-compatible summary server needs a base URL and a model name.
+    /// The OpenAI-compatible large language model server needs a base URL and a model name.
     case missingLLMEndpoint
     case noTranscriptionSource
     case diarizationModelsMissing
@@ -43,6 +43,11 @@ public struct LocalSpeakerModels: Sendable {
 public protocol ProviderCatalog: Sendable {
     func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider
     func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider
+    /// Live captions while recording; display only.
+    func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider
+    func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider
+    /// nil until the model is on disk.
+    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)?
     func llm(apiKey: Secret) -> any LLMProvider
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
@@ -51,6 +56,8 @@ public protocol ProviderCatalog: Sendable {
     func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)?
     /// nil until the model is on disk.
     func localLLM() -> (any LLMProvider)?
+    /// Live caption translation into `target` on this Mac; nil until the models it needs are on disk.
+    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)?
     var thresholds: MatchThresholds { get }
 }
 
@@ -85,7 +92,7 @@ public struct PipelineSetup: Sendable {
         for source in settings.transcriptionOrder {
             switch source {
             case .cloud:
-                if let key = try nonEmpty(.elevenLabsAPIKey) {
+                if let key = try? nonEmpty(.elevenLabsAPIKey) {
                     routes.append(.init(.cloud, catalog.cloudTranscription(apiKey: key, language: settings.transcriptionLanguage)))
                 } else {
                     issues.append(.missingCredential(.elevenLabsAPIKey))
@@ -113,18 +120,39 @@ public struct PipelineSetup: Sendable {
         }
 
         let models = catalog.localSpeakerModels()
-        if settings.diarizationOrder.contains(.local), models == nil { issues.append(.diarizationModelsMissing) }
+        if models == nil { issues.append(.diarizationModelsMissing) }
 
         guard issues.isEmpty, let llm else { return .needsSetup(issues) }
         return .ready(MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
             diarizer: models?.diarizer, embedder: models?.embedder,
-            diarizationOrder: settings.diarizationOrder,
+            diarizationOrder: AppSettings.diarizationOrder,
             transcription: TranscriptionChain(routes), llm: llm,
             thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
             runsConcurrently: settings.llmLocation == .cloud,
             transcribesConcurrently: !settings.transcriptionOrder.contains(.local),
             micCleaner: EchoRemover()))
+    }
+
+    /// Live captions try the sources in the transcription order, skipping any not set up; nil when none is.
+    public func buildCaptions(_ settings: AppSettings) -> StreamingTranscriptionChain? {
+        var routes: [StreamingTranscriptionChain.Route] = []
+        for source in settings.transcriptionOrder {
+            switch source {
+            case .cloud:
+                if let key = try? nonEmpty(.elevenLabsAPIKey) {
+                    routes.append(.init(.cloud, catalog.streamingTranscription(apiKey: key)))
+                }
+            case .selfHosted:
+                // The token is optional; only an unreadable one skips the server.
+                if let url = settings.selfHostedURL, case .success(let token) = Result(catching: { try nonEmpty(.selfHostedToken) }) {
+                    routes.append(.init(.selfHosted, catalog.selfHostedStreamingTranscription(url: url, token: token)))
+                }
+            case .local:
+                if let local = catalog.localStreamingTranscription() { routes.append(.init(.local, local)) }
+            }
+        }
+        return routes.isEmpty ? nil : StreamingTranscriptionChain(routes)
     }
 
     /// Text-only tasks need the selected LLM, independently of recording and speaker setup.

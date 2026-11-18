@@ -273,6 +273,48 @@ import Testing
         await capture.stop()
         #expect(receivedLive == [false, false])
     }
+
+    // MARK: Global shortcut
+
+    @Test func theShortcutRecordsAPromptedMeetingWithoutAnsweringThePromptAndStopsOnTheNextPress() async throws {
+        let world = try World()
+        await world.capture.handle(Signals.zoom())
+        #expect(world.capture.state == .prompting(zoom))
+
+        await world.capture.toggle(title: "錄音")
+        #expect(world.capture.state.isCapturing)
+        #expect(world.recorder.last?.configuration.targetBundleID == "us.zoom.xos", "the meeting app's sound, as accepting would")
+
+        await world.capture.toggle(title: "錄音")
+        #expect(world.capture.state == .idle)
+        #expect(try await world.library.list().count == 1)
+        #expect(world.recorder.sessions.get.count == 1)
+    }
+
+    @Test func theShortcutWithNoMeetingStartsWhatTheRecordButtonStarts() async throws {
+        let world = try World()
+        await world.capture.toggle(title: "錄音")
+        let configuration = try #require(world.recorder.last?.configuration)
+        #expect(configuration.targetBundleID == nil && configuration.title == "錄音")
+        #expect(configuration.captureMicrophone)
+    }
+
+    @Test func theShortcutAlsoStopsAPausedRecordingOrOneCountingDown() async throws {
+        let world = try World(endCountdown: .seconds(30))
+        await world.capture.handle(Signals.zoom())
+        await world.capture.toggle(title: "錄音")
+        await world.capture.pause()
+        await world.capture.toggle(title: "錄音")
+        #expect(world.capture.state == .idle)
+
+        await world.capture.handle(Signals.zoom())
+        await world.capture.toggle(title: "錄音")
+        await world.capture.handle(Signals.quiet)
+        if case .endingSoon = world.capture.state {} else { Issue.record("expected a countdown, got \(world.capture.state)") }
+        await world.capture.toggle(title: "錄音")
+        #expect(world.capture.state == .idle)
+        #expect(world.recorder.sessions.get.count == 2)
+    }
 }
 
 extension DetectedMeeting {

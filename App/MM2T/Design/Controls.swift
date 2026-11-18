@@ -17,19 +17,22 @@ struct PillButton: View {
     let title: LocalizedStringKey
     var icon: String?
     var kind = Kind.ghost
+    var minWidth: CGFloat?
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
 
-    init(_ title: LocalizedStringKey, icon: String? = nil, kind: Kind = .ghost, action: @escaping () -> Void) {
+    init(_ title: LocalizedStringKey, icon: String? = nil, kind: Kind = .ghost, minWidth: CGFloat? = nil,
+         action: @escaping () -> Void) {
         self.title = title
         self.icon = icon
         self.kind = kind
+        self.minWidth = minWidth
         self.action = action
     }
 
     var body: some View {
-        Button(action: action) { PillLabel(title: title, icon: icon, kind: kind, hovering: hovering) }
+        Button(action: action) { PillLabel(title: title, icon: icon, kind: kind, hovering: hovering, minWidth: minWidth) }
             .buttonStyle(Pressable())
             .opacity(enabled ? 1 : 0.4)
             .onHover { hovering = $0 }
@@ -43,6 +46,7 @@ struct PillLabel: View {
     var icon: String?
     var kind = PillButton.Kind.ghost
     var hovering = false
+    var minWidth: CGFloat?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -51,6 +55,7 @@ struct PillLabel: View {
         }
         .foregroundStyle(kind == .primary ? .white : kind == .danger ? Palette.danger : Palette.text)
         .padding(.horizontal, 14)
+        .frame(minWidth: minWidth)
         .frame(height: 30)
         .background(background, in: Capsule())
         .contentShape(Capsule())
@@ -69,20 +74,22 @@ struct IconButton: View {
     let title: LocalizedStringKey
     let icon: String
     var isOn = false
+    var tint = Palette.text
     let action: () -> Void
     @State private var hovering = false
 
-    init(_ title: LocalizedStringKey, icon: String, isOn: Bool = false, action: @escaping () -> Void) {
+    init(_ title: LocalizedStringKey, icon: String, isOn: Bool = false, tint: Color = Palette.text, action: @escaping () -> Void) {
         self.title = title
         self.icon = icon
         self.isOn = isOn
+        self.tint = tint
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
             Icon(icon, size: 17)
-                .foregroundStyle(isOn ? Palette.orange : Palette.text)
+                .foregroundStyle(isOn ? Palette.orange : tint)
                 .frame(width: 32, height: 32)
                 .background(isOn ? Palette.orangeSoft : hovering ? Palette.hover : .clear, in: Circle())
                 .contentShape(Circle())
@@ -98,16 +105,22 @@ struct IconButton: View {
 /// The surface every list item and panel sits on. `lifts` is for cards that open something.
 struct CardModifier: ViewModifier {
     var lifts = false
+    var compact = false
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, compact ? 8 : 16)
+            .padding(.vertical, compact ? 8 : 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.card, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-            .shadow(color: Palette.shadow.opacity(lifts && hovering ? 1 : 0.6), radius: lifts && hovering ? 14 : 6, y: lifts && hovering ? 6 : 2)
-            .offset(y: lifts && hovering ? -2 : 0)
+            // The shadow is the surface's alone: cast by the whole card, it would be redrawn from the
+            // card's text and controls every time they move.
+            .background {
+                RoundedRectangle(cornerRadius: compact ? 8 : Radius.card, style: .continuous)
+                    .fill(compact ? (hovering ? Palette.hover : .clear) : Palette.card)
+                    .shadow(color: Palette.shadow.opacity(compact ? 0 : lifts && hovering ? 1 : 0.6), radius: lifts && hovering ? 14 : 6, y: lifts && hovering ? 6 : 2)
+            }
+            .offset(y: !compact && lifts && hovering ? -2 : 0)
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
             .onHover { hovering = $0 }
             .motion(Motion.touch, value: hovering)
@@ -115,7 +128,7 @@ struct CardModifier: ViewModifier {
 }
 
 extension View {
-    func card(lifts: Bool = false) -> some View { modifier(CardModifier(lifts: lifts)) }
+    func card(lifts: Bool = false, compact: Bool = false) -> some View { modifier(CardModifier(lifts: lifts, compact: compact)) }
 }
 
 struct SearchField: View {
@@ -216,6 +229,7 @@ struct SwitchStyle: ToggleStyle {
 
 struct ProgressLine: View {
     let fraction: Double
+    var animation = Motion.page
 
     var body: some View {
         GeometryReader { proxy in
@@ -225,7 +239,7 @@ struct ProgressLine: View {
                 }
         }
         .frame(height: 4)
-        .motion(Motion.page, value: fraction)
+        .motion(animation, value: fraction)
     }
 }
 
@@ -250,7 +264,13 @@ struct TipModifier: ViewModifier {
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
-        content.anchorPreference(key: TipKey.self, value: .bounds) { show ? [TipRequest(id: id, anchor: $0, text: text)] : [] }
+        // Reported only while showing: a standing anchor is resolved again for every control on
+        // every frame of a scroll.
+        content.background {
+            if show {
+                Color.clear.anchorPreference(key: TipKey.self, value: .bounds) { [TipRequest(id: id, anchor: $0, text: text)] }
+            }
+        }
     }
 }
 

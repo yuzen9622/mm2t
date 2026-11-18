@@ -16,15 +16,14 @@ export function VideoButton() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" className="gap-3 px-3">
-          <span className="grid size-7 place-items-center rounded-full border border-foreground/25">
-            <Icon name="play" size={14} />
-          </span>
+        <button
+          type="button"
+          className="btn inline-flex min-h-12 items-center gap-2.5 rounded-full px-5 text-base font-medium hover:bg-foreground/[.06] max-sm:w-full max-sm:justify-center"
+        >
+          <Icon name="playFilled" size={14} />
           {t("觀看示範")}
-          <span className="hidden text-xs text-muted-foreground sm:inline">
-            00:44
-          </span>
-        </Button>
+          <span className="font-mono text-sm text-muted-foreground tabular-nums">0:44</span>
+        </button>
       </DialogTrigger>
       <DialogContent className="max-w-5xl gap-2 p-2 md:p-3">
         <DialogHeader className="pl-3">

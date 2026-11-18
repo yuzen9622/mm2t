@@ -58,7 +58,21 @@ import Testing
 
         world.catalog.modelsDownloaded.set(false)
         #expect(try issues { _ in } == [.diarizationModelsMissing])
-        #expect(try issues { $0.diarizationOrder = [.transcription] }.isEmpty, "STT labels need no local model")
+        #expect(try issues { $0.transcriptionOrder = [.cloud] } == [.diarizationModelsMissing],
+                "speakers are always told apart on this Mac, whatever the transcription service")
+    }
+
+    @Test func speakersAreToldApartOnThisMacEvenWhenOldSettingsPreferredTheServicesLabels() async throws {
+        let world = try World()
+        let old = Data(#"{"transcriptionOrder":["cloud"],"diarizationOrder":["transcription","local"]}"#.utf8)
+        world.defaults.set(old, forKey: SettingsStore.key)
+        world.app.settings.settings = SettingsStore(defaults: world.defaults).settings
+
+        let meeting = try await world.recordedMeeting()
+        #expect(meeting.status == .completed)
+        #expect(meeting.attribution?.source == .local)
+        #expect(!world.catalog.cloud.labelRequests.get.isEmpty)
+        #expect(!world.catalog.cloud.labelRequests.get.contains(true), "the service is never asked for speaker labels")
     }
 
     @Test func transcriptionFollowsTheConfiguredOrderAndFallsThroughWhenSelfHostedIsDown() async throws {
@@ -106,6 +120,54 @@ import Testing
         await gate.open(true)
         await stopping.value
         #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames", "cleanTranscript", "digestPerPerson", "summarize"])
+    }
+
+    @Test func cancellingAJobLeavesTheMeetingReadyToResumeFromTheStoppedStep() async throws {
+        let world = try World()
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        world.app.settings.settings.llmLocation = .local
+        let gate = Gate<Bool>()
+        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
+        await world.capture.startNow(title: "Stopped by the user")
+        let stopping = Task { await world.capture.stop() }
+        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
+        let id = try #require(world.app.queue.activeJob?.id)
+
+        world.app.queue.cancel(id)
+        await gate.open(true)
+        await stopping.value
+
+        #expect(world.app.queue.jobs[id] == nil)
+        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames"], "nothing after the stopped step ran")
+        #expect(try await world.library.meeting(id).status == .pending(next: .inferNames))
+
+        await world.app.queue.run(.process, on: id)
+        #expect(try await world.library.meeting(id).status == .completed)
+    }
+
+    @Test func cancellingAQueuedJobTakesItOutOfLineAtOnceAndItNeverRuns() async throws {
+        let world = try World()
+        world.catalog.offlineDownloaded[.llm]!.set(true)
+        world.app.settings.settings.llmLocation = .local
+        let gate = Gate<Bool>()
+        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
+        await world.capture.startNow(title: "Ahead in line")
+        let first = Task { await world.capture.stop() }
+        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
+        await world.capture.startNow(title: "Waiting in line")
+        let second = Task { await world.capture.stop() }
+        #expect(await eventually { world.app.queue.jobs.values.contains(.queued) })
+        let waiting = try #require(world.app.queue.jobs.first { $0.value == .queued }?.key)
+
+        world.app.queue.cancel(waiting)
+        #expect(world.app.queue.jobs[waiting] == nil, "out of line before the job ahead finishes")
+        #expect(!world.app.queue.isBusy(waiting))
+
+        await gate.open(true)
+        await first.value
+        await second.value
+        #expect(world.app.queue.jobs[waiting] == nil)
+        #expect(try await world.library.meeting(waiting).status == .pending(next: .transcribe), "it never ran")
     }
 
     @Test func speechAndLLMConcurrencyFollowTheirOwnModelLocations() throws {

@@ -23,7 +23,7 @@ struct VoiceprintPlan {
         var selected = stored.filter { enough.contains($0.key) }
         if includingBrief {
             let short = SpeakerTurns.cleanPieces(segments, within: duration,
-                                                 minPiece: WeSpeakerEmbedder.briefMinimumPiece)
+                                                 minPiece: VoiceprintEmbedder.briefMinimumPiece)
             selected.merge(short.filter { !enough.contains($0.key) && !$0.value.isEmpty }) { kept, _ in kept }
         }
         pieces = selected.flatMap { cluster, ranges in

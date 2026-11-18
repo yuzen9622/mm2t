@@ -21,22 +21,22 @@ struct MainApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 980, height: 680)
+        // The window follows its content's size limits: fixed while setup shows, at least the
+        // app's minimum otherwise. `MainWindow` sets those limits and animates the frame between them.
+        .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
+            CommandGroup(after: .textEditing) {
+                Button("Search…") { MainNavigation.shared.searchOpen.toggle() }
+                    .keyboardShortcut("k", modifiers: .command)
+                    .disabled(delegate.app?.showsSetup ?? true)
+            }
         }
-
-        Window(Text("Set up mm2t"), id: WindowID.onboarding) {
-            RootGuard(delegate: delegate) { app in OnboardingView(app: app) }
-                .windowSharingNone()
-                .regularActivationWhileOpen()
-        }
-        .windowResizability(.contentSize)
     }
 }
 
 enum WindowID {
     static let main = "main"
-    static let onboarding = "onboarding"
 }
 
 /// Shows the startup error instead of a view when the data folder could not be opened.

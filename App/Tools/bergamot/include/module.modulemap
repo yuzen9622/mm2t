@@ -1,0 +1,7 @@
+module Bergamot {
+    header "mm2t_bergamot.h"
+    link "c++"
+    link "iconv"
+    link framework "Accelerate"
+    export *
+}

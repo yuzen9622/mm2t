@@ -8,6 +8,7 @@
 
 - macOS 14.2 以上
 - Xcode 26 以上（Swift 6.2 工具鏈）
+- Python 3（只有要用 `App/Tools/build-bergamot.sh` 重新建置翻譯引擎時才需要；平常 Swift package 會自動下載已發布的版本）
 
 ```bash
 git clone https://github.com/yuzen9622/mm2t.git
@@ -27,7 +28,7 @@ macOS 依程式碼簽章記住權限。用 ad-hoc 簽章時，每次重新建置
 
 自己建置的 App 也會用 Sparkle 檢查正式版的更新。開發時不想讓它檢查，把 `App/Config/Info.plist` 的 `SUPublicEDKey` 清空即可（不要 commit 這個改動）。
 
-說話者分群模型（約 210 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
+說話者分群模型（約 230 MB）不隨 App 附帶。在 **設定** 按 **下載**，App 會從 Hugging Face 下載模型到 `~/Library/Application Support/mm2t/Models`。
 
 ## Google Calendar 的 OAuth 設定
 
@@ -78,6 +79,6 @@ Evaluation/        說話者分群的評測資料與腳本
 
 - `MeetingDetector`：輸入系統訊號快照（哪些程序在用麥克風、前景視窗標題、瀏覽器網址），輸出「偵測到會議」或「會議結束」事件。判斷邏輯是純函式。
 - `AudioRecorder`：用 Core Audio Process Tap 擷取目標程序的聲音，另外錄麥克風。兩軌邊錄邊寫入磁碟，App 當掉或電腦休眠時已錄的部分不會遺失。
-- `VoiceprintStore`：本機聲紋資料庫。只有你改名、接受建議或合併說話者時才會寫入。
+- `VoiceprintStore`：本機聲紋資料庫。只有使用者確認學習時才會寫入：改名時開啟更新聲紋、接受建議、「這是我」或 `learnVoice`。合併說話者不寫入，`forgetVoice` 可移除某場會議教進去的向量。
 - `TranscriptionProvider` 與 `LLMProvider`：轉錄與 LLM 的介面。ElevenLabs Scribe、自架伺服器、Gemini 都實作在介面之後。
 - `SpeakerEditing`：改名、接受建議、合併說話者。LLM 產出一律以說話者代號表示，顯示時才換成名字，所以改名立即生效，不用重新產生。

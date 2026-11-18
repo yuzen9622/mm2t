@@ -144,8 +144,12 @@ public struct MeetingProcessingPipeline: Sendable {
             progress(step)
             do {
                 try await run(step, on: &meeting)
+                // Some steps fall back instead of throwing; a cancelled one must not count as done.
+                try Task.checkCancellation()
                 meeting.status = step.next.map { .pending(next: $0) } ?? .completed
             } catch {
+                // A stop the user asked for leaves the meeting waiting at this step, ready to resume.
+                if Task.isCancelled { throw CancellationError() }
                 meeting.status = .failed(step: step, reason: String(describing: error))
                 try await library.save(meeting)
                 return meeting
@@ -183,7 +187,12 @@ public struct MeetingProcessingPipeline: Sendable {
                 try? await library.save(meeting)
             }
         }
-        if let failed = steps.first(where: { failures[$0] != nil }) {
+        if Task.isCancelled {
+            // What finished is kept; the rest runs again from `first` when the user resumes.
+            meeting.status = .pending(next: first)
+            try await library.save(meeting)
+            throw CancellationError()
+        } else if let failed = steps.first(where: { failures[$0] != nil }) {
             meeting.status = .failed(step: failed, reason: failures[failed]!)
         } else {
             meeting.status = .completed
@@ -239,20 +248,23 @@ public struct MeetingProcessingPipeline: Sendable {
             let hints = names + vocabulary.filter { !names.contains($0) }
             let micURL = await library.audioURL(meeting, track: .me), remoteURL = await library.audioURL(meeting, track: .remote)
             let cleaned = try? micCleaner?.clean(mic: micURL, remote: remoteURL)
-            defer { if let cleaned { try? FileManager.default.removeItem(at: cleaned.audio) } }
+            // Playback wants the same track, and cleaning it again there is slow for a long meeting.
+            defer { if let cleaned { PlaybackMic.keep(cleaned.audio, beside: micURL) } }
             let heardURL = cleaned?.audio ?? micURL
             let remote: TrackTranscript
             var me: TrackTranscript
+            // Speaker labels serve only the separation that falls back on them.
+            let labels = diarizationOrder.contains(.transcription)
             if transcribesConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
-                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
-                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: true)
+                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
+                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels)
                 (remote, me) = try await (remoteTask, meTask)
             } else {
-                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: true)
+                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
                 // A silent remote track means the meeting happened in the room, so the mic holds every
                 // voice and is the track whose speakers need telling apart.
-                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: remote.words.isEmpty)
+                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels && remote.words.isEmpty)
             }
             if let echo = cleaned?.echo { me = me.dropping(echo) }
             meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)
@@ -279,12 +291,14 @@ public struct MeetingProcessingPipeline: Sendable {
                 let known = meeting.speakers.reduce(into: [SpeakerID: String]()) { result, speaker in
                     if let name = speaker.person.flatMap({ names[$0] }) { result[speaker.id] = name }
                 }
+                let transcript = llmTranscript(meeting)
                 let guesses = try await llm.inferNames(NameInferenceRequest(
-                    transcript: llmTranscript(meeting), unnamedSpeakers: unnamed, knownNames: known))
+                    transcript: transcript, unnamedSpeakers: unnamed, knownNames: known))
                 inferred = guesses
-                    .filter { unnamed.contains($0.speaker) && !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .map { NameGuess(speaker: $0.speaker, name: TraditionalChinese.convert($0.name), reason: $0.reason) }
+                    .filter { unnamed.contains($0.speaker) && Self.isSpoken($0.name, in: transcript) }
                     .map { NameSuggestion(speaker: $0.speaker, source: .inferred(
-                        name: TraditionalChinese.convert($0.name), reason: TraditionalChinese.convert($0.reason))) }
+                        name: $0.name, reason: TraditionalChinese.convert($0.reason))) }
             }
             meeting.suggestions = NameSuggestions(items: voiceprintSuggestions + inferred)
 
@@ -330,6 +344,12 @@ public struct MeetingProcessingPipeline: Sendable {
 
         var separated = meeting
         await diarize(&separated)
+        if Task.isCancelled {
+            // Separation falls back when stopped, so its result is not kept.
+            meeting.status = .completed
+            try await library.save(meeting)
+            throw CancellationError()
+        }
         if case .unseparated = separated.attribution {
             if case .unseparated = meeting.attribution { meeting.attribution = separated.attribution }
         } else {
@@ -360,8 +380,8 @@ public struct MeetingProcessingPipeline: Sendable {
             separated = await separation(of: remote, track: library.audioURL(meeting, track: track))
         }
         let channel: VoiceChannel = track == .me ? .room : .call
-        let ids = apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
-                        to: &meeting)
+        apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
+              brief: separated.brief.mapValues { $0.map { $0.heard(on: channel) } }, to: &meeting)
         let attribution = separated.attribution
         meeting.separatedTrack = track == .me ? .me : nil
         meeting.mergedSpeakers = [:]
@@ -381,11 +401,7 @@ public struct MeetingProcessingPipeline: Sendable {
                 await separateMic(&meeting)
             }
         }
-        if track == .me {
-            let brief = Dictionary(separated.brief.compactMap { cluster, vectors in ids[cluster].map { ($0, vectors) } },
-                                   uniquingKeysWith: +)
-            await claimUser(in: &meeting, brief: brief)
-        }
+        if track == .me { await claimUser(in: &meeting) }
     }
 
     /// On a call the mic is the user's own, but in a shared room it hears the people next to them
@@ -441,7 +457,8 @@ public struct MeetingProcessingPipeline: Sendable {
             let id = SpeakerID.remote(meeting.speakers.count + 1)
             meeting.speakers.append(RemoteSpeaker(
                 id: id, label: Self.label(meeting.speakers.count), person: nil,
-                embeddings: (heard.embeddings[cluster] ?? []).map { $0.heard(on: .room) }))
+                embeddings: (heard.embeddings[cluster] ?? []).map { $0.heard(on: .room) },
+                briefEmbeddings: heard.briefEmbeddings[cluster]?.map { $0.heard(on: .room) }))
             others[cluster] = id
         }
         guard !others.isEmpty else { return }
@@ -482,13 +499,12 @@ public struct MeetingProcessingPipeline: Sendable {
 
     /// In a meeting recorded in the room, the speaker who sounds most like the enrolled user becomes
     /// `.me`, as the mic track is on a call. Below the user threshold nobody is. A speaker who
-    /// said too little to store a voiceprint is judged by their `brief` vectors: telling the user
+    /// said too little to store a voiceprint is judged by their brief vectors: telling the user
     /// apart needs less than naming someone, and short meetings are mostly short turns.
-    private func claimUser(in meeting: inout Meeting, brief: [SpeakerID: [Embedding]]) async {
+    private func claimUser(in meeting: inout Meeting) async {
         var best: (id: SpeakerID, similarity: Double)?
         for speaker in meeting.speakers {
-            let vectors = speaker.embeddings.isEmpty ? brief[speaker.id] ?? [] : speaker.embeddings
-            guard let similarity = await voiceprints.similarityToUser(vectors),
+            guard let similarity = await voiceprints.similarityToUser(speaker.learnableEmbeddings),
                   similarity >= thresholds.user, similarity > (best?.similarity ?? -.infinity) else { continue }
             best = (speaker.id, similarity)
         }
@@ -497,7 +513,8 @@ public struct MeetingProcessingPipeline: Sendable {
             $0.speaker == mine ? SpeakerSegment(speaker: .me, range: $0.range) : $0
         }
         meeting.speakers = meeting.speakers.filter { $0.id != mine }.enumerated().map { index, speaker in
-            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
+                          briefEmbeddings: speaker.briefEmbeddings)
         }
     }
 
@@ -534,13 +551,14 @@ public struct MeetingProcessingPipeline: Sendable {
         meeting.micSegments = meeting.micSegments?.filter { !silent.contains($0.speaker) }
         meeting.speakers = meeting.speakers.filter { !silent.contains($0.id) }
             .enumerated().map { index, speaker in
-                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings)
+                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
+                              briefEmbeddings: speaker.briefEmbeddings)
             }
     }
 
     @discardableResult
     private func apply(_ segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]],
-                       to meeting: inout Meeting) -> [ClusterID: SpeakerID] {
+                       brief: [ClusterID: [Embedding]], to meeting: inout Meeting) {
         var order: [ClusterID] = []
         for segment in segments.sorted(by: { $0.range.start < $1.range.start })
         where !order.contains(segment.cluster) {
@@ -549,10 +567,9 @@ public struct MeetingProcessingPipeline: Sendable {
         let ids = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, SpeakerID.remote($0 + 1)) })
         meeting.speakers = order.enumerated().map { index, cluster in
             RemoteSpeaker(id: ids[cluster]!, label: Self.label(index), person: nil,
-                          embeddings: embeddings[cluster] ?? [])
+                          embeddings: embeddings[cluster] ?? [], briefEmbeddings: brief[cluster])
         }
         meeting.remoteSegments = segments.map { SpeakerSegment(speaker: ids[$0.cluster]!, range: $0.range) }
-        return ids
     }
 
     /// One segment per run of consecutive words sharing a label.
@@ -575,6 +592,23 @@ public struct MeetingProcessingPipeline: Sendable {
             LLMUtterance(id: $0.id, speaker: $0.speaker, range: $0.range, text: $0.text,
                          isHighlighted: meeting.isHighlighted($0))
         })
+    }
+
+    /// Answers a model gives in place of a name when the transcript has none.
+    private static let placeholderNames: Set<String> = [
+        "無", "无", "沒有", "没有", "未知", "不明", "不詳", "不详", "未提及", "無法判斷", "无法判断", "無名", "某人",
+        "none", "unknown", "n/a", "na", "null", "nil", "?", "？",
+    ]
+
+    /// An inferred name has to be something said in the meeting, so a model that answers with a
+    /// placeholder or invents a name gives no suggestion.
+    static func isSpoken(_ name: String, in transcript: LLMTranscript) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !name.isEmpty, !placeholderNames.contains(name.lowercased()) else { return false }
+        let squeezed = name.lowercased().filter { !$0.isWhitespace }
+        return transcript.utterances.contains { utterance in
+            utterance.text.lowercased().filter { !$0.isWhitespace }.contains(squeezed)
+        }
     }
 
     static func label(_ index: Int) -> String {

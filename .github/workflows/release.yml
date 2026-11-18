@@ -190,7 +190,8 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           # Sparkle ships its helpers ad-hoc signed; the export must re-sign them or notarization fails.
           sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
-          for code in "$app" "$sparkle" "$sparkle/Autoupdate" "$sparkle/Updater.app" "$sparkle"/XPCServices/*.xpc; do
+          widget="$app/Contents/PlugIns/mm2tWidget.appex"
+          for code in "$app" "$widget" "$sparkle" "$sparkle/Autoupdate" "$sparkle/Updater.app" "$sparkle"/XPCServices/*.xpc; do
             info=$(codesign -dv --verbose=2 "$code" 2>&1)
             if ! grep -q "TeamIdentifier=$TEAM_ID" <<< "$info" || ! grep -q "(runtime)" <<< "$info" || ! grep -q "^Timestamp=" <<< "$info"; then
               echo "::error::$code is not signed by $TEAM_ID with the hardened runtime and a timestamp"
@@ -198,6 +199,18 @@ jobs:
               exit 1
             fi
           done
+          # The widget reads what the app writes into their shared app group container, so both
+          # must name the same group, and the system only loads a sandboxed widget.
+          for code in "$app" "$widget"; do
+            if ! codesign -d --entitlements - --xml "$code" 2>/dev/null | grep -q "<string>$TEAM_ID.dev.mm2t</string>"; then
+              echo "::error::$code lacks the app group $TEAM_ID.dev.mm2t, so the widget would stay empty"
+              exit 1
+            fi
+          done
+          if ! codesign -d --entitlements - --xml "$widget" 2>/dev/null | grep -q "<key>com.apple.security.app-sandbox</key><true/>"; then
+            echo "::error::The widget is not sandboxed, so the system would not load it"
+            exit 1
+          fi
           if [[ -n "${PROFILE_UUID:-}" ]]; then
             if [[ ! -f "$app/Contents/embedded.provisionprofile" ]] \
               || ! codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q "<string>$TEAM_ID.dev.mm2t.app</string>"; then
@@ -222,11 +235,17 @@ jobs:
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$VERSION" \
             CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
           app="$WORK/mm2t.xcarchive/Products/Applications/mm2t.app"
+          # The widget gets its data through an app group, which only code signed by a team can
+          # open. Ad-hoc code has no team, so the widget would install and stay empty: leave it out.
+          rm -rf "$app/Contents/PlugIns"
           # Ad-hoc code has no Team ID, so the hardened runtime's library validation makes dyld refuse
           # llama.framework ("different Team IDs"). Re-sign only the app itself with an entitlement that
           # allows ad-hoc frameworks; the frameworks keep the ad-hoc signatures Xcode gave them.
           codesign --display --entitlements - --xml "$app" > "$WORK/entitlements.plist"
-          /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$WORK/entitlements.plist"
+          /usr/libexec/PlistBuddy \
+            -c "Delete :com.apple.security.application-groups" \
+            -c "Add :com.apple.security.cs.disable-library-validation bool true" \
+            "$WORK/entitlements.plist"
           codesign --force --sign - --options runtime --entitlements "$WORK/entitlements.plist" "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           shipped=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist")

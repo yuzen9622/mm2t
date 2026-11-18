@@ -71,7 +71,8 @@ public struct ElevenLabsScribe: TranscriptionProvider {
     }
 
     /// Scribe rejects terms over 50 characters, over 5 words, or containing `<>{}[]\`.
-    static func keyterms(from hints: [String]) -> [String] {
+    /// The realtime API allows fewer and shorter terms, so it passes its own limits.
+    static func keyterms(from hints: [String], limit: Int = maxKeyterms, maxLength: Int = 50) -> [String] {
         let forbidden = CharacterSet(charactersIn: "<>{}[]\\")
         var seen = Set<String>()
         var terms: [String] = []
@@ -79,9 +80,9 @@ public struct ElevenLabsScribe: TranscriptionProvider {
             let term = String(hint.unicodeScalars.filter { !forbidden.contains($0) })
                 .split(whereSeparator: \.isWhitespace).joined(separator: " ")
             let wordCount = term.split(separator: " ").count
-            guard !term.isEmpty, term.count <= 50, wordCount <= 5, seen.insert(term.lowercased()).inserted else { continue }
+            guard !term.isEmpty, term.count <= maxLength, wordCount <= 5, seen.insert(term.lowercased()).inserted else { continue }
             terms.append(term)
-            if terms.count == maxKeyterms { break }
+            if terms.count == limit { break }
         }
         return terms
     }
@@ -148,14 +149,28 @@ public struct ElevenLabsScribe: TranscriptionProvider {
 }
 
 func silentWAV(seconds: Double, sampleRate: Int = 16000) -> Data {
-    let samples = Int(seconds * Double(sampleRate))
-    let dataSize = samples * 2
+    wav([Float](repeating: 0, count: Int(seconds * Double(sampleRate))), sampleRate: sampleRate)
+}
+
+/// A mono 16-bit WAV file of `samples` in -1...1.
+func wav(_ samples: [Float], sampleRate: Int) -> Data {
+    let pcm = pcm16(samples)
     var data = Data()
     func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
-    data.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36 + dataSize))
+    data.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36 + pcm.count))
     data.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
     append(UInt32(sampleRate)); append(UInt32(sampleRate * 2)); append(UInt16(2)); append(UInt16(16))
-    data.append(contentsOf: Array("data".utf8)); append(UInt32(dataSize))
-    data.append(Data(count: dataSize))
+    data.append(contentsOf: Array("data".utf8)); append(UInt32(pcm.count))
+    data.append(pcm)
     return data
+}
+
+/// Little-endian signed 16-bit samples, clamped to -1...1.
+func pcm16(_ samples: [Float]) -> Data {
+    var pcm = Data(capacity: samples.count * 2)
+    for sample in samples {
+        let clamped = sample.isNaN ? 0 : max(-1, min(1, sample))
+        withUnsafeBytes(of: Int16(clamped * Float(Int16.max)).littleEndian) { pcm.append(contentsOf: $0) }
+    }
+    return pcm
 }

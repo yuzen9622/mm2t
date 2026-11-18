@@ -16,7 +16,7 @@ struct TranscriptContent: View {
             lines.flatMap { $0.indices.contains(index) ? $0[index].id : nil }
         }
         ScrollViewReader { proxy in
-            FadingScrollView {
+            FadingScrollView(ground: Palette.window) {
                 LazyVStack(alignment: .leading, spacing: lines == nil ? 10 : 2) {
                     switch model.selectedView {
                     case .raw, .cleaned:
@@ -34,7 +34,7 @@ struct TranscriptContent: View {
             .onChange(of: lines, initial: true) { _, lines in
                 playhead.follow(lines?.map(\.start) ?? [])
             }
-            .onChange(of: model.focusedUtterance) { _, id in
+            .onChange(of: model.focusedUtterance, initial: true) { _, id in
                 if let id { withAnimation(Motion.page) { proxy.scrollTo(id.rawValue, anchor: .center) } }
             }
             .onChange(of: currentID) { _, id in
@@ -203,7 +203,7 @@ struct TextCorrection: View {
         .background(Palette.field, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         .overlay(alignment: .bottomLeading) {
             if rewriteFailed {
-                Text("Couldn't rewrite. Check the summary model in Settings.").font(Typo.caption).foregroundStyle(Palette.danger)
+                Text("Couldn't rewrite. Check the large language model in Settings.").font(Typo.caption).foregroundStyle(Palette.danger)
                     .offset(y: 18)
             }
         }

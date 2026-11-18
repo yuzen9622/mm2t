@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import MM2TCore
 import MM2TSystem
 import Observation
 
@@ -65,13 +66,12 @@ public final class TwoTrackPlayer: MeetingPlayback {
     public private(set) var status: PlaybackStatus = .loading
     public private(set) var duration: TimeInterval = 0
     @ObservationIgnored private var players: [AVAudioPlayer] = []
-    @ObservationIgnored private var audio: PlaybackAudio?
     @ObservationIgnored private var loadID = UUID()
+    /// Removing the echo from a recording that has no kept playback track yet.
+    @ObservationIgnored private(set) var cleaning: Task<Void, Never>?
     @ObservationIgnored private lazy var finish = FinishObserver { [weak self] in self?.isPlaying = false }
 
     public init() {}
-
-    deinit { audio?.removeTemporaryFiles() }
 
     public var currentTime: TimeInterval { players.first?.currentTime ?? 0 }
 
@@ -88,39 +88,45 @@ public final class TwoTrackPlayer: MeetingPlayback {
         loadID = request
         pause()
         players = []
-        audio?.removeTemporaryFiles()
-        audio = nil
         status = .loading
         duration = 0
-        let metadata = await Task.detached(priority: .userInitiated) {
-            let urls = [mic, remote].filter { FileManager.default.fileExists(atPath: $0.path) }
-            let duration = urls.compactMap { url -> TimeInterval? in
-                guard let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 else { return nil }
-                return Double(file.length) / file.processingFormat.sampleRate
-            }.max() ?? 0
-            return (exists: !urls.isEmpty, duration: duration)
+        let found = await Task.detached(priority: .userInitiated) {
+            (exists: [mic, remote].contains { FileManager.default.fileExists(atPath: $0.path) },
+             kept: PlaybackMic.kept(beside: mic))
         }.value
         guard loadID == request else { return }
-        duration = metadata.duration
-        guard metadata.exists else {
+        guard found.exists else {
             status = .unavailable
             return
         }
-        // Keep the original tracks intact. Filtering a long recording must not block the UI.
-        let prepared = await Task.detached(priority: .userInitiated) {
-            PlaybackAudio.prepare(mic: mic, remote: remote)
-        }.value
-        guard loadID == request else {
-            prepared.removeTemporaryFiles()
-            return
+        install(PlaybackAudio(mic: found.kept ?? mic, remote: remote))
+        guard found.kept == nil, status == .ready else { return }
+        // Removing the echo reads the whole recording, minutes of work for a long one. The tracks
+        // play as recorded until it is done, and the result is kept so it happens once a meeting.
+        cleaning = Task { [weak self] in
+            let prepared = await Task.detached(priority: .utility) {
+                PlaybackAudio.prepare(mic: mic, remote: remote)
+            }.value
+            guard let self, self.loadID == request, prepared.mic != mic else { return }
+            self.install(prepared)
         }
-        audio = prepared
-        players = [prepared.mic, prepared.remote].compactMap { try? AVAudioPlayer(contentsOf: $0) }
+    }
+
+    /// Replaces the tracks being played, keeping the playhead where it is.
+    private func install(_ audio: PlaybackAudio) {
+        let time = currentTime, wasPlaying = isPlaying
+        players.forEach { $0.stop() }
+        players = [audio.mic, audio.remote].compactMap { try? AVAudioPlayer(contentsOf: $0) }
         players.forEach { $0.prepareToPlay() }
         // The longer track ends last; when it does, playback is over.
         players.max { $0.duration < $1.duration }?.delegate = finish
         duration = players.map(\.duration).max() ?? 0
         status = players.isEmpty ? .failed : .ready
+        if wasPlaying {
+            play(from: time)
+        } else {
+            seek(to: time)
+        }
     }
 
     public func play(from time: TimeInterval) {
@@ -144,15 +150,18 @@ public final class TwoTrackPlayer: MeetingPlayback {
 struct PlaybackAudio: Sendable {
     let mic: URL
     let remote: URL
-    private let temporaryMic: URL?
 
+    /// The kept playback track when the meeting has one; otherwise removes the echo and keeps the
+    /// result. The mic as recorded when it heard no echo or cannot be cleaned.
     static func prepare(mic: URL, remote: URL) -> PlaybackAudio {
-        let cleaned = try? EchoRemover().clean(mic: mic, remote: remote)
-        return PlaybackAudio(mic: cleaned?.audio ?? mic, remote: remote, temporaryMic: cleaned?.audio)
-    }
-
-    func removeTemporaryFiles() {
-        if let temporaryMic { try? FileManager.default.removeItem(at: temporaryMic) }
+        if PlaybackMic.kept(beside: mic) == nil {
+            do {
+                PlaybackMic.keep(try EchoRemover().clean(mic: mic, remote: remote)?.audio, beside: mic)
+            } catch {
+                // Unreadable tracks are not marked as echo-free; the next load tries again.
+            }
+        }
+        return PlaybackAudio(mic: PlaybackMic.kept(beside: mic) ?? mic, remote: remote)
     }
 }
 

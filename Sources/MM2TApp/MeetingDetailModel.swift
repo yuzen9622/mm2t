@@ -20,6 +20,12 @@ public struct SpeakerRow: Hashable, Sendable, Identifiable {
     public let displayName: String
     public let person: PersonID?
     public let suggestion: Suggestion?
+    /// Whether the meeting heard enough of them to keep a voiceprint from.
+    public let hasVoice: Bool
+    /// Whether their person's voiceprint still lacks some of this meeting's voice.
+    public let canLearnVoice: Bool
+    /// Whether their person's voiceprint holds some of this meeting's voice.
+    public let canForgetVoice: Bool
 
     /// The recording's owner, who has no voice of their own to rename or merge.
     public var isMe: Bool { id == .me }
@@ -63,19 +69,22 @@ public final class MeetingDetailModel {
         self.playback = playback
     }
 
-    public func load() async {
+    public func load(at utterance: UtteranceID? = nil) async {
         do {
             let meeting = try await library.meeting(id)
             self.meeting = meeting
             names = await voiceprints.names()
             people = await voiceprints.allPersons().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             if !loadedAudio, let playback {
-                // Queue updates can reenter load while playback prepares its filtered audio.
+                // Queue updates can reenter load while playback is still opening its tracks.
                 loadedAudio = true
                 await playback.load(mic: await library.audioURL(meeting, track: .me),
                               remote: await library.audioURL(meeting, track: .remote))
             }
             await reminders?.fillMissingDeadlines(reminderDrafts())
+            if !Task.isCancelled, let utterance, let source = meeting.utterance(utterance) {
+                jump(to: JumpTarget(utterance: source.id, time: source.range.start))
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -129,7 +138,8 @@ public final class MeetingDetailModel {
     public var speakers: [SpeakerRow] {
         guard let meeting, let presentation else { return [] }
         let me = meeting.utterances.contains { meeting.resolve($0.speaker) == .me }
-            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil)]
+            ? [SpeakerRow(id: .me, label: "", displayName: presentation.speakerName(.me), person: nil, suggestion: nil,
+                          hasVoice: false, canLearnVoice: false, canForgetVoice: false)]
             : []
         return me + meeting.speakers.map { speaker in
             let suggestion = meeting.suggestions.items.first { $0.speaker == speaker.id }.flatMap { item -> SpeakerRow.Suggestion? in
@@ -140,8 +150,12 @@ public final class MeetingDetailModel {
                     .inferred(name: name, reason: presentation.substitute(reason))
                 }
             }
+            let stored = people.first { $0.id == speaker.person }?.embeddings
+            let voice = speaker.learnableEmbeddings
+            let learned = voice.filter { stored?.contains($0) == true }.count
             return SpeakerRow(id: speaker.id, label: speaker.label, displayName: presentation.speakerName(speaker.id),
-                              person: speaker.person, suggestion: suggestion)
+                              person: speaker.person, suggestion: suggestion, hasVoice: !voice.isEmpty,
+                              canLearnVoice: stored != nil && learned < voice.count, canForgetVoice: learned > 0)
         }
     }
 
@@ -158,7 +172,10 @@ public final class MeetingDetailModel {
     }
 
     public func toggleDone(_ row: SourcedRow) {
-        if let id = todoID(row) { todos?.toggle(id) }
+        guard let id = todoID(row), let index = Int(row.id.dropFirst("action-".count)),
+              let items = meeting?.outputs.summary?.actionItems, items.indices.contains(index) else { return }
+        todos?.toggle(id, anchor: AssistantTaskRef.fingerprint(items[index]))
+        if let error = todos?.storageError { errorMessage = error }
     }
 
     public func isInReminders(_ row: SourcedRow) -> Bool {
@@ -203,6 +220,11 @@ public final class MeetingDetailModel {
         await load()
     }
 
+    /// Stops this meeting's job; it waits as not processed until the user processes it again.
+    public func cancelProcessing() {
+        queue.cancel(id)
+    }
+
     /// Shows the source utterance in the raw transcript and plays from it.
     public func jump(to target: JumpTarget) {
         selectedView = .raw
@@ -221,8 +243,23 @@ public final class MeetingDetailModel {
         playback?.play(from: row.start)
     }
 
-    public func rename(_ speaker: SpeakerID, to target: SpeakerEditing.Target) async {
-        await edit { try await $0.rename(speaker, in: self.id, to: target) }
+    /// `learn` also teaches the person's voiceprint this meeting's voice; off, the speaker is only labelled.
+    public func rename(_ speaker: SpeakerID, to target: SpeakerEditing.Target, learn: Bool = true) async {
+        await edit { try await $0.rename(speaker, in: self.id, to: target, learn: learn) }
+    }
+
+    public func learnVoice(of speaker: SpeakerID) async {
+        await edit {
+            try await $0.learnVoice(of: speaker, in: self.id)
+            return try await self.library.meeting(self.id)
+        }
+    }
+
+    public func forgetVoice(of speaker: SpeakerID) async {
+        await edit {
+            try await $0.forgetVoice(of: speaker, in: self.id)
+            return try await self.library.meeting(self.id)
+        }
     }
 
     public func acceptSuggestion(for speaker: SpeakerID) async {

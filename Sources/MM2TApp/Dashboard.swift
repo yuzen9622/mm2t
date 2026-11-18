@@ -13,6 +13,7 @@ public struct TodoRow: Hashable, Sendable, Identifiable {
     public let meetingTitle: String
     public let date: Date
     public let isDone: Bool
+    public var anchor: String? = nil
 }
 
 public struct DashboardStats: Hashable, Sendable {
@@ -67,7 +68,7 @@ public final class DashboardModel {
     /// Every to-do with its done state as it is now.
     public var todos: [TodoRow] {
         loadedTodos.map { TodoRow(id: $0.id, text: $0.text, owner: $0.owner, meeting: $0.meeting, meetingTitle: $0.meetingTitle,
-                                  date: $0.date, isDone: status.isDone($0.id)) }
+                                  date: $0.date, isDone: status.isDone($0.id), anchor: $0.anchor) }
     }
     private var loadedTodos: [TodoRow] = []
     public private(set) var stats = DashboardStats()
@@ -245,7 +246,7 @@ public final class DashboardModel {
     }
 
     public func toggle(_ todo: TodoRow) {
-        status.toggle(todo.id)
+        status.toggle(todo.id, anchor: todo.anchor)
     }
 
     struct Snapshot {
@@ -274,7 +275,7 @@ public final class DashboardModel {
                 result.todos.append(TodoRow(
                     id: id, text: SpeakerMention.substitute(in: item.text, name: name), owner: item.owner.map(name),
                     meeting: meeting.id, meetingTitle: meeting.metadata.title, date: meeting.metadata.startedAt,
-                    isDone: done.contains(id)))
+                    isDone: done.contains(id), anchor: AssistantTaskRef.fingerprint(item)))
             }
 
             result.stats.meetings += 1

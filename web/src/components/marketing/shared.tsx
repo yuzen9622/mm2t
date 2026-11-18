@@ -1,84 +1,59 @@
 "use client";
-import type { ReactNode } from "react";
 import Image from "next/image";
-import { motion, useReducedMotion } from "motion/react";
-import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/icon";
 import { useCopy } from "@/components/i18n";
 import { cn } from "@/lib/utils";
 
 export const REPO = "https://github.com/yuzen9622/mm2t";
 export const DOWNLOAD = `${REPO}/releases/latest`;
-export const container =
-  "mx-auto w-[calc(100%-3rem)] max-w-7xl md:w-[calc(100%-6rem)] xl:w-[calc(100%-8rem)]";
-export const sectionPadding = "py-20 md:py-28 xl:py-32";
-export const heading =
-  "text-[clamp(2.1rem,3.5vw,3.2rem)] leading-[1.3] font-medium tracking-[-.055em]";
-export const label =
-  "mb-6 block text-xs font-medium tracking-[.09em] text-[#925021]";
-export const frame =
-  "overflow-hidden rounded-xl bg-background shadow-[0_24px_65px_-28px_#30282038] ring-1 ring-foreground/5 md:rounded-2xl";
-export const textLink =
-  "inline-flex min-h-11 items-center gap-4 text-sm font-medium decoration-1 underline-offset-8 transition-colors hover:text-primary hover:underline";
+/** One content edge for the header, every section and the footer: 80px gutters at 1440. */
+export const wrap =
+  "wrap relative z-1 mx-auto w-[min(100%_-_48px,1280px)] md:w-[min(100%_-_96px,1280px)] xl:w-[min(100%_-_160px,1280px)]";
+/** One or two screens a section, the h2 120px under the section top (96 on a phone). */
+export const screen =
+  "relative min-h-svh pt-24 pb-12 lg:h-svh lg:min-h-0 lg:pt-[120px] lg:pb-[72px]";
+export const h2 =
+  "text-[30px] leading-[1.2] font-medium tracking-[-0.02em] lg:text-[48px] lg:leading-[1.12]";
+export const lead = "text-base leading-[1.65] text-muted-foreground lg:text-lg";
 
-export function Reveal({
-  children,
-  className,
-  delay = 0,
-}: {
-  children: ReactNode;
-  className?: string;
-  delay?: number;
-}) {
-  const reduced = useReducedMotion();
-  return (
-    <motion.div
-      data-reveal=""
-      className={className}
-      initial={reduced ? false : { opacity: 0, y: 24 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.12 }}
-      transition={{
-        duration: reduced ? 0 : 0.8,
-        ease: [0.22, 1, 0.36, 1],
-        delay,
-      }}
-    >
-      {children}
-    </motion.div>
-  );
-}
-export function Brand() {
+export function Brand({ tone = "ink" }: { tone?: "ink" | "stage" }) {
   const { t } = useCopy();
   return (
     <a
-      className="inline-flex min-h-11 items-center gap-2"
+      className={cn(
+        "inline-flex min-h-11 items-center gap-2.5 text-[20px] font-semibold tracking-[-0.03em]",
+        tone === "stage" ? "text-stage-ink" : "text-foreground",
+      )}
       href="#top"
       aria-label={t("mm2t 首頁")}
     >
-      <Image
-        src="/media/icon.png"
-        width={38}
-        height={38}
-        alt=""
-        className="rounded-xl"
-      />
-      <span className="text-[26px] font-semibold tracking-[-.06em]">
-        mm2t<span className="text-primary">.</span>
-      </span>
+      <Image src="/media/icon.png" width={28} height={28} alt="" className="rounded-[7px]" />
+      mm2t
     </a>
   );
 }
-export function DownloadButton({ className }: { className?: string }) {
+
+export function DownloadButton({
+  className,
+  size = "md",
+}: {
+  className?: string;
+  size?: "md" | "lg";
+}) {
   const { t } = useCopy();
   return (
-    <Button asChild className={cn("gap-5 py-2 pr-2 pl-6", className)}>
-      <a href={DOWNLOAD} target="_blank" rel="noreferrer">
-        {t("下載 mm2t")}
-        <span className="grid size-9 place-items-center rounded-full bg-black/10">
-          <Icon name="diagonal" size={17} />
-        </span>
-      </a>
-    </Button>
+    <a
+      href={DOWNLOAD}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(
+        "btn inline-flex items-center justify-center gap-2 rounded-full bg-primary font-medium text-primary-foreground hover:bg-[#d9660e]",
+        size === "lg" ? "min-h-12 px-6 text-base" : "min-h-11 px-5 text-sm",
+        className,
+      )}
+    >
+      <Icon name="download" size={size === "lg" ? 18 : 16} />
+      {t("下載 mm2t")}
+    </a>
   );
 }

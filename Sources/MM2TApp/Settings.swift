@@ -16,8 +16,35 @@ public enum CloudLLM: String, Codable, Sendable, CaseIterable {
     case openAICompatible
 }
 
+/// Live captions translated on this Mac into one language, or not at all. Stored as the
+/// language's id (`traditionalChinese`, `english` and the rest of `CaptionTarget.all`) or `off`;
+/// an id this build does not know reads as off.
+public struct CaptionTranslation: Codable, Hashable, Sendable {
+    public let target: CaptionTarget?
+
+    public init(_ target: CaptionTarget?) { self.target = target }
+
+    public static let off = CaptionTranslation(nil)
+
+    /// Off first, then every language in menu order.
+    public static var allCases: [CaptionTranslation] { [.off] + CaptionTarget.all.map(CaptionTranslation.init) }
+
+    public init(from decoder: Decoder) throws {
+        target = (try? decoder.singleValueContainer().decode(String.self)).flatMap(CaptionTarget.with)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(target?.id ?? "off")
+    }
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
+    /// Speakers are always told apart on this Mac. Settings saved by an older build may still hold a
+    /// `diarizationOrder` that preferred the transcription service's speaker labels; it is ignored.
+    public static let diarizationOrder: [DiarizationSource] = [.local]
+
     /// Tried in order; each one listed must be configured. The chain falls through only when a
     /// source is unreachable, as `TranscriptionChain` defines.
     public var transcriptionOrder: [TranscriptionSource] = [.cloud]
@@ -28,7 +55,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public private(set) var learnedVocabulary: [String] = []
     /// Learned terms the user deleted, so they are not learned again.
     public private(set) var dismissedVocabulary: [String] = []
-    public var diarizationOrder: [DiarizationSource] = [.local, .transcription]
     public var llmLocation: LLMLocation = .cloud
     public var cloudLLM: CloudLLM = .gemini
     /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
@@ -39,6 +65,22 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
     /// user turns this off.
     public var hidesFromScreenCapture = true
+    /// Live captions while recording, streamed to ElevenLabs; usable only with an ElevenLabs key.
+    /// Display only: the saved transcript still comes from the recording.
+    public var liveCaptions = false
+    /// Translates live captions on this Mac with the downloaded models; never saved.
+    public var captionTranslation: CaptionTranslation = .off
+    /// Where the user dragged the caption bar, by screen (its display number as text): the bar's
+    /// offset from its default place, in points.
+    public var captionBarOffsets: [String: CaptionBarOffset] = [:]
+
+    /// The global shortcut that starts a recording and stops it again.
+    public var recordShortcut: Hotkey = .commandFn
+
+    // MARK: Recording prompts
+    /// Which apps and websites bring up the recording prompt, beyond and instead of the built-in
+    /// lists in `DetectionPolicy`. Learned from the prompt's answers and edited in Settings.
+    public var detectionRules = DetectionRules()
 
     public init() {}
 
@@ -51,7 +93,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? defaults.vocabulary
         learnedVocabulary = try c.decodeIfPresent([String].self, forKey: .learnedVocabulary) ?? []
         dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
-        diarizationOrder = try c.decodeIfPresent([DiarizationSource].self, forKey: .diarizationOrder) ?? defaults.diarizationOrder
         llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
         cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
         openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
@@ -59,12 +100,30 @@ public struct AppSettings: Codable, Equatable, Sendable {
         transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
+        liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
+        captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
+        captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
+        recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
+        detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
 
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
-        case diarizationOrder, llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
+        case llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
+        case recordShortcut
+        case detectionRules
+        case liveCaptions, captionBarOffsets, captionTranslation
+    }
+
+    /// These settings with the ones that only change what is shown while recording set aside, so
+    /// turning captions on mid-meeting does not count as a change to how the meeting is processed.
+    public var forProcessing: AppSettings {
+        var settings = self
+        settings.liveCaptions = false
+        settings.captionTranslation = .off
+        settings.captionBarOffsets = [:]
+        return settings
     }
 
     /// Parses what the user typed; nil for anything that is not an http(s) URL with a host.
@@ -136,6 +195,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private static func same(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .widthInsensitive]) == .orderedSame
+    }
+}
+
+/// How far the caption bar was dragged from its default place on one screen, in points.
+public struct CaptionBarOffset: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
     }
 }
 

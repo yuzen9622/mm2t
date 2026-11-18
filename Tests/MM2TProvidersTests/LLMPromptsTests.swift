@@ -19,6 +19,31 @@ import Testing
         #expect(prompt.contains("0922-456-789"), "spoken phone numbers are written in the usual format")
     }
 
+    @Test func cleanupDoesNotTreatUncertaintyOrAdditionalOptionsAsDeletions() {
+        let prompt = LLMPrompts.cleanTranscript
+        #expect(prompt.contains("不設定縮短比例"))
+        #expect(prompt.contains("把那個字詞照原樣留著，句子其餘部分照常整理"))
+        #expect(prompt.contains("照抄：輸出還留著贅詞"))
+        #expect(prompt.contains("「也可以」「另外」是補充"))
+        #expect(prompt.contains("即使 sources 寫了編號"))
+        #expect(!prompt.contains("真的聽不出意思的殘句就刪掉"))
+        #expect(!prompt.contains("通常比原文短很多"))
+    }
+
+    @Test func summaryChecksCoverageWithoutInventingCommitments() {
+        #expect(LLMPrompts.summarize.contains("不要只涵蓋開頭或結尾"))
+        #expect(LLMPrompts.summarize.contains("沒有成立的決議或待辦時保留空陣列"))
+        #expect(LLMPrompts.summarize.contains("不能只補 sources 卻省略內容"))
+    }
+
+    @Test func summaryCitationsAreCappedInThePromptAndTheSchema() {
+        let limit = LLMPrompts.maxSummarySources
+        #expect(LLMPrompts.summarize.contains("最多 \(limit) 個"))
+        let schema = LLMPrompts.summarySchema([.me]).serialized()
+        // decisions, discussionPoints and actionItems each carry the cap.
+        #expect(schema.components(separatedBy: #""maxItems":\#(limit)"#).count - 1 == 3)
+    }
+
     @Test func theRewritePromptCarriesTheInstructionAndTheText() {
         let request = LLMPrompts.rewriteRequest("這份報告寫得太慢了", instruction: "改得委婉一點")
         #expect(request == "指示：\n改得委婉一點\n\n原文：\n這份報告寫得太慢了")

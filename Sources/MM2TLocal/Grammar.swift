@@ -38,6 +38,8 @@ enum Grammar {
             switch fields["type"] {
             case .text("string")?:
                 return "string"
+            case .text("boolean")?:
+                return define(#"("true" | "false")"#)
             case .list(let types)?:
                 let names = types.compactMap { if case .text(let name) = $0 { name } else { nil } }
                 guard Set(names) == ["string", "null"] else { throw Unsupported(description: "union \(names)") }
@@ -45,7 +47,10 @@ enum Grammar {
             case .text("array")?:
                 guard let items = fields["items"] else { throw Unsupported(description: "array without items") }
                 let item = try rule(for: items)
-                return define(#""[" ws ("# + item + #" (ws "," ws "# + item + #")*)? ws "]""#)
+                // A capped array cannot run on until the output limit.
+                var more = "*"
+                if case .integer(let limit)? = fields["maxItems"], limit >= 1 { more = "{0,\(limit - 1)}" }
+                return define(#""[" ws ("# + item + #" (ws "," ws "# + item + #")"# + more + #")? ws "]""#)
             case .text("object")?:
                 guard case .dict(let properties)? = fields["properties"] else { throw Unsupported(description: "object without properties") }
                 var members: [String] = []

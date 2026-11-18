@@ -60,7 +60,7 @@ struct MenuBarContent: View {
             header
             CaptureCard(state: state, meters: meters, needsOnboarding: needsOnboarding, capture: app.capture)
             if let job = app.queue.activeJob {
-                ProcessingRow(title: title(job.id), detail: Copy.job(job.state))
+                ProcessingRow(title: title(job.id), detail: Copy.job(job.state)) { app.queue.cancel(job.id) }
                     .transition(.opacity)
             }
             if !app.recovered.isEmpty {
@@ -116,7 +116,7 @@ struct MenuBarContent: View {
         case .idle:
             if app.queue.activeJob != nil { return String(localized: "Processing…") }
             return needsOnboarding ? String(localized: "Setup isn't finished") : String(localized: "Ready")
-        case .prompting(let meeting): return String(localized: "\(meeting.platform.displayName) detected")
+        case .prompting(let meeting): return String(localized: "\(app.capture.displayName(of: meeting)) detected")
         case .recording(let target): return String(localized: "Recording \(target.name)")
         case .paused: return String(localized: "Paused")
         case .endingSoon: return String(localized: "Meeting ended")
@@ -151,9 +151,7 @@ private struct CaptureCard: View {
             switch state {
             case .idle:
                 if needsOnboarding {
-                    Text("mm2t needs your permissions and keys before it can take notes.")
-                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-                    WideButton("Continue Setup", icon: "settings") { WindowOpener.open(WindowID.onboarding) }
+                    WideButton("Continue Setup", icon: "settings") { MainNavigation.shared.openSetup() }
                 } else {
                     WideButton("Start Recording", icon: "microphone") {
                         Task { await capture.startNow(title: String(localized: "Recording")) }
@@ -162,7 +160,7 @@ private struct CaptureCard: View {
             case .prompting(let meeting):
                 HStack(spacing: 8) {
                     Icon("video", size: 18).foregroundStyle(Palette.orange)
-                    Text("\(meeting.platform.displayName) meeting").font(Typo.heading)
+                    Text(Copy.detectedCall(meeting, name: capture.displayName(of: meeting))).font(Typo.heading)
                 }
                 if meeting.client == .browser {
                     Text("The whole browser is recorded. Don't play other audio in it during the meeting.")
@@ -170,7 +168,13 @@ private struct CaptureCard: View {
                 }
                 HStack(spacing: 8) {
                     WideButton("Record", icon: "microphone") { Task { await capture.startPrompted() } }
-                    PillButton("Not This Time") { capture.dismiss() }
+                    PillButton("Cancel") { capture.dismiss() }
+                }
+                if meeting.isUnlisted {
+                    HStack(spacing: 8) {
+                        PillButton("Always ask") { capture.alwaysPrompt() }
+                        PillButton("Never ask") { capture.neverAsk() }
+                    }
                 }
             case .recording(let target), .paused(let target):
                 recording(target, paused: { if case .paused = state { true } else { false } }())
@@ -333,6 +337,7 @@ private struct MenuCountdown: View {
 private struct ProcessingRow: View {
     let title: String
     let detail: String
+    let cancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -342,6 +347,7 @@ private struct ProcessingRow: View {
                 Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
+            PillButton("Cancel", action: cancel)
         }
         .card()
     }

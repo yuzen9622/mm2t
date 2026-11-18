@@ -10,5 +10,9 @@
 	<true/>
 	<key>com.apple.security.personal-information.reminders</key>
 	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)dev.mm2t</string>
+	</array>
 </dict>
 </plist>

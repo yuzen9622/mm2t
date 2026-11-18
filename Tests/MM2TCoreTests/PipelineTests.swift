@@ -48,6 +48,20 @@ import Testing
         #expect(meeting.speaker(SpeakerID("r2"))?.person == nil)
     }
 
+    @Test func anInferredNameMustBeSaidInTheMeeting() {
+        let transcript = LLMTranscript(utterances: [
+            LLMUtterance(id: UtteranceID("u1"), speaker: SpeakerID("r1"), range: TimeRange(start: 0, end: 1),
+                         text: "這是無障礙地圖，Alice Chen 你覺得呢", isHighlighted: false),
+        ])
+        #expect(MeetingProcessingPipeline.isSpoken("alice chen", in: transcript))
+        #expect(MeetingProcessingPipeline.isSpoken("AliceChen", in: transcript))
+        // "無" appears inside 無障礙, but a model answers it when it found no name.
+        #expect(!MeetingProcessingPipeline.isSpoken("無", in: transcript))
+        #expect(!MeetingProcessingPipeline.isSpoken("Unknown", in: transcript))
+        #expect(!MeetingProcessingPipeline.isSpoken("小明", in: transcript))
+        #expect(!MeetingProcessingPipeline.isSpoken("  ", in: transcript))
+    }
+
     @Test func flagsOverlappingSpeech() async throws {
         let world = try await World()
         let meeting = try await world.processed()

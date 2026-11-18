@@ -32,7 +32,7 @@ enum Usage: Error, CustomStringConvertible {
 
 let usage = """
     diareval diarize --models DIR --out DIR [--engine offline|sortformer|lseend-ami|nemotron3-offline|nemotron3-fast32] [--step-ratio R] [--threshold T] WAV...
-    diareval embed --models DIR --spans SPANS.json --out OUT.json
+    diareval embed --models DIR --spans SPANS.json --out OUT.json [--engine wespeaker|campplus]
     WAVs must be 16 kHz mono; anything else is rejected rather than silently resampled.
     """
 
@@ -206,6 +206,26 @@ func embed(_ arguments: [String]) async throws {
     }
     let requests = try JSONDecoder().decode(
         [SpanRequest].self, from: Data(contentsOf: URL(fileURLWithPath: spansPath)))
+    if option("--engine", in: &args) == "campplus" {
+        // CAM++ (3D-Speaker, Mandarin 200k speakers), one call per span like the app's embedSpans pieces.
+        let modelsURL = URL(fileURLWithPath: models)
+        try await ModelHub.download(.campPlus, to: modelsURL)
+        let embedder = CampPlusEmbedder(models: try CampPlusModels.load(
+            from: modelsURL.appendingPathComponent(Repo.campPlus.folderName, isDirectory: true)))
+        var results: [SpanResult] = []
+        for request in requests {
+            let samples = try loadMono16k(request.wav)
+            var embeddings: [[Float]] = []
+            for span in request.spans {
+                let start = max(0, Int(span[0] * 16_000)), end = min(samples.count, Int(span[1] * 16_000))
+                embeddings.append(try await embedder.embed(audio: Array(samples[start..<end])))
+            }
+            results.append(SpanResult(wav: request.wav, spans: request.spans, embeddings: embeddings))
+            print("\(request.wav): \(embeddings.count) span embeddings")
+        }
+        try JSONEncoder().encode(results).write(to: URL(fileURLWithPath: out))
+        return
+    }
     let manager = OfflineDiarizerManager(config: .default)
     try await manager.prepareModels(directory: URL(fileURLWithPath: models))
     var results: [SpanResult] = []

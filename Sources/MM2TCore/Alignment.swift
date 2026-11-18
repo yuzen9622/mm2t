@@ -107,7 +107,7 @@ public enum Alignment {
     }
 
     /// CJK tokens join without spaces; Latin words get one between them.
-    private static func joined(_ words: [TimedWord]) -> String {
+    public static func joined(_ words: [TimedWord]) -> String {
         var text = ""
         for word in words {
             let token = word.text.trimmingCharacters(in: .whitespaces)

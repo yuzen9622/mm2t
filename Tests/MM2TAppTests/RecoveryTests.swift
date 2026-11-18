@@ -49,7 +49,7 @@ import Testing
         let relaunched = try AppController(
             paths: world.app.paths, defaults: world.defaults, credentials: world.credentials, catalog: world.catalog,
             recorder: world.recorder, permissions: world.permissions, installer: FakeInstaller(world.catalog.modelsDownloaded),
-            offlineInstallers: [:],
+            offlineInstallers: [:], translationInstaller: { _ in FakeInstaller(world.catalog.translationDownloaded) },
             validator: world.validator)
         await relaunched.launch(watchMeetings: false)
         #expect(relaunched.recovered == [meeting.id])

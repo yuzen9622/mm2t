@@ -30,7 +30,6 @@ public struct MeetingRow: Hashable, Sendable, Identifiable {
 
 @MainActor @Observable
 public final class MeetingListModel {
-    public var query = ""
     public private(set) var rows: [MeetingRow] = []
     public private(set) var errorMessage: String?
     /// How the mic speaker is named in previews and avatars; the app sets its localized word.
@@ -46,11 +45,11 @@ public final class MeetingListModel {
         self.queue = queue
     }
 
-    /// Lists every meeting, or those matching `query` by title, transcript or speaker name.
+    /// Lists every meeting, newest first.
     public func reload() async {
         do {
             let names = await voiceprints.names()
-            let meetings = try await library.search(query, names: names)
+            let meetings = try await library.list()
             rows = meetings.map { meeting in
                 let presentation = MeetingPresentation(meeting: meeting, names: names, labels: Self.labels(me: meLabel))
                 return MeetingRow(

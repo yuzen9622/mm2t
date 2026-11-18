@@ -20,4 +20,10 @@ import Testing
     @Test func traditionalTextIsLeftAlone() {
         #expect(TraditionalChinese.convert(["我們", "今天", "開會"]) == ["我們", "今天", "開會"])
     }
+
+    @Test func simplifiedIsTheInverseForTheOneTargetThatAsksForIt() {
+        #expect(TraditionalChinese.simplified("後面再說，這個會議記錄請寄給我們。") == "后面再说，这个会议记录请寄给我们。")
+        #expect(TraditionalChinese.simplified("Q3 預算 review") == "Q3 预算 review")
+        #expect(TraditionalChinese.convert(TraditionalChinese.simplified("語音辨識")) == "語音辨識")
+    }
 }

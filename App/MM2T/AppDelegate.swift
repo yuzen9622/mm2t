@@ -9,12 +9,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let app: AppController?
     let startupError: String?
     private var floating: FloatingPanelController?
+    private var captionBar: CaptionBarController?
 
     override init() {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
-            app = try AppController.live(defaults: .standard, credentials: Self.credentials, signedInPage: signedIn,
-                                         recorder: LiveRecorder(), permissions: LivePermissions())
+            var defaults = UserDefaults.standard
+            var fixture = false
+            #if DEBUG
+            if let isolated = try AssistantScenarioRunner.fixtureDefaults() { defaults = isolated; fixture = true }
+            #endif
+            app = try AppController.live(defaults: defaults, credentials: Self.credentials, signedInPage: signedIn,
+                                         calendars: fixture ? [] : nil, recordingTitle: String(localized: "Recording"),
+                                         recorder: LiveRecorder(), permissions: LivePermissions(), shareWidget: !fixture)
             startupError = nil
         } catch {
             app = nil
@@ -35,22 +42,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         WindowSharing.install(settings: app?.settings)
         guard let app else { return }
-        floating = FloatingPanelController(app: app)
-        Updates.start()
-        Task { await app.launch() }
-        // Opening the app shows its window; without this a launch leaves only the menu bar icon.
-        WindowOpener.open(WindowID.main)
-        // Setup comes first: the main window shows nothing else until it is finished.
-        Task {
-            await app.enrollment.refresh()
-            if app.needsOnboarding { WindowOpener.open(WindowID.onboarding) }
+        #if DEBUG
+        if AssistantScenarioRunner.requested {
+            Task { await AssistantScenarioRunner.run(app) }
+            return
         }
+        #endif
+        floating = FloatingPanelController(app: app)
+        captionBar = CaptionBarController(app: app)
+        var fixture = false
+        #if DEBUG
+        fixture = AssistantScenarioRunner.fixtureRoot != nil
+        #endif
+        if !fixture { Updates.start() }
+        Task { await app.launch(watchMeetings: !fixture) }
+        // Opening the app shows its window; without this a launch leaves only the menu bar icon.
+        // While setup is unfinished the window shows setup and nothing else.
+        WindowOpener.open(WindowID.main)
     }
 
     /// Opening the app again while it runs (Finder, Dock, `open`) brings the window back.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { WindowOpener.open(WindowID.main) }
         return true
+    }
+
+    /// A desktop widget's Join click arrives as an `mm2t:` link naming an event; the app opens that
+    /// event's call. Recording is left to the usual prompt once the call is live.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { app?.widget?.open(url) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

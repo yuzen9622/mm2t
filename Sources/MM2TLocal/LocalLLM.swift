@@ -42,7 +42,8 @@ public struct LocalLLMModel: Sendable {
 /// The four LLM tasks on an on-device model through llama.cpp, with every answer constrained to
 /// the task's JSON schema. Loads the model on first use and frees it with the last reference,
 /// so it holds memory only while a meeting is being processed.
-public struct LocalLLM: LLMProvider, StructuredGenerator {
+public struct LocalLLM: LLMProvider, StructuredGenerator, AssistantInputLimiting {
+    package var assistantInputLimit: Int { max(0, Int(model.contextTokens) * 3 / 4 - 4_096) }
     let model: LocalLLMModel
     let engine: LlamaEngine
 
@@ -67,6 +68,10 @@ public struct LocalLLM: LLMProvider, StructuredGenerator {
     public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
     public func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
         try await tasks.vocabularyCorrections(from: old, to: new)
+    }
+
+    public func generateText(system: String, input: String) async throws -> String {
+        try await AssistantGeneration.text(generator: self, system: system, input: input)
     }
 
     package var service: Service { .localLLM }

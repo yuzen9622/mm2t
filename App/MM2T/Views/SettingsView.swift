@@ -3,6 +3,7 @@ import MM2TApp
 import MM2TCore
 import MM2TLocal
 import MM2TProviders
+import MM2TSystem
 import SwiftUI
 
 /// Addresses the app points people to. Change them here.
@@ -19,6 +20,7 @@ enum AppLinks {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
+    case assistant
     case permissions
     case about
 
@@ -27,6 +29,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
+        case .assistant: String(localized: "Personalized memory")
         case .permissions: String(localized: "Permissions")
         case .about: String(localized: "About")
         }
@@ -34,7 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .general: "adjustments-horizontal"
+        case .general, .assistant: "adjustments-horizontal"
         case .permissions: "shield-check"
         case .about: "info-circle"
         }
@@ -44,11 +47,13 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// One setting the search can find. A new setting is a case here, a place in its group's `rows`,
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
-    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription
-    case diarizationOrder, diarizationModel
+    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions, captionTranslation
+    case diarizationModel
     case summaryBackend, geminiKey, localSummaries
-    case appLanguage
+    case appLanguage, assistantMemory
     case hideFromCapture
+    case recordShortcut
+    case promptApps, promptSites
     case systemPermissions, calendars, reminders
     case version, sourceCode, author, buyMeACoffee
     case privacyPolicy, terms, licenses
@@ -60,14 +65,19 @@ enum SettingsRow: Hashable {
         case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local)]
-        case .diarizationOrder: [String(localized: "Try first")] + DiarizationSource.allCases.map(Copy.diarization)
-        case .diarizationModel: [String(localized: "Speaker separation model (about 210 MB) runs on this Mac.")]
-        case .summaryBackend: [String(localized: "Summary model"), "Gemini", String(localized: "Self-hosted (OpenAI-compatible)"),
+        case .liveCaptions: [String(localized: "Live captions"), Copy.source(.selfHosted), Copy.source(.cloud), Copy.source(.local)]
+        case .captionTranslation: [String(localized: "Translate captions")] + CaptionTarget.all.map(\.name)
+        case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
+        case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
         case .geminiKey: [Copy.credentialName(.geminiAPIKey)]
         case .localSummaries: [String(localized: "Generate on this Mac")]
+        case .assistantMemory: [String(localized: "Personalized memory"), String(localized: "Conversation history"), String(localized: "Preference")]
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
+        case .recordShortcut: [String(localized: "Start or stop recording")]
+        case .promptApps: [String(localized: "Apps")] + DetectionPolicy.callApps.map(\.name)
+        case .promptSites: [String(localized: "Websites")] + MeetingPlatform.allCases.map(\.displayName)
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
                                   String(localized: "Accessibility"), String(localized: "Automation")]
         case .calendars: ["Apple", "Google", "Outlook"]
@@ -92,14 +102,19 @@ struct SettingsGroup: Identifiable {
 
     static var all: [SettingsGroup] {
         [
+            SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
-                          rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription]),
+                          rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
+                                 .liveCaptions, .captionTranslation]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
-                          rows: [.diarizationOrder, .diarizationModel]),
+                          rows: [.diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
                           rows: [.summaryBackend, .geminiKey, .localSummaries]),
+            SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .general, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
+            SettingsGroup(id: "prompts", section: .general, title: String(localized: "Recording prompts"),
+                          rows: [.promptApps, .promptSites]),
             SettingsGroup(id: "system", section: .permissions, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
             SettingsGroup(id: "calendars", section: .permissions, title: String(localized: "Calendars"), rows: [.calendars]),
             SettingsGroup(id: "reminders", section: .permissions, title: String(localized: "Reminders"), rows: [.reminders]),
@@ -159,7 +174,8 @@ struct SettingsDialog: View {
             .motion(Motion.reveal, value: showLicenses)
             .overlay(alignment: .topTrailing) {
                 IconButton("Close", icon: "x") { navigation.settingsOpen = false }
-                    .keyboardShortcut(.cancelAction)
+                    // While a list is open, Esc closes the list instead.
+                    .keyboardShortcut(DropdownState.shared.open == nil ? .cancelAction : nil)
                     .padding(14)
             }
         }
@@ -250,8 +266,10 @@ struct SettingsPage: View {
             }
             ForEach(groups) { group in
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(searching ? "\(group.section.title) › \(group.title)" : group.title)
-                        .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
+                    if group.title != group.section.title || searching {
+                        Text(searching && group.title != group.section.title ? "\(group.section.title) › \(group.title)" : group.title)
+                            .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
+                    }
                     // Rows are set apart by space, not lines.
                     VStack(alignment: .leading, spacing: 20) {
                         ForEach(group.rows, id: \.self) { row in
@@ -283,6 +301,8 @@ struct SettingsRowView: View {
     @ViewBuilder private var controls: some View {
         @Bindable var store = app.settings
         switch row {
+        case .assistantMemory:
+            AssistantMemorySettings(preferences: app.assistantPreferences, conversations: app.assistantConversations)
         case .transcriptionLanguage:
             HStack {
                 Text("Meeting language")
@@ -311,27 +331,21 @@ struct SettingsRowView: View {
             if store.settings.transcriptionOrder.contains(.local) {
                 OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
             }
-        case .diarizationOrder:
-            HStack {
-                Text("Try first")
-                Spacer()
-                Segmented(options: DiarizationSource.allCases, selection: Binding(
-                    get: { store.settings.diarizationOrder.first ?? .local },
-                    set: { first in store.settings.diarizationOrder = [first] + DiarizationSource.allCases.filter { $0 != first } })) {
-                    Copy.diarization($0)
-                }
-            }
+        case .liveCaptions:
+            LiveCaptionsRow(app: app)
+        case .captionTranslation:
+            CaptionTranslationRow(app: app)
         case .diarizationModel:
             ModelDownloadView(setup: app.setup)
         case .summaryBackend:
             if store.settings.llmLocation == .cloud {
                 HStack {
-                    Text("Summary model")
+                    Text("Large language model")
                     Spacer()
                     Segmented(options: CloudLLM.allCases, selection: $store.settings.cloudLLM) { backend in
                         switch backend {
                         case .gemini: "Gemini"
-                        case .openAICompatible: String(localized: "Self-hosted (OpenAI-compatible)")
+                        case .openAICompatible: String(localized: "OpenAI-compatible")
                         }
                     }
                 }
@@ -354,11 +368,13 @@ struct SettingsRowView: View {
         case .appLanguage:
             LanguagePicker()
         case .hideFromCapture:
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Hide mm2t from screen sharing and screenshots", isOn: $store.settings.hidesFromScreenCapture)
-                Text("While on, screen shares, recordings and screenshots leave mm2t's windows out.")
-                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            Toggle("Hide mm2t from screen sharing and screenshots", isOn: $store.settings.hidesFromScreenCapture)
+        case .recordShortcut:
+            RecordShortcutRow(app: app)
+        case .promptApps:
+            PromptAppRules(store: store)
+        case .promptSites:
+            PromptSiteRules(store: store)
         case .systemPermissions:
             PermissionRows(setup: app.setup)
         case .calendars:
@@ -384,10 +400,7 @@ struct SettingsRowView: View {
             LinkRow(icon: "file-text", title: "Terms of Service", url: AppLinks.terms)
         case .licenses:
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Third-party notices")
-                    Text("Licensed under AGPL-3.0.").font(Typo.caption).foregroundStyle(Palette.secondary)
-                }
+                Text("Third-party notices")
                 Spacer()
                 PillButton("Licenses") { showLicenses = true }
             }
@@ -429,7 +442,7 @@ private struct LinkRow: View {
 }
 
 /// The self-hosted server's address, saved as the user types so the token check beside it always sees it.
-private struct ServerURLField: View {
+struct ServerURLField: View {
     let store: SettingsStore
     @State private var text = ""
 
@@ -451,7 +464,7 @@ private struct ServerURLField: View {
 }
 
 /// Where an OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp) answers, and which model to ask.
-private struct LLMServerFields: View {
+struct LLMServerFields: View {
     let store: SettingsStore
     let key: CredentialField
     @State private var url = ""
@@ -662,6 +675,79 @@ struct IssueRow: View {
     }
 }
 
+/// Captions run on the first transcription source that is on and set up; with none the switch is off.
+private struct LiveCaptionsRow: View {
+    let app: AppController
+
+    var body: some View {
+        let available = app.hasCaptionSource
+        Toggle("Live captions", isOn: Binding(
+            get: { available && app.settings.settings.liveCaptions },
+            set: { app.settings.settings.liveCaptions = $0 }))
+            .disabled(!available)
+    }
+}
+
+private extension AppController {
+    /// The same sources `buildCaptions` would chain, read from what the settings window shows.
+    var hasCaptionSource: Bool {
+        settings.settings.transcriptionOrder.contains { source in
+            switch source {
+            case .selfHosted: settings.settings.selfHostedURL != nil
+            case .cloud:
+                switch setup.field(.elevenLabsAPIKey).state {
+                case .empty, .storageFailed: false
+                default: true
+                }
+            case .local: setup.offlineModels[.transcription] == .downloaded
+            }
+        }
+    }
+}
+
+/// Live captions translated on this Mac into one language. Choosing a language the first time
+/// downloads the models it needs; the row follows the live captions switch. The choice is a menu,
+/// styled like the assistant's conversation history menu, since eight options do not fit a
+/// segmented control.
+private struct CaptionTranslationRow: View {
+    let app: AppController
+
+    private var enabled: Bool { app.hasCaptionSource && app.settings.settings.liveCaptions }
+
+    var body: some View {
+        let choice = app.settings.settings.captionTranslation
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Translate captions")
+                Spacer()
+                Dropdown(label: "Translate captions",
+                         options: CaptionTranslation.allCases.map { option in
+                             DropdownOption(id: option, leading: option.target?.flag,
+                                            title: option.target?.name ?? String(localized: "Off"))
+                         },
+                         selection: Binding(get: { choice }, set: { new in Task { await app.setCaptionTranslation(new) } }))
+                    .disabled(!enabled)
+            }
+            if choice != .off {
+                switch app.setup.translationModels {
+                case .downloading(let fraction):
+                    Text("Downloading translation model… \(Int(fraction * 100))%")
+                        .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
+                case .failed:
+                    HStack {
+                        Text("Couldn't download the translation model.")
+                            .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
+                    }
+                case .notDownloaded, .downloaded:
+                    EmptyView()
+                }
+            }
+        }
+    }
+}
+
 /// On means the source is in the chain; self-hosted always goes before cloud.
 struct SourceToggle: View {
     let source: TranscriptionSource
@@ -741,12 +827,12 @@ struct ModelDownloadView: View {
             }
         case .downloading(let fraction):
             VStack(alignment: .leading, spacing: 8) {
-                Text("Downloading speaker separation model (about 210 MB)")
+                Text("Downloading speaker separation model (about 230 MB)")
                 ProgressLine(fraction: fraction)
             }
         case .notDownloaded, .failed:
             HStack {
-                Text("Speaker separation model (about 210 MB) runs on this Mac.")
+                Text("Speaker separation model (about 230 MB) runs on this Mac.")
                 Spacer()
                 PillButton("Download", icon: "download") { Task { await setup.downloadModels() } }
             }
@@ -801,5 +887,123 @@ struct OfflineModelView: View {
         case .transcription: "1.1 GB"
         case .llm: "5.7 GB"
         }
+    }
+}
+
+// MARK: Record shortcut
+
+/// The global shortcut that starts and stops a recording, and what keeps it from working.
+private struct RecordShortcutRow: View {
+    let app: AppController
+    @State private var listening = false
+
+    var body: some View {
+        @Bindable var store = app.settings
+        Group {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start or stop recording")
+                    if listening {
+                        Text("Press the new shortcut. Esc cancels.")
+                            .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                ShortcutField(app: app, shortcut: $store.settings.recordShortcut, listening: $listening)
+            }
+            if app.setup.accessibility != .granted {
+                HStack(spacing: 12) {
+                    Text("Needs Accessibility permission. Until it is on, the shortcut does nothing.")
+                        .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    PillButton("Open System Settings") { SetupModel.openSettings(.accessibility) }
+                }
+            }
+        }
+        .motion(Motion.reveal, value: app.setup.accessibility)
+        .task {
+            // macOS sends no notification when the Accessibility switch is flipped.
+            while !Task.isCancelled {
+                app.setup.refreshPermissions()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
+/// Shows the shortcut; clicked, it listens for a new one. While it listens the shortcut itself is
+/// off, and the keys pressed go nowhere else.
+private struct ShortcutField: View {
+    let app: AppController
+    @Binding var shortcut: Hotkey
+    @Binding var listening: Bool
+    @State private var recorder = HotkeyRecorder()
+    @State private var monitor: Any?
+    @State private var hovering = false
+
+    /// kVK_Escape.
+    private static let escape: UInt16 = 53
+
+    var body: some View {
+        Button { listening ? stop() : start() } label: {
+            Group {
+                if listening { Text("Press keys…") } else { Text(verbatim: shortcut.symbols) }
+            }
+            .font(Typo.captionStrong)
+            .foregroundStyle(listening ? Palette.orange : Palette.text)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 96)
+            .frame(height: 30)
+            .background(listening ? Palette.orangeSoft : hovering ? Palette.selected : Palette.tonal, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(Pressable())
+        .onHover { hovering = $0 }
+        .motion(Motion.touch, value: hovering)
+        .motion(Motion.select, value: listening)
+        .onDisappear(perform: stop)
+        .accessibilityLabel("Start or stop recording")
+        .accessibilityValue(Text(verbatim: shortcut.symbols))
+    }
+
+    private func start() {
+        recorder = HotkeyRecorder()
+        app.suspendsRecordShortcut = true
+        listening = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { event in
+            MainActor.assumeIsolated { listen(event) }
+            // Key presses are swallowed so they neither type nor press a button behind the field.
+            return event.type == .keyDown ? nil : event
+        }
+    }
+
+    private func listen(_ event: NSEvent) {
+        let modifiers = HotkeyModifiers(event.modifierFlags)
+        if event.type == .keyDown, event.keyCode == Self.escape, modifiers.isEmpty { return stop() }
+        let recorded = event.type == .flagsChanged
+            ? recorder.modifiersChanged(modifiers)
+            : recorder.keyDown(event.keyCode, modifiers: modifiers, label: Self.label(event))
+        if let recorded {
+            shortcut = recorded
+            stop()
+        }
+    }
+
+    private func stop() {
+        monitor.map(NSEvent.removeMonitor)
+        monitor = nil
+        listening = false
+        app.suspendsRecordShortcut = false
+    }
+
+    /// Keys that type nothing get the symbols macOS menus use; the rest read as their character.
+    private static func label(_ event: NSEvent) -> String {
+        let named: [UInt16: String] = [
+            49: "Space", 36: "↩", 76: "⌤", 48: "⇥", 51: "⌫", 117: "⌦",
+            123: "←", 124: "→", 125: "↓", 126: "↑", 115: "↖", 119: "↘", 116: "⇞", 121: "⇟",
+            122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+            98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+        ]
+        return named[event.keyCode] ?? event.charactersIgnoringModifiers?.uppercased() ?? "?"
     }
 }
