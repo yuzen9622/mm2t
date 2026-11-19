@@ -65,9 +65,9 @@ std::string quoted(const char *path) {
 std::string configuration(const char *model, const char *shortlist, const char *source, const char *target) {
   std::ostringstream yaml;
   yaml << "models:\n  - " << quoted(model) << "\n"
-       << "vocabs:\n  - " << quoted(source) << "\n  - " << quoted(target) << "\n"
-       << "shortlist:\n  - " << quoted(shortlist) << "\n  - false\n"
-       << "beam-size: 1\n"
+       << "vocabs:\n  - " << quoted(source) << "\n  - " << quoted(target) << "\n";
+  if (shortlist) yaml << "shortlist:\n  - " << quoted(shortlist) << "\n  - false\n";
+  yaml << "beam-size: 1\n"
        << "normalize: 1.0\n"
        << "word-penalty: 0\n"
        << "max-length-break: 128\n"
@@ -87,7 +87,7 @@ std::string configuration(const char *model, const char *shortlist, const char *
 extern "C" MM2TBergamotModel *mm2t_bergamot_model_create(const char *model_path, const char *shortlist_path,
                                                           const char *source_vocab_path,
                                                           const char *target_vocab_path, char **error) {
-  if (!model_path || !shortlist_path || !source_vocab_path || !target_vocab_path) {
+  if (!model_path || !source_vocab_path || !target_vocab_path) {
     fail(error, "missing model file path");
     return nullptr;
   }

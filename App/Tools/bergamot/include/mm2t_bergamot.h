@@ -9,6 +9,7 @@ extern "C" {
 /// One loaded translation direction.
 typedef struct MM2TBergamotModel MM2TBergamotModel;
 
+/// NULL shortlist_path uses the full target vocabulary.
 /// Loads a model from its files. On failure returns NULL and, when `error` is not NULL, stores a
 /// message there that the caller frees with `mm2t_bergamot_string_free`.
 MM2TBergamotModel *mm2t_bergamot_model_create(const char *model_path,

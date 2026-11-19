@@ -8,7 +8,7 @@
 
 - macOS 14.2 以上
 - Xcode 26 以上（Swift 6.2 工具鏈）
-- Python 3（只有要用 `App/Tools/build-bergamot.sh` 重新建置翻譯引擎時才需要；平常 Swift package 會自動下載已發布的版本）
+- Python 3（只有重新建置翻譯引擎時才需要；平常直接使用 `Vendor/Bergamot.xcframework.zip`）。更新引擎時，執行 `App/Tools/build-bergamot.sh` 建置兩種架構，再以輸出的 zip 更新 `Vendor/` 下的套件。
 
 ```bash
 git clone https://github.com/yuzen9622/mm2t.git
