@@ -48,10 +48,13 @@ public struct CaptionTarget: Hashable, Sendable, Identifiable {
     /// In the order a menu lists them.
     public static let all: [CaptionTarget] = [traditionalChinese, simplifiedChinese, korean, japanese, english, german, czech]
 
-    public static func with(id: String) -> CaptionTarget? { all.first { $0.id == id } }
+    public static func with(id: String) -> CaptionTarget? {
+        if id.hasPrefix("lang:") { return Self(languageCode: String(id.dropFirst(5))) }
+        return all.first { $0.id == id }
+    }
 
     /// How a caption in `source` reaches this language.
-    public func route(from source: CaptionLanguage) -> CaptionRoute {
+    public func route(from source: CaptionLanguage, engine: CaptionEngine = .firefox) -> CaptionRoute {
         switch source {
         case .english:
             return self == .english ? .none : .models(["en", code])
@@ -59,7 +62,7 @@ public struct CaptionTarget: Hashable, Sendable, Identifiable {
             if self == .traditionalChinese { return .none }
             if self == .simplifiedChinese { return .simplify }
             // Mozilla translates Chinese only into English, so other languages go through English.
-            return .models(self == .english ? ["zh_hant", "en"] : ["zh_hant", "en", code])
+            return .models(self == .english || engine != .firefox ? ["zh_hant", code] : ["zh_hant", "en", code])
         }
     }
 

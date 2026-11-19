@@ -55,8 +55,10 @@ public actor BergamotTranslator: CaptionTranslator {
         guard let direction = models.direction(pair) else { throw CaptionTranslationError.unsupported(pair) }
         let paths = models.paths(direction)
         var error: UnsafeMutablePointer<CChar>?
+        // The zh_hant→en shortlist excludes valid continuations of terms such as “single sign-on”.
+        let shortlist = pair == ModelPair("zh_hant", "en") ? nil : paths.shortlist.path
         guard let handle = mm2t_bergamot_model_create(
-            paths.model.path, paths.shortlist.path, paths.sourceVocabulary.path, paths.targetVocabulary.path, &error) else {
+            paths.model.path, shortlist, paths.sourceVocabulary.path, paths.targetVocabulary.path, &error) else {
             throw CaptionTranslationError.engine(Self.take(error) ?? "the translation model did not load")
         }
         let model = LoadedModel(direction: direction, handle: handle)

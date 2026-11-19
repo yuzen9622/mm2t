@@ -111,8 +111,11 @@ public enum Alignment {
         var text = ""
         for word in words {
             let token = word.text.trimmingCharacters(in: .whitespaces)
-            if let last = text.unicodeScalars.last, let first = token.unicodeScalars.first,
-               isLatin(last), first.isASCII, CharacterSet.alphanumerics.contains(first) {
+            guard !token.isEmpty else { continue }
+            if !text.isEmpty && word.text.first?.isWhitespace == true {
+                text += " "
+            } else if let last = text.unicodeScalars.last, let first = token.unicodeScalars.first,
+                      isLatin(last), first.isASCII, CharacterSet.alphanumerics.contains(first) {
                 text += " "
             }
             text += token
