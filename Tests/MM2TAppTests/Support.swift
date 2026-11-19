@@ -285,7 +285,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let modelsDownloaded = Box(true)
     let onDeviceSTT = FakeSTT()
     let onDeviceLLM = FakeLLM()
-    let offlineDownloaded: [OfflineModel: Box<Bool>] = [.transcription: Box(false), .llm: Box(false)]
+    let offlineDownloaded: [OfflineModel: Box<Bool>] = Dictionary(uniqueKeysWithValues: OfflineModel.allCases.map { ($0, Box(false)) })
     let keysUsed = Box<[String]>([])
     let selfHostedURLs = Box<[URL]>([])
     let languagesUsed = Box<[TranscriptionLanguage]>([])
@@ -316,8 +316,8 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     }
 
     let localStreaming = FakeStreamingSTT()
-    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
-        offlineDownloaded[.transcription]!.get ? localStreaming : nil
+    func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)? {
+        offlineDownloaded[OfflineModel(model)]!.get ? localStreaming : nil
     }
 
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
@@ -334,9 +334,9 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         modelsDownloaded.get ? LocalSpeakerModels(diarizer: diarizer, embedder: ScriptedEmbedder()) : nil
     }
 
-    func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
+    func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
         languagesUsed.update { $0.append(language) }
-        return offlineDownloaded[.transcription]!.get ? onDeviceSTT : nil
+        return offlineDownloaded[OfflineModel(model)]!.get ? onDeviceSTT : nil
     }
 
     func localLLM() -> (any LLMProvider)? {
@@ -346,7 +346,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let translator = FakeTranslator()
     let translationDownloaded = Box(false)
     let translatorTargets = Box<[CaptionTarget]>([])
-    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+    func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) -> (any CaptionTranslator)? {
         translatorTargets.update { $0.append(target) }
         return translationDownloaded.get ? translator : nil
     }
@@ -584,8 +584,9 @@ struct World {
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: speakerInstaller,
             offlineInstallers: offlineInstallers,
-            translationInstaller: { _ in translation },
+            translationInstaller: { _, _ in translation },
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
+        app.settings.settings.captionEngine = .firefox
     }
 
     var capture: CaptureController { app.capture }

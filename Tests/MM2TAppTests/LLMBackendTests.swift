@@ -65,12 +65,16 @@ import Testing
         let world = try World()
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.catalog.languagesUsed.set([])
-        _ = try build(world) { $0.transcriptionOrder = [.cloud, .local] }
+        _ = try build(world) {
+            $0.localSpeechModel = .breeze
+            $0.transcriptionOrder = [.cloud, .local]
+        }
         #expect(world.catalog.languagesUsed.get == [.auto, .auto])
 
         world.catalog.languagesUsed.set([])
         let url = try #require(AppSettings.selfHostedURL(from: "http://gpu:8080"))
         _ = try build(world) {
+            $0.localSpeechModel = .breeze
             $0.transcriptionOrder = [.selfHosted, .cloud, .local]
             $0.selfHostedURL = url
             $0.transcriptionLanguage = .english

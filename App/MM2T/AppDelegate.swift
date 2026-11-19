@@ -1,5 +1,6 @@
 import AppKit
 import MM2TApp
+import MM2TLocal
 import MM2TProviders
 import MM2TSystem
 import Observation
@@ -15,13 +16,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
             var defaults = UserDefaults.standard
+            var recorder: any Recorder = LiveRecorder()
+            var machine = MachineProfile.current
             var fixture = false
             #if DEBUG
             if let isolated = try AssistantScenarioRunner.fixtureDefaults() { defaults = isolated; fixture = true }
+            if fixture && UserDefaults.standard.bool(forKey: "MM2TFixtureIntel") {
+                machine = MachineProfile(isAppleSilicon: false, memoryBytes: machine.memoryBytes)
+            }
+            if fixture, let root = AssistantScenarioRunner.fixtureRoot, UserDefaults.standard.bool(forKey: "MM2TReplayAudio") {
+                recorder = MeetingAudioReplay(root: root)
+                var settings = SettingsStore(defaults: defaults).settings
+                settings.transcriptionOrder = [.local]
+                settings.localCaptionModel = .nemotron
+                settings.localSpeechModel = UserDefaults.standard.bool(forKey: "MM2TReplayBreezeCoreML") ? .breezeCoreML : .breeze
+                settings.liveCaptions = true
+                settings.captionTranslation = .off
+                settings.transcriptionLanguage = .auto
+                settings.llmLocation = .local
+                SettingsStore(defaults: defaults).settings = settings
+            }
             #endif
             app = try AppController.live(defaults: defaults, credentials: Self.credentials, signedInPage: signedIn,
                                          calendars: fixture ? [] : nil, recordingTitle: String(localized: "Recording"),
-                                         recorder: LiveRecorder(), permissions: LivePermissions(), shareWidget: !fixture)
+                                         recorder: recorder, permissions: LivePermissions(), shareWidget: !fixture, machine: machine)
             startupError = nil
         } catch {
             app = nil

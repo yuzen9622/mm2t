@@ -1,6 +1,7 @@
 import Foundation
 import MM2TCore
 import MM2TProviders
+import MM2TLocal
 import Observation
 
 /// Where the four LLM tasks run. `.local` needs the on-device model downloaded first.
@@ -60,6 +61,22 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
     public var openAIBaseURL: URL?
     public var openAIModel = ""
+    private struct SpeechModels: Codable, Equatable, Sendable {
+        var captions: LocalSpeechModel?
+        var transcript: LocalSpeechModel?
+    }
+    private var speechModels = SpeechModels()
+    /// An explicit caption selection. With no override, captions follow the transcript model.
+    public var localCaptionModel: LocalSpeechModel? {
+        get { speechModels.captions }
+        set { speechModels.captions = newValue }
+    }
+    public var localSpeechModel: LocalSpeechModel? {
+        get { speechModels.transcript }
+        set { speechModels.transcript = newValue }
+    }
+    public var effectiveCaptionModel: LocalSpeechModel? { localCaptionModel ?? localSpeechModel }
+    public var hasChosenSpeechModel: Bool { localSpeechModel != nil }
     public var transcriptionLanguage: TranscriptionLanguage = .auto
     public var hasCompletedOnboarding = false
     /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
@@ -69,6 +86,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
     /// Translates live captions on this Mac with the downloaded models; never saved.
+    public var captionEngine: CaptionEngine = .initial
     public var captionTranslation: CaptionTranslation = .off
     /// Where the user dragged the caption bar, by screen (its display number as text): the bar's
     /// offset from its default place, in points.
@@ -97,23 +115,44 @@ public struct AppSettings: Codable, Equatable, Sendable {
         cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
         openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
         openAIModel = try c.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
+        if let choices = try c.decodeIfPresent(SpeechModels.self, forKey: .speechModels) {
+            speechModels = choices
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyModelKeys.self)
+            let chose = try legacy.decodeIfPresent(Bool.self, forKey: .hasChosenSpeechModel)
+            if chose != false {
+                let transcript = try legacy.decodeIfPresent(LocalSpeechModel.self, forKey: .localSpeechModel)
+                let caption = try legacy.decodeIfPresent(LocalSpeechModel.self, forKey: .localCaptionModel)
+                let oldLocal = transcript == nil && caption == nil && chose == nil && transcriptionOrder.contains(.local)
+                localSpeechModel = transcript ?? (oldLocal ? .breezeCoreML : nil)
+                localCaptionModel = caption
+                // With the shared flag, choosing one model also exposed the other field's MLX default.
+                if chose == true, effectiveCaptionModel != localSpeechModel, decoder.userInfo[Self.installedMLX] as? Bool == false {
+                    if localCaptionModel == .breeze { localCaptionModel = nil }
+                    if localSpeechModel == .breeze { localSpeechModel = nil }
+                }
+            }
+        }
         transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
+        captionEngine = (try? c.decode(CaptionEngine.self, forKey: .captionEngine)) ?? .firefox
         captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
         captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
 
+    fileprivate static let installedMLX = CodingUserInfoKey(rawValue: "mm2t.installedMLX")!
+    private enum LegacyModelKeys: CodingKey { case hasChosenSpeechModel, localSpeechModel, localCaptionModel }
+
     private enum CodingKeys: String, CodingKey {
         case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
         case llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
-        case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage
-        case recordShortcut
+        case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
         case detectionRules
-        case liveCaptions, captionBarOffsets, captionTranslation
+        case liveCaptions, captionBarOffsets, captionEngine, captionTranslation
     }
 
     /// These settings with the ones that only change what is shown while recording set aside, so
@@ -121,6 +160,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var forProcessing: AppSettings {
         var settings = self
         settings.liveCaptions = false
+        settings.localCaptionModel = nil
+        settings.captionEngine = .initial
         settings.captionTranslation = .off
         settings.captionBarOffsets = [:]
         return settings
@@ -236,17 +277,56 @@ public final class SettingsStore {
     public static let key = "settings.v1"
 
     public var settings: AppSettings {
-        didSet { save() }
+        didSet {
+            for field in Self.modelFields where oldValue[keyPath: field] != settings[keyPath: field] {
+                nativeSelections.removeValue(forKey: field)
+            }
+            save()
+        }
     }
 
     @ObservationIgnored private let defaults: UserDefaults
 
-    public init(defaults: UserDefaults = .standard) {
+    private static let modelFields = [\AppSettings.localCaptionModel, \AppSettings.localSpeechModel]
+    @ObservationIgnored private var nativeSelections: [WritableKeyPath<AppSettings, LocalSpeechModel?>: LocalSpeechModel] = [:]
+    public let machine: MachineProfile
+
+    public init(defaults: UserDefaults = .standard, machine: MachineProfile = .current, installedMLX: Bool? = nil) {
         self.defaults = defaults
-        settings = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) } ?? AppSettings()
+        self.machine = machine
+        let decoder = JSONDecoder()
+        if machine.isAppleSilicon { decoder.userInfo[AppSettings.installedMLX] = installedMLX }
+        let stored = defaults.data(forKey: Self.key).flatMap { try? decoder.decode(AppSettings.self, from: $0) }
+        var compatible = stored ?? AppSettings()
+        if #unavailable(macOS 26), compatible.captionEngine == .apple {
+            compatible.captionEngine = .firefox
+            if let target = compatible.captionTranslation.target, !CaptionTarget.all.contains(target) {
+                compatible.captionTranslation = .off
+            }
+        }
+        for field in Self.modelFields {
+            guard let choice = compatible[keyPath: field], !choice.isSupported(on: machine) else { continue }
+            if machine.isTranslated { nativeSelections[field] = compatible[keyPath: field] }
+            compatible[keyPath: field] = .whisperCPU
+        }
+        settings = compatible
+        if stored != nil { save() }
+    }
+
+    func chooseSpeechModel(_ choice: LocalSpeechModel, for field: WritableKeyPath<AppSettings, LocalSpeechModel?>) {
+        nativeSelections.removeValue(forKey: field)
+        // Selecting the transcript model again restores the default link between the pickers.
+        let transcript = nativeSelections[\.localSpeechModel] ?? settings.localSpeechModel
+        settings[keyPath: field] = field == \.localCaptionModel && choice == transcript ? nil : choice
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: Self.key) }
+        var stored = settings
+        for (field, choice) in nativeSelections { stored[keyPath: field] = choice }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        if let data = try? encoder.encode(stored), defaults.data(forKey: Self.key) != data {
+            defaults.set(data, forKey: Self.key)
+        }
     }
 }

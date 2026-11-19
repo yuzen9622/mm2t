@@ -1,6 +1,15 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯模型" } } } },
+    "Apple Translation requires macOS 26 or later.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Apple 翻譯需要 macOS 26 或以上版本。" } } } },
+    "Unavailable": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法使用" } } } },
+    "No system translation languages available.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "系統沒有可用的翻譯語言。" } } } },
+    "Installed": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已安裝" } } } },
+    "Needs download": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "需要下載" } } } },
+    "Remote audio": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "遠端音軌" } } } },
+    "Live caption model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕模型" } } } },
+    "Transcription model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "轉錄模型" } } } },
     "About %lld MB in total.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "總共約 %lld MB。" } } } },
     "Microsoft 365 or Outlook.com": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Microsoft 365 或 Outlook.com" } } } },
     "Open your browser to grant it.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請先開啟瀏覽器再授權。" } } } },
@@ -57,6 +66,46 @@
     "Listening": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "聆聽中" } } } },
     "Live captions": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕" } } } },
     "%lld assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "%lld 項交辦" } } } },
+    "Choose a model": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請選擇模型"
+          }
+        }
+      }
+    },
+    "Choose a transcription model to continue.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先選擇轉錄模型，再繼續。"
+          }
+        }
+      }
+    },
+    "Selecting a speech model downloads it to this Mac.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選取語音模型後，會自動下載到這台 Mac。"
+          }
+        }
+      }
+    },
+    "Personalization": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "個人化"
+          }
+        }
+      }
+    },
     "Personalized memory": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "個人化記憶" } } } },
     "Checked assignments": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "查詢交辦事項" } } } },
     "Conversation history": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "對話紀錄" } } } },
@@ -167,6 +216,9 @@
           }
         }
       }
+    },
+    "Preparing Breeze Core ML…": {
+      "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在準備 Breeze Core ML…" } } }
     },
     "Preparing audio…": {
       "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在準備錄音…" } } }
@@ -1806,12 +1858,12 @@
         }
       }
     },
-    "On this Mac": {
+    "Local models": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在這台 Mac 上"
+            "value": "本機模型"
           }
         }
       }
@@ -1912,16 +1964,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "人物"
-          }
-        }
-      }
-    },
-    "Permissions": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "權限"
           }
         }
       }

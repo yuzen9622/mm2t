@@ -21,7 +21,7 @@ enum AppLinks {
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case assistant
-    case permissions
+    case privacy
     case about
 
     var id: String { rawValue }
@@ -29,8 +29,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
-        case .assistant: String(localized: "Personalized memory")
-        case .permissions: String(localized: "Permissions")
+        case .assistant: String(localized: "Personalization")
+        case .privacy: String(localized: "Privacy")
         case .about: String(localized: "About")
         }
     }
@@ -38,7 +38,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general, .assistant: "adjustments-horizontal"
-        case .permissions: "shield-check"
+        case .privacy: "shield-check"
         case .about: "info-circle"
         }
     }
@@ -47,7 +47,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// One setting the search can find. A new setting is a case here, a place in its group's `rows`,
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
-    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions, captionTranslation
+    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions
     case diarizationModel
     case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
@@ -64,9 +64,11 @@ enum SettingsRow: Hashable {
         case .transcriptionLanguage: [String(localized: "Meeting language"), String(localized: "Auto-detect"), "中文", "English"]
         case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
-        case .localTranscription: [Copy.source(.local)]
-        case .liveCaptions: [String(localized: "Live captions"), Copy.source(.selfHosted), Copy.source(.cloud), Copy.source(.local)]
-        case .captionTranslation: [String(localized: "Translate captions")] + CaptionTarget.all.map(\.name)
+        case .localTranscription: [Copy.source(.local), String(localized: "Transcription model")]
+        case .liveCaptions: [String(localized: "Live captions"), String(localized: "Live caption model"),
+                             String(localized: "Translate captions"), String(localized: "Translation model"),
+                             "Apple Translation", "Mozilla Firefox Translations", "Bergamot", "Tencent Hy-MT2-1.8B", "Q4_K_M", Copy.source(.selfHosted), Copy.source(.cloud),
+                             Copy.source(.local)] + CaptionTarget.all.map(\.name)
         case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
@@ -105,19 +107,19 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
-                                 .liveCaptions, .captionTranslation]),
+                                 .liveCaptions]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
                           rows: [.summaryBackend, .geminiKey, .localSummaries]),
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
-            SettingsGroup(id: "privacy", section: .general, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
+            SettingsGroup(id: "privacy", section: .privacy, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
             SettingsGroup(id: "prompts", section: .general, title: String(localized: "Recording prompts"),
                           rows: [.promptApps, .promptSites]),
-            SettingsGroup(id: "system", section: .permissions, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
-            SettingsGroup(id: "calendars", section: .permissions, title: String(localized: "Calendars"), rows: [.calendars]),
-            SettingsGroup(id: "reminders", section: .permissions, title: String(localized: "Reminders"), rows: [.reminders]),
+            SettingsGroup(id: "system", section: .privacy, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
+            SettingsGroup(id: "calendars", section: .privacy, title: String(localized: "Calendars"), rows: [.calendars]),
+            SettingsGroup(id: "reminders", section: .privacy, title: String(localized: "Reminders"), rows: [.reminders]),
             SettingsGroup(id: "app", section: .about, title: "mm2t", rows: [.version, .sourceCode, .author, .buyMeACoffee]),
             SettingsGroup(id: "legal", section: .about, title: String(localized: "Legal"), rows: [.privacyPolicy, .terms, .licenses]),
         ]
@@ -329,12 +331,10 @@ struct SettingsRowView: View {
         case .localTranscription:
             SourceToggle(source: .local, store: store)
             if store.settings.transcriptionOrder.contains(.local) {
-                OfflineModelView(model: .transcription, fit: app.setup.suitability.transcription, setup: app.setup)
+                SpeechModelPicker(store: store, setup: app.setup)
             }
         case .liveCaptions:
             LiveCaptionsRow(app: app)
-        case .captionTranslation:
-            CaptionTranslationRow(app: app)
         case .diarizationModel:
             ModelDownloadView(setup: app.setup)
         case .summaryBackend:
@@ -363,7 +363,7 @@ struct SettingsRowView: View {
                 get: { store.settings.llmLocation == .local },
                 set: { store.settings.llmLocation = $0 ? .local : .cloud }))
             if store.settings.llmLocation == .local {
-                OfflineModelView(model: .llm, fit: app.setup.suitability.llm, setup: app.setup)
+                OfflineModelView(model: .llm, setup: app.setup)
             }
         case .appLanguage:
             LanguagePicker()
@@ -675,22 +675,27 @@ struct IssueRow: View {
     }
 }
 
-/// Captions run on the first transcription source that is on and set up; with none the switch is off.
+/// Keep model selection and download retries accessible while configuring local captions.
 private struct LiveCaptionsRow: View {
     let app: AppController
 
     var body: some View {
-        let available = app.hasCaptionSource
+        let available = app.hasConfiguredCaptionSource
         Toggle("Live captions", isOn: Binding(
             get: { available && app.settings.settings.liveCaptions },
             set: { app.settings.settings.liveCaptions = $0 }))
             .disabled(!available)
+        if available && app.settings.settings.liveCaptions {
+            if app.settings.settings.transcriptionOrder.contains(.local) {
+                SpeechModelPicker(store: app.settings, setup: app.setup, field: \.localCaptionModel)
+            }
+            CaptionTranslationRow(app: app)
+        }
     }
 }
 
 private extension AppController {
-    /// The same sources `buildCaptions` would chain, read from what the settings window shows.
-    var hasCaptionSource: Bool {
+    var hasConfiguredCaptionSource: Bool {
         settings.settings.transcriptionOrder.contains { source in
             switch source {
             case .selfHosted: settings.settings.selfHostedURL != nil
@@ -699,50 +704,7 @@ private extension AppController {
                 case .empty, .storageFailed: false
                 default: true
                 }
-            case .local: setup.offlineModels[.transcription] == .downloaded
-            }
-        }
-    }
-}
-
-/// Live captions translated on this Mac into one language. Choosing a language the first time
-/// downloads the models it needs; the row follows the live captions switch. The choice is a menu,
-/// styled like the assistant's conversation history menu, since eight options do not fit a
-/// segmented control.
-private struct CaptionTranslationRow: View {
-    let app: AppController
-
-    private var enabled: Bool { app.hasCaptionSource && app.settings.settings.liveCaptions }
-
-    var body: some View {
-        let choice = app.settings.settings.captionTranslation
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Translate captions")
-                Spacer()
-                Dropdown(label: "Translate captions",
-                         options: CaptionTranslation.allCases.map { option in
-                             DropdownOption(id: option, leading: option.target?.flag,
-                                            title: option.target?.name ?? String(localized: "Off"))
-                         },
-                         selection: Binding(get: { choice }, set: { new in Task { await app.setCaptionTranslation(new) } }))
-                    .disabled(!enabled)
-            }
-            if choice != .off {
-                switch app.setup.translationModels {
-                case .downloading(let fraction):
-                    Text("Downloading translation model… \(Int(fraction * 100))%")
-                        .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
-                case .failed:
-                    HStack {
-                        Text("Couldn't download the translation model.")
-                            .font(Typo.caption).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
-                    }
-                case .notDownloaded, .downloaded:
-                    EmptyView()
-                }
+            case .local: settings.settings.effectiveCaptionModel != nil
             }
         }
     }
@@ -844,13 +806,55 @@ struct ModelDownloadView: View {
 }
 
 /// One on-device model: whether this Mac suits it, and its download.
+struct SpeechModelPicker: View {
+    @Bindable var store: SettingsStore
+    let setup: SetupModel
+
+    var field: WritableKeyPath<AppSettings, LocalSpeechModel?> = \.localSpeechModel
+
+    private var isCaption: Bool { field == \.localCaptionModel }
+    private var label: LocalizedStringKey { isCaption ? "Live caption model" : "Transcription model" }
+
+    var body: some View {
+        picker
+        if let model = store.settings[keyPath: field], !isCaption || model != store.settings.localSpeechModel {
+            OfflineModelView(model: OfflineModel(model), setup: setup)
+        }
+    }
+
+    private var picker: some View {
+        let selection = Binding<LocalSpeechModel?>(
+            get: { isCaption ? store.settings.effectiveCaptionModel : store.settings.localSpeechModel },
+            set: { choice in
+                if let choice {
+                    setup.selectSpeechModel(choice, for: field)
+                }
+            }
+        )
+        let options = setup.speechModelChoices.map { choice in
+            let model = OfflineModel(choice)
+            let mb = Int((Double(setup.offlineModelBytes(model)) / 1_000_000).rounded())
+            return DropdownOption(id: Optional(choice), title: choice.name, detail: setup.offlineModels[model] == .downloaded ? nil : "\(mb) MB")
+        }
+        return HStack {
+            Text(label)
+            Spacer()
+            Dropdown(label: label, options: options, selection: selection, placeholder: String(localized: "Choose a model"))
+                .onAppear {
+                    if let choice = selection.wrappedValue, setup.offlineModels[OfflineModel(choice)] == .notDownloaded {
+                        Task { await setup.downloadOfflineModel(OfflineModel(choice)) }
+                    }
+                }
+        }
+    }
+}
+
 struct OfflineModelView: View {
     let model: OfflineModel
-    let fit: OfflineFit
     let setup: SetupModel
 
     var body: some View {
-        if case .unsuited(let reason) = fit {
+        if case .unsuited(let reason) = setup.fit(for: model) {
             HStack(spacing: 8) {
                 Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
                 switch reason {
@@ -861,32 +865,42 @@ struct OfflineModelView: View {
         }
         switch setup.offlineModels[model] ?? .notDownloaded {
         case .downloaded:
-            HStack(spacing: 8) {
-                Icon("circle-check", size: 16).foregroundStyle(Palette.success)
-                Text("Model installed")
+            if model == .breezeCoreML, setup.preparingCoreML {
+                HStack { ProgressView().controlSize(.small); Text("Preparing Breeze Core ML…") }
+            } else if model == .breezeCoreML, let error = setup.coreMLPreparationError {
+                HStack {
+                    Text(error)
+                    PillButton("Retry", icon: "refresh") { Task { await setup.prepareInstalledCoreML() } }
+                }
+            } else if model == .llm {
+                HStack(spacing: 8) {
+                    Icon("circle-check", size: 16).foregroundStyle(Palette.success)
+                    Text("Model installed")
+                }
             }
         case .downloading(let fraction):
             VStack(alignment: .leading, spacing: 8) {
                 Text("Downloading \(size)")
                 ProgressLine(fraction: fraction)
             }
-        case .notDownloaded, .failed:
-            HStack {
-                Text("Needs a model on this Mac (\(size)).")
-                Spacer()
-                PillButton("Download", icon: "download") { Task { await setup.downloadOfflineModel(model) } }
+        case .notDownloaded:
+            if model == .llm {
+                HStack {
+                    Text("Needs a model on this Mac (\(size)).")
+                    Spacer()
+                    PillButton("Download", icon: "download") { Task { await setup.downloadOfflineModel(model) } }
+                }
             }
-            if case .failed(let reason) = setup.offlineModels[model] {
+        case .failed(let reason):
+            HStack {
                 Text(reason).font(Typo.caption).foregroundStyle(Palette.danger)
+                PillButton("Retry", icon: "refresh") { Task { await setup.downloadOfflineModel(model) } }
             }
         }
     }
 
     private var size: String {
-        switch model {
-        case .transcription: "1.1 GB"
-        case .llm: "5.7 GB"
-        }
+        ByteCountFormatter.string(fromByteCount: setup.offlineModelBytes(model), countStyle: .file)
     }
 }
 

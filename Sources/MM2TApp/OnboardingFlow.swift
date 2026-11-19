@@ -40,6 +40,7 @@ public enum ServiceEntry: Hashable, Sendable {
     case offlineModel(OfflineModel)
     /// No transcription source is on; the row turns the chosen one back on.
     case transcriptionSource
+    case speechModelPicker
     /// Something only Settings can fix; the row says what and opens Settings.
     case settings(SetupIssue)
 }
@@ -52,6 +53,7 @@ public enum OnboardingPrimary: Equatable, Sendable {
 
 /// The line under the footer buttons saying why the primary is disabled.
 public enum OnboardingNote: Equatable, Sendable {
+    case chooseSpeechModel
     case needsMicrophone
     case needsVoice
     /// Every model still downloading, together, 0...1.
@@ -118,7 +120,7 @@ public final class OnboardingFlow {
     /// which lets the user go on while the downloads run.
     public func isComplete(_ step: OnboardingStep) -> Bool {
         switch step {
-        case .models: modelsReady
+        case .models: canLeave(.models) && modelsReady
         default: canLeave(step)
         }
     }
@@ -129,7 +131,7 @@ public final class OnboardingFlow {
         switch step {
         case .usage: choice.isAvailable
         case .permissions: setup.microphone == .granted
-        case .models: true
+        case .models: settings.settings.hasCompletedOnboarding || settings.settings.hasChosenSpeechModel
         case .voice: enrollment.hasVoice
         case .services: setup.issues.isEmpty && modelsReady
         }
@@ -143,14 +145,15 @@ public final class OnboardingFlow {
     public var note: OnboardingNote? {
         guard !canContinue else { return nil }
         switch step {
-        case .usage, .models: return nil  // Never held: a choice is always selected, downloads run on.
+        case .usage: return nil
+        case .models: return .chooseSpeechModel
         case .permissions: return .needsMicrophone
         case .voice: return .needsVoice
         case .services: break
         }
         if isDownloading { return .finishingDownloads(modelProgress) }
         if case .failed = setup.models { return .downloadFailed }
-        if setup.translationTarget != nil, case .failed = setup.translationModels { return .downloadFailed }
+        if requiresTranslationDownload, case .failed = setup.translationModels { return .downloadFailed }
         if let issue = setup.issues.first(where: { $0 != .diarizationModelsMissing }) { return .issue(issue) }
         return .modelsNotDownloaded
     }
@@ -216,7 +219,7 @@ public final class OnboardingFlow {
             switch source {
             case .cloud: entries.append(.elevenLabs)
             case .selfHosted: entries.append(.transcriptionServer)
-            case .local: entries.append(.offlineModel(.transcription))
+            case .local: entries.append(settings.localSpeechModel.map { .offlineModel(OfflineModel($0)) } ?? .speechModelPicker)
             }
         }
         switch settings.llmLocation {
@@ -241,6 +244,7 @@ public final class OnboardingFlow {
         case .missingCredential(.googleCalendarRefreshToken), .missingCredential(.microsoftCalendarRefreshToken): .settings(issue)
         case .missingSelfHostedURL: .transcriptionServer
         case .missingLLMEndpoint: .llmServer
+        case .speechModelNotSelected: .speechModelPicker
         case .noTranscriptionSource: .transcriptionSource
         case .diarizationModelsMissing: nil
         case .offlineModelMissing(let model): .offlineModel(model)
@@ -250,7 +254,7 @@ public final class OnboardingFlow {
     /// Turns an on-device source off the way its Settings switch does.
     public func turnOff(_ model: OfflineModel) {
         switch model {
-        case .transcription:
+        case .whisperCPU, .transcription, .breezeCoreML, .parakeet, .nemotron:
             let enabled = Set(settings.settings.transcriptionOrder).subtracting([.local])
             settings.settings.transcriptionOrder = TranscriptionSource.allCases.filter(enabled.contains)
         case .llm:
@@ -268,17 +272,17 @@ public final class OnboardingFlow {
     // MARK: Models
 
     public var modelsReady: Bool {
-        setup.models == .downloaded && (setup.translationTarget == nil || setup.translationModels == .downloaded)
+        setup.models == .downloaded && (!requiresTranslationDownload || setup.translationModels == .downloaded)
     }
 
     /// Both downloads in bytes, for "About N MB in total"; translation counts only the chosen
     /// language's models, and nothing while translation is off.
-    public var modelBytes: Int64 { setup.speakerModelBytes + setup.translationModelBytes }
+    public var modelBytes: Int64 { setup.speakerModelBytes + (requiresTranslationDownload ? setup.translationModelBytes : 0) }
 
     /// The on-device models the settings use.
     public var requiredOfflineModels: [OfflineModel] {
         let current = settings.settings
-        return (current.transcriptionOrder.contains(.local) ? [.transcription] : [])
+        return (current.transcriptionOrder.contains(.local) ? current.localSpeechModel.map { [OfflineModel($0)] } ?? [] : [])
             + (current.llmLocation == .local ? [.llm] : [])
     }
 
@@ -298,7 +302,7 @@ public final class OnboardingFlow {
 
     private var progressParts: [(state: ModelDownloadState, bytes: Int64)] {
         [(setup.models, setup.speakerModelBytes)]
-            + (setup.translationTarget == nil ? [] : [(setup.translationModels, setup.translationModelBytes)])
+            + (!requiresTranslationDownload ? [] : [(setup.translationModels, setup.translationModelBytes)])
             + requiredOfflineModels.compactMap { model in
                 let state = setup.offlineModels[model] ?? .notDownloaded
                 guard case .downloading = state else { return nil }
@@ -315,10 +319,14 @@ public final class OnboardingFlow {
     }
 
     /// Starts whichever download has not begun; a failed one waits for its Retry. Returns when both end.
+    private var requiresTranslationDownload: Bool {
+        settings.settings.captionEngine == .firefox && setup.translationTarget != nil
+    }
+
     public func startDownloads() async {
         let setup = setup
         let speakers = setup.models == .notDownloaded ? Task { await setup.downloadModels() } : nil
-        let translation = setup.translationTarget != nil && setup.translationModels == .notDownloaded
+        let translation = requiresTranslationDownload && setup.translationModels == .notDownloaded
             ? Task { await setup.downloadTranslationModels() } : nil
         await speakers?.value
         await translation?.value

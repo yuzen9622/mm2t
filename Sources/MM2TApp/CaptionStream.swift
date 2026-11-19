@@ -75,7 +75,7 @@ public actor CaptionStream {
         isStopped = true
         audioTask?.cancel()
         audioTask = nil
-        await disconnect()
+        await disconnect(discard: true)
         await captions.clear()
     }
 
@@ -88,14 +88,14 @@ public actor CaptionStream {
         runTask = Task { [weak self] in await self?.run(current) }
     }
 
-    private func disconnect() async {
+    private func disconnect(discard: Bool = false) async {
         generation += 1
         runTask?.cancel()
         runTask = nil
         pending = []
         let open = connection
         connection = nil
-        await open?.close()
+        if discard { await open?.discard() } else { await open?.close() }
     }
 
     private func isCurrent(_ run: Int) -> Bool {

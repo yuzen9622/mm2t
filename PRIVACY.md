@@ -116,7 +116,7 @@ LLM 位置設為雲端時使用。端點：`https://generativelanguage.googleapi
 
 ### 模型下載（Hugging Face）
 
-你按下下載說話者分群模型時，本 App 會從 Hugging Face 下載模型檔。這個請求不含任何會議資料。
+你選擇下載本機語音辨識模型（包括 Intel Mac 使用的多語 Whisper Base），或按下下載說話者分群模型時，本 App 會從 Hugging Face 下載模型檔。這個請求不含任何會議資料。
 
 ## 本 App 不做的事
 

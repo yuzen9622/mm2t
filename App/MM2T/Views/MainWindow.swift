@@ -148,6 +148,7 @@ struct MainWindow: View {
                maxWidth: stage == .setup ? Self.setupSize.width : .infinity,
                minHeight: stage == .app ? Self.appMinimum.height : Self.setupSize.height,
                maxHeight: stage == .setup ? Self.setupSize.height : .infinity)
+        .task(id: app.shouldPrepareBreeze, priority: .utility) { await app.preparePreferredBreeze() }
         .onChange(of: app.showsSetup) { _, setup in travel(toSetup: setup) }
         .onChange(of: navigation.setupRequested, initial: true) {
             guard navigation.setupRequested else { return }
@@ -167,7 +168,17 @@ struct MainWindow: View {
             show(.meetings)
         }
         .onChange(of: app.capture.state.isCapturing) { _, capturing in
-            if !capturing { navigation.liveOpen = false }
+            if capturing { showSavedMeeting = false }
+            else {
+                showSavedMeeting = navigation.liveOpen
+                navigation.liveOpen = false
+            }
+        }
+        .onChange(of: app.capture.lastSavedMeeting) { _, id in
+            if showSavedMeeting, let id {
+                showSavedMeeting = false
+                show(.meetings, meeting: id)
+            }
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
@@ -262,6 +273,8 @@ struct MainWindow: View {
     }
 
     /// The live page shows only while a recording runs.
+    @State private var showSavedMeeting = false
+
     private var showsLive: Bool { MainNavigation.shared.liveOpen && app.capture.state.isCapturing }
 
     /// A floating panel on the window's ground, set apart by tone and a soft shadow, never by a line.

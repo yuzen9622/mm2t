@@ -16,7 +16,8 @@ enum Copy {
         decisions: String(localized: "Decisions"),
         discussionPoints: String(localized: "Discussion points"),
         actionItems: String(localized: "Action items"),
-        owner: { String(localized: "owner: \($0)") })
+        owner: { String(localized: "owner: \($0)") },
+        microphone: String(localized: "Microphone"), remoteAudio: String(localized: "Remote audio"))
 
     static func view(for view: TranscriptView) -> String {
         switch view {
@@ -74,7 +75,8 @@ enum Copy {
         case .missingLLMEndpoint: String(localized: "Enter the large language model's server URL and model name, or switch back to Gemini.")
         case .noTranscriptionSource: String(localized: "Turn on at least one transcription source.")
         case .diarizationModelsMissing: String(localized: "Download the speaker separation model.")
-        case .offlineModelMissing(.transcription): String(localized: "Download the on-device transcription model.")
+        case .speechModelNotSelected: String(localized: "Choose a model")
+        case .offlineModelMissing(.whisperCPU), .offlineModelMissing(.transcription), .offlineModelMissing(.breezeCoreML), .offlineModelMissing(.parakeet), .offlineModelMissing(.nemotron): String(localized: "Download the on-device transcription model.")
         case .offlineModelMissing(.llm): String(localized: "Download the on-device large language model.")
         }
     }
@@ -133,7 +135,7 @@ enum Copy {
         switch source {
         case .selfHosted: String(localized: "Self-hosted server")
         case .cloud: String(localized: "ElevenLabs (cloud)")
-        case .local: String(localized: "On this Mac")
+        case .local: String(localized: "Local models")
         }
     }
 

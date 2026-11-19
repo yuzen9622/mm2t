@@ -29,17 +29,17 @@ let package = Package(
             dependencies: ["MM2TCore", .product(name: "FluidAudio", package: "FluidAudio")]),
         .target(
             name: "MM2TLocal",
-            dependencies: ["MM2TCore", "MM2TProviders", "llama", "Bergamot", .product(name: "WhisperKit", package: "WhisperKit")]),
+            dependencies: ["MM2TCore", "MM2TProviders", "llama", "Bergamot", "CWhisperCPU", .product(name: "FluidAudio", package: "FluidAudio"), .product(name: "WhisperKit", package: "WhisperKit")]),
         .binaryTarget(
             name: "llama",
             url: "https://github.com/ggml-org/llama.cpp/releases/download/b11929/llama-b11929-xcframework.zip",
             checksum: "22644a57aad53f4a0a440860607c6d2f1da9e683f78cf03266569c0030d2dbd7"),
-        // Mozilla's Bergamot translation engine behind a small C API, built by App/Tools/build-bergamot.sh
-        // and published as a release asset of this repository.
-        .binaryTarget(
-            name: "Bergamot",
-            url: "https://github.com/yuzen9622/mm2t/releases/download/bergamot-0.4.5-9271618/Bergamot.xcframework.zip",
-            checksum: "97b1bb70599e7fab826cdb0548188be00b601258b896d3848f144d8b2d298d0b"),
+        .target(name: "CWhisperCPU", dependencies: ["whisper"]),
+        .binaryTarget(name: "whisper",
+            url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-v1.9.2-xcframework.zip",
+            checksum: "af74fed13ea7f2d5ca2a39d9f58ec177713fafd7cab63aef4e27b79f3ceca80b"),
+        // App/Tools/build-bergamot.sh builds the engine with optional shortlist support.
+        .binaryTarget(name: "Bergamot", path: "Vendor/Bergamot.xcframework.zip"),
         .target(name: "MM2TWidgetData"),
         .target(name: "MM2TApp", dependencies: ["MM2TCore", "MM2TProviders", "MM2TSystem", "MM2TDiarization", "MM2TLocal", "MM2TWidgetData"]),
         .testTarget(name: "MM2TCoreTests", dependencies: ["MM2TCore"]),

@@ -1,8 +1,12 @@
 # Third-party notices
 
-mm2t separates speakers on the Mac with the software and models below. The SDK is linked into the app. The models are not shipped with the app; it downloads them from Hugging Face on first use into `~/Library/Application Support/mm2t/Models`. The live caption translation models come from Mozilla's Google Cloud Storage the same way, the first time a caption language is chosen.
+mm2t separates speakers on the Mac with the software and models below. The SDK is linked into the app. The models are not shipped with the app; it downloads them from Hugging Face on first use into `~/Library/Application Support/mm2t/Models`. Caption translation models are optional downloads from Hugging Face (Tencent) or Google Cloud Storage (Mozilla).
 
 ## Software
+
+### OpenCC Taiwan character variants
+
+The on-device Nemotron formatter uses the TWVariants character pairs from [OpenCC 1.1.9](https://github.com/BYVoid/OpenCC/blob/ver.1.1.9/data/dictionary/TWVariants.txt), Copyright the OpenCC contributors, under the [Apache License 2.0](https://github.com/BYVoid/OpenCC/blob/ver.1.1.9/LICENSE). The pairs have been adapted into a Swift dictionary.
 
 ### FluidAudio 0.18.3
 
@@ -856,17 +860,41 @@ It links these components:
 - License: the model card states that the upstream license applies. The 3D-Speaker repository is licensed under the Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0. A separate license for the checkpoint itself was not found.
 - Original model by Alibaba DAMO Academy (3D-Speaker). Core ML conversion by Fluid Inference. The app uses it unmodified to compute voiceprints.
 
+### Parakeet TDT 0.6B v3 (optional transcription model)
+
+- NVIDIA Parakeet, Core ML conversion by Fluid Inference: https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml
+- Original: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+- License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/
+
+### Nemotron 3.5 ASR Streaming Multilingual 0.6B (optional transcription model)
+
+- NVIDIA Nemotron, Core ML conversion by Fluid Inference: https://huggingface.co/FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML
+- Original and license: https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b
+
 ### Breeze-ASR-25 (on-device transcription, optional download)
 
-- Source: https://huggingface.co/weiren119/Breeze-ASR-25-coreml-4bit-palette (revision `3fc1623`), a community Core ML conversion of https://huggingface.co/MediaTek-Research/Breeze-ASR-25 (tokenizer from revision `cffe7cc`)
+- Source: https://huggingface.co/schsu/breeze-asr-25-mlx (revision `6e48985`), an FP16 MLX conversion of https://huggingface.co/MediaTek-Research/Breeze-ASR-25
 - License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
 - Original model by MediaTek Research, fine-tuned from OpenAI Whisper large-v2.
+
+The BreezeMLX helper embeds CPython. Its full license and copyright notices are included in the helper at Contents/Resources/licenses/CPython/LICENSE.txt.
+
+The BreezeMLX helper includes SciPy. Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers. SciPy is distributed under the BSD 3-Clause license. The helper includes the installed distribution’s full LICENSE.txt, including the notices for its bundled libraries, under Contents/Resources/scipy-*.dist-info/.
+
+The helper also includes regex and the certifi CA bundle. Their distribution notices are in the corresponding .dist-info/licenses directories under Contents/Resources/.
+
+The bundled recognizer uses Apple MLX and mlx-whisper (MIT). See https://github.com/ml-explore/mlx and https://github.com/ml-explore/mlx-examples/tree/main/whisper.
 
 ### Qwen3.5-9B (on-device summaries, optional download)
 
 - Source: https://huggingface.co/unsloth/Qwen3.5-9B-GGUF (revision `3885219`, `Q4_K_M` quantization)
 - License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
 - Original model by Alibaba Cloud (Qwen team). GGUF quantization by Unsloth.
+
+### Tencent Hy-MT2-1.8B (caption translation, optional download)
+
+- Source: [Tencent's official GGUF release](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/tree/a0c709d9fac510f2c807aa3af52872340dc37a4a), `Hy-MT2-1.8B-Q4_K_M.gguf`, unmodified.
+- License: [Apache License 2.0](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/blob/a0c709d9fac510f2c807aa3af52872340dc37a4a/LICENSE.txt).
 
 ### Firefox Translations models (live caption translation, optional download)
 
@@ -878,3 +906,32 @@ It links these components:
 
 The interface icons in `App/MM2T/Icons/`. MIT License, Copyright (c) 2020-2026 Paweł Kuna.
 Source: https://github.com/tabler/tabler-icons. The license text ships in the app as `TABLER-LICENSE.txt`.
+
+## Whisper Base (CPU)
+
+- Engine: [whisper.cpp v1.9.2](https://github.com/ggml-org/whisper.cpp/tree/v1.9.2).
+- Optional multilingual model: [OpenAI Whisper Base](https://github.com/openai/whisper), converted to GGML by [ggerganov](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1).
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Copyright (c) 2022 OpenAI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

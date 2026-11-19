@@ -66,6 +66,13 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
 @Suite struct LiveTranscriptionTests {
     static let rate = 1000
 
+    @Test func breezeKeepsTheTailShortAndUsesAFullWindowForCatchUpOrStop() {
+        #expect(LiveTranscriber.breezeWindow(remaining: 10, finishing: false) == 4)
+        #expect(LiveTranscriber.breezeWindow(remaining: 12, finishing: false) == 10)
+        #expect(LiveTranscriber.breezeWindow(remaining: 31, finishing: false) == 30)
+        #expect(LiveTranscriber.breezeWindow(remaining: 13, finishing: true) == 30)
+    }
+
     @Test func recordingUsesHostedRoutesWithoutSkippingOverALocalPreference() async throws {
         let hosted = FakeSTT(.unreachable), cloud = FakeSTT(.unreachable), local = FakeSTT()
         let full = TranscriptionChain([.init(.selfHosted, hosted), .init(.cloud, cloud), .init(.local, local)])

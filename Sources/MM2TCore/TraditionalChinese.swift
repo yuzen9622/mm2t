@@ -6,9 +6,9 @@ public enum TraditionalChinese {
     /// Converts the words as one text so context picks the right character (后面 -> 後面, 皇后 stays),
     /// then cuts it back into the same words. The conversion is character for character; if it ever
     /// is not, each word is converted on its own instead.
-    static func convert(_ words: [String]) -> [String] {
-        let converted = Array(convert(words.joined()))
-        guard converted.count == words.reduce(0, { $0 + $1.count }) else { return words.map(convert) }
+    package static func convert(_ words: [String], using transform: (String) -> String = convert) -> [String] {
+        let converted = Array(transform(words.joined()))
+        guard converted.count == words.reduce(0, { $0 + $1.count }) else { return words.map(transform) }
         var start = 0
         return words.map { word in
             defer { start += word.count }

@@ -128,19 +128,41 @@ public final class SetupModel {
     /// Whether this Mac is suited to each offline option, for the hint next to its switch.
     public let suitability: OfflineSuitability
     public private(set) var issues: [SetupIssue] = []
+    public private(set) var preparingCoreML = false
+    public private(set) var coreMLPreparationError: String?
+    @ObservationIgnored private let prepareCoreML: @MainActor () async throws -> Void
     public let fields: [CredentialField]
     /// What the speaker model and the translation models each download from nothing.
     public var speakerModelBytes: Int64 { installer.downloadBytes }
-    public var translationModelBytes: Int64 { translationTarget.map { translationInstaller($0).downloadBytes } ?? 0 }
+    public var translationModelBytes: Int64 { selectedInstaller?.downloadBytes ?? 0 }
     /// The language captions are translated into; nil when translation is off and needs no models.
-    public var translationTarget: CaptionTarget? { chosenTranslation() }
+    public var translationTarget: CaptionTarget? {
+        settings.settings.captionEngine == .apple ? nil : settings.settings.captionTranslation.target
+    }
+
+    private var selectedInstaller: (any ModelInstalling)? {
+        translationTarget.flatMap { translationInstaller(settings.settings.captionEngine, $0) }
+    }
+
+    private struct DownloadKey: Hashable {
+        let engine: CaptionEngine
+        // Hy-MT2 has one file for all languages; Firefox installs per target.
+        let target: CaptionTarget?
+    }
+    private var downloadKey: DownloadKey? {
+        translationTarget.map { DownloadKey(engine: settings.settings.captionEngine,
+                                           target: settings.settings.captionEngine == .hyMT2 ? nil : $0) }
+    }
+    @ObservationIgnored private var downloadTasks: [DownloadKey: Task<Void, Never>] = [:]
+    @ObservationIgnored private var downloadStates: [DownloadKey: ModelDownloadState] = [:]
+    @ObservationIgnored private var lastDownload: Task<Void, Never>?
     public func offlineModelBytes(_ model: OfflineModel) -> Int64 { offlineInstallers[model]?.downloadBytes ?? 0 }
 
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let installer: any ModelInstalling
     @ObservationIgnored private let offlineInstallers: [OfflineModel: any ModelInstalling]
-    @ObservationIgnored private let translationInstaller: @MainActor (CaptionTarget) -> any ModelInstalling
-    @ObservationIgnored private let chosenTranslation: @MainActor () -> CaptionTarget?
+    @ObservationIgnored private let translationInstaller: @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?
+    @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let runningBrowsers: @MainActor () -> [String]
     @ObservationIgnored private let checkSetup: @MainActor () -> [SetupIssue]
 
@@ -148,21 +170,25 @@ public final class SetupModel {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
-        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
+        translationInstaller: @escaping @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?,
         suitability: OfflineSuitability,
         credentials: any CredentialStoring,
         validator: any KeyValidating,
         settings: SettingsStore,
         runningBrowsers: @escaping @MainActor () -> [String],
+        prepareCoreML: @escaping @MainActor () async throws -> Void = {},
         checkSetup: @escaping @MainActor () -> [SetupIssue]
     ) {
+        self.settings = settings
         self.permissions = permissions
         self.installer = installer
-        self.offlineInstallers = offlineInstallers
+        let supportedSpeech = LocalSpeechModel.allCases.filter { $0.isSupported(on: settings.machine) }
+        let availableModels = Set(supportedSpeech.map(OfflineModel.init)).union([.llm])
+        self.offlineInstallers = offlineInstallers.filter { availableModels.contains($0.key) }
         self.translationInstaller = translationInstaller
-        chosenTranslation = { settings.settings.captionTranslation.target }
         self.suitability = suitability
         self.runningBrowsers = runningBrowsers
+        self.prepareCoreML = prepareCoreML
         self.checkSetup = checkSetup
         fields = [Credential.elevenLabsAPIKey, .geminiAPIKey, .selfHostedToken, .openAICompatibleAPIKey].map {
             CredentialField(credential: $0, store: credentials, validator: validator,
@@ -183,9 +209,15 @@ public final class SetupModel {
     public func refresh() {
         refreshPermissions()
         if case .downloading = models {} else { models = installer.isDownloaded ? .downloaded : .notDownloaded }
-        for model in OfflineModel.allCases {
+        for (model, installer) in offlineInstallers {
             if case .downloading = offlineModels[model] { continue }
-            offlineModels[model] = offlineInstallers[model]?.isDownloaded == true ? .downloaded : .notDownloaded
+            if installer.isDownloaded {
+                offlineModels[model] = .downloaded
+            } else if case .failed = offlineModels[model] {
+                continue
+            } else {
+                offlineModels[model] = .notDownloaded
+            }
         }
         refreshTranslation()
         issues = checkSetup()
@@ -239,10 +271,41 @@ public final class SetupModel {
         if installer.needsCompleting { await downloadModels() }
     }
 
+    public func fit(for model: OfflineModel) -> OfflineFit {
+        switch model {
+        case .whisperCPU: .suited
+        case .llm: suitability.llm
+        default: suitability.transcription
+        }
+    }
+
+    public var speechModelChoices: [LocalSpeechModel] {
+        let machine = settings.machine
+        let showsCPU = !machine.isAppleSilicon || machine.isTranslated
+            || settings.settings.localSpeechModel == .whisperCPU || settings.settings.localCaptionModel == .whisperCPU
+        return LocalSpeechModel.allCases.filter {
+            $0.isSupported(on: machine) && ($0 != .whisperCPU || showsCPU)
+        }
+    }
+
+    /// Each use keeps its selection; both selectors share the same installer.
+    @discardableResult
+    public func selectSpeechModel(_ choice: LocalSpeechModel, for field: WritableKeyPath<AppSettings, LocalSpeechModel?>) -> Task<Void, Never> {
+        guard choice.isSupported(on: settings.machine) else { return Task {} }
+        settings.chooseSpeechModel(choice, for: field)
+        recheck()
+        return Task { await downloadOfflineModel(OfflineModel(choice)) }
+    }
+
     /// Same as `downloadModels`, for one offline model; safe to call again after a failure, which resumes.
     public func downloadOfflineModel(_ model: OfflineModel) async {
         if case .downloading = offlineModels[model] { return }
         guard let installer = offlineInstallers[model] else { return }
+        if installer.isDownloaded {
+            offlineModels[model] = .downloaded
+            if model == .breezeCoreML { await prepareInstalledCoreML() }
+            return
+        }
         offlineModels[model] = .downloading(0)
         do {
             try await installer.download { [weak self] fraction in
@@ -251,40 +314,61 @@ public final class SetupModel {
                 }
             }
             offlineModels[model] = .downloaded
+            if model == .breezeCoreML { await prepareInstalledCoreML() }
         } catch {
             offlineModels[model] = .failed(String(describing: error))
         }
         issues = checkSetup()
     }
 
-    /// Re-reads whether the chosen target's models are on disk, unless a download is running.
-    public func refreshTranslation() {
-        if case .downloading = translationModels { return }
-        translationModels = translationTarget.map { translationInstaller($0).isDownloaded ? .downloaded : .notDownloaded }
-            ?? .notDownloaded
+    public func prepareInstalledCoreML() async {
+        guard !preparingCoreML else { return }
+        preparingCoreML = true
+        coreMLPreparationError = nil
+        defer { preparingCoreML = false }
+        do { try await prepareCoreML() }
+        catch { coreMLPreparationError = error.localizedDescription }
     }
 
-    /// Same as `downloadModels`, for the models of the chosen target language only; a retry resumes.
-    /// If the choice changes while it runs, the newly chosen language's models follow.
+    public func refreshTranslation() {
+        guard let key = downloadKey, let installer = selectedInstaller else {
+            translationModels = .notDownloaded
+            return
+        }
+        translationModels = installer.isDownloaded ? .downloaded : downloadStates[key] ?? .notDownloaded
+    }
+
     public func downloadTranslationModels() async {
-        if case .downloading = translationModels { return }
-        var fetched: Set<CaptionTarget> = []
-        while let target = translationTarget, !translationInstaller(target).isDownloaded, !fetched.contains(target) {
-            fetched.insert(target)
-            translationModels = .downloading(0)
+        guard let key = downloadKey, let installer = selectedInstaller else { return }
+        if let existing = downloadTasks[key] { await existing.value; return }
+        guard !installer.isDownloaded else { refreshTranslation(); return }
+        let predecessor = lastDownload
+        downloadStates[key] = .downloading(0)
+        refreshTranslation()
+        let task = Task { @MainActor in
+            // Firefox targets can share files, so avoid two writers to a partial download.
+            await predecessor?.value
             do {
-                try await translationInstaller(target).download { [weak self] fraction in
-                    Task { @MainActor in
-                        if case .downloading = self?.translationModels { self?.translationModels = .downloading(fraction) }
+                if !installer.isDownloaded {
+                    try await installer.download { [weak self] fraction in
+                        Task { @MainActor in
+                            guard let self, case .downloading = self.downloadStates[key] else { return }
+                            self.downloadStates[key] = .downloading(fraction)
+                            if self.downloadKey == key { self.translationModels = .downloading(fraction) }
+                        }
                     }
                 }
+                downloadStates[key] = nil
             } catch {
-                translationModels = .failed(String(describing: error))
-                return
+                downloadStates[key] = .failed(String(describing: error))
             }
-            translationModels = .notDownloaded
+            downloadTasks[key] = nil
+            if downloadTasks.isEmpty { lastDownload = nil }
+            refreshTranslation()
         }
-        refreshTranslation()
+        downloadTasks[key] = task
+        lastDownload = task
+        await task.value
     }
 
     /// Re-checks what processing still needs after the user changed keys or settings.

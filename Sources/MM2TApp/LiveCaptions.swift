@@ -54,6 +54,7 @@ public final class LiveCaptions {
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var partialStarted: Date?
+    @ObservationIgnored private var fixedTranslationSource: CaptionLanguage?
     @ObservationIgnored private var translation: LiveTranslation?
 
     public init(now: @escaping @Sendable () -> Date = Date.init) {
@@ -124,6 +125,7 @@ public final class LiveCaptions {
         isBarHidden = false
         translation?.stop()
         translation = nil
+        fixedTranslationSource = nil
         translationTarget = nil
         awaitingTranslation = []
         partialTranslation = nil
@@ -134,11 +136,12 @@ public final class LiveCaptions {
 
     /// Translates this recording's captions into `target` from here on. Called once per recording,
     /// after `clear()`; the translator, and the model it holds, goes with the next `clear()`.
-    func translate(with translator: any CaptionTranslator, to target: CaptionTarget,
+    func translate(with translator: any CaptionTranslator, to target: CaptionTarget, engine: CaptionEngine = .firefox, source: CaptionLanguage? = nil,
                    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         translation?.stop()
+        fixedTranslationSource = source
         translationTarget = target
-        translation = LiveTranslation(captions: self, translator: translator, target: target, now: now, sleep: sleep)
+        translation = LiveTranslation(captions: self, translator: translator, target: target, engine: engine, source: source, now: now, sleep: sleep)
     }
 
     /// The id the unfinished partial will have once it settles.
@@ -147,7 +150,7 @@ public final class LiveCaptions {
     /// The text needs translating: translation is on and it is in the other language.
     func needsTranslation(_ text: String) -> Bool {
         guard let target = translationTarget, let language = CaptionLanguage.of(text) else { return false }
-        return target.route(from: language) != .none
+        return target.route(from: fixedTranslationSource ?? language) != .none
     }
 
     /// The translation a surface shows for a finished segment: its own, or until that arrives the

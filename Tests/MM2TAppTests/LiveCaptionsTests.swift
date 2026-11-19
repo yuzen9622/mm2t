@@ -218,6 +218,7 @@ import Testing
     @Test func withNoTranscriptionSourceSetUpCaptionsOpenNothing() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.localCaptionModel = .breeze
         world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         try await Task.sleep(for: .milliseconds(20))
@@ -231,6 +232,7 @@ import Testing
     @Test func captionsFollowTheTranscriptionOrderStartingWithTheServer() async throws {
         let world = try World()
         world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.localCaptionModel = .breeze
         world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
         world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
         world.catalog.offlineDownloaded[.transcription]!.set(true)
@@ -245,6 +247,7 @@ import Testing
     @Test func anOfflineServerFallsToElevenLabsThenThisMac() async throws {
         let world = try World()
         world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.localCaptionModel = .breeze
         world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
         world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
         world.catalog.offlineDownloaded[.transcription]!.set(true)
@@ -259,6 +262,7 @@ import Testing
     @Test func withoutAnElevenLabsKeyCaptionsRunOnThisMac() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.localSpeechModel = .breeze
         world.app.settings.settings.transcriptionOrder = [.cloud, .local]
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))

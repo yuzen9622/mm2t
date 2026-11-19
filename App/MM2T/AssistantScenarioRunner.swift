@@ -15,9 +15,12 @@ enum AssistantScenarioRunner {
 
     static func fixtureDefaults() throws -> UserDefaults? {
         guard let root = fixtureRoot else { return nil }
-        let defaults = UserDefaults(suiteName: "mm2t-assistant-fixture-\(UUID().uuidString)")!
-        var settings = SettingsStore(defaults: .standard).settings
-        settings.hasCompletedOnboarding = true
+        let runID = UserDefaults.standard.string(forKey: "MM2TFixtureRunID").flatMap(UUID.init(uuidString:)) ?? UUID()
+        let defaults = UserDefaults(suiteName: "mm2t-assistant-fixture-\(runID.uuidString)")!
+        var settings = try UserDefaults.standard.data(forKey: SettingsStore.key).map {
+            try JSONDecoder().decode(AppSettings.self, from: $0)
+        } ?? AppSettings()
+        settings.hasCompletedOnboarding = !UserDefaults.standard.bool(forKey: "MM2TFixtureFirstRun")
         settings.hidesFromScreenCapture = false
         defaults.register(defaults: ["settings.v1": try JSONEncoder().encode(settings), "MM2TDataRoot": root.path])
         return defaults

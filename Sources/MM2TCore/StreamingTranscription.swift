@@ -36,6 +36,12 @@ public protocol StreamingTranscriptionSession: Sendable {
     /// Mono samples in -1...1 at the request's rate.
     func send(_ samples: [Float]) async throws
     func close() async
+    /// The consumer has cleared its display and will discard all remaining events.
+    func discard() async
+}
+
+public extension StreamingTranscriptionSession {
+    func discard() async { await close() }
 }
 
 /// Opens streaming sessions. Its text is for display only and never becomes the record.

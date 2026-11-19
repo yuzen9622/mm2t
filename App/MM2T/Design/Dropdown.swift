@@ -7,6 +7,12 @@ struct DropdownOption<ID: Hashable>: Identifiable {
     /// A flag or other emoji before the title; read by nobody, the title says it all.
     var leading: String?
     let title: String
+    var detail: String?
+
+    var trailing: String?
+
+    var selectedTitle: String { [title, detail].compactMap { $0 }.joined(separator: ", ") }
+    var accessibleTitle: String { [selectedTitle, trailing].compactMap { $0 }.joined(separator: ", ") }
 }
 
 /// A choice drawn in the window instead of a system menu: the selected option and a chevron,
@@ -17,6 +23,8 @@ struct Dropdown<ID: Hashable>: View {
     let label: LocalizedStringKey
     let options: [DropdownOption<ID>]
     @Binding var selection: ID
+    var placeholder = ""
+    var showsSelectedLeading = true
     @State private var id = UUID()
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
@@ -27,8 +35,11 @@ struct Dropdown<ID: Hashable>: View {
     var body: some View {
         Button { DropdownState.shared.open = isOpen ? nil : id } label: {
             HStack(spacing: 6) {
-                if let leading = selected?.leading { Text(verbatim: leading) }
-                Text(verbatim: selected?.title ?? "")
+                if showsSelectedLeading, let leading = selected?.leading { Text(verbatim: leading) }
+                Text(verbatim: selected?.title ?? placeholder)
+                if let detail = selected?.detail {
+                    Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary)
+                }
                 Icon("chevron-down", size: 12).foregroundStyle(Palette.secondary)
             }
             .font(Typo.body)
@@ -47,16 +58,16 @@ struct Dropdown<ID: Hashable>: View {
         .onHover { hovering = $0 && enabled }
         .motion(Motion.touch, value: hovering)
         .accessibilityLabel(label)
-        .accessibilityValue(Text(verbatim: selected?.title ?? ""))
+        .accessibilityValue(Text(verbatim: selected?.selectedTitle ?? placeholder))
         .anchorPreference(key: DropdownKey.self, value: .bounds) { anchor in
-            isOpen ? DropdownRequest(id: id, anchor: anchor, list: AnyView(list)) : nil
+            isOpen ? DropdownRequest(id: id, anchor: anchor, idealHeight: CGFloat(options.count * 30 + 12), list: { AnyView(list(maxHeight: $0)) }) : nil
         }
         .onDisappear { if isOpen { DropdownState.shared.open = nil } }
         .onChange(of: enabled) { if !enabled, isOpen { DropdownState.shared.open = nil } }
     }
 
-    private var list: some View {
-        DropdownList(options: options, selection: selection) { choice in
+    private func list(maxHeight: CGFloat) -> some View {
+        DropdownList(options: options, selection: selection, maxHeight: maxHeight) { choice in
             selection = choice
             DropdownState.shared.open = nil
         }
@@ -73,7 +84,8 @@ final class DropdownState {
 struct DropdownRequest {
     let id: UUID
     let anchor: Anchor<CGRect>
-    let list: AnyView
+    let idealHeight: CGFloat
+    let list: (CGFloat) -> AnyView
 }
 
 struct DropdownKey: PreferenceKey {
@@ -87,6 +99,7 @@ struct DropdownKey: PreferenceKey {
 private struct DropdownList<ID: Hashable>: View {
     let options: [DropdownOption<ID>]
     let selection: ID
+    let maxHeight: CGFloat
     let choose: (ID) -> Void
     @State private var highlight: ID?
     @FocusState private var focused: Bool
@@ -94,6 +107,37 @@ private struct DropdownList<ID: Hashable>: View {
     private var reservesLeading: Bool { options.contains { $0.leading != nil } }
 
     var body: some View {
+        ScrollViewReader { reader in
+            ScrollView {
+                rows
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(maxHeight, CGFloat(options.count * 30 + 12)))
+            .onChange(of: highlight) { if let highlight { reader.scrollTo(highlight) } }
+        }
+        .frame(minWidth: 180)
+        .fixedSize(horizontal: true, vertical: false)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Palette.shadow, radius: 32, y: 14)
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onAppear {
+            highlight = options.first { $0.id == selection }?.id ?? options.first?.id
+            focused = true
+        }
+        .onKeyPress(.upArrow) { move(-1) }
+        .onKeyPress(.downArrow) { move(1) }
+        .onKeyPress(.return) { chooseHighlight() }
+        .onKeyPress(.space) { chooseHighlight() }
+        .onKeyPress(.escape) {
+            DropdownState.shared.open = nil
+            return .handled
+        }
+    }
+
+    private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(options) { option in
                 Button { choose(option.id) } label: {
@@ -107,7 +151,14 @@ private struct DropdownList<ID: Hashable>: View {
                             Spacer().frame(width: 6)
                         }
                         Text(verbatim: option.title).foregroundStyle(Palette.text).lineLimit(1)
-                        Spacer(minLength: 0)
+                        if let detail = option.detail {
+                            Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary)
+                                .padding(.leading, 6)
+                        }
+                        Spacer(minLength: option.trailing == nil ? 0 : 12)
+                        if let trailing = option.trailing {
+                            Text(verbatim: trailing).font(Typo.caption).foregroundStyle(Palette.secondary)
+                        }
                     }
                     .font(Typo.body)
                     .padding(.horizontal, 10)
@@ -119,36 +170,18 @@ private struct DropdownList<ID: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
+                .id(option.id)
                 .onHover { if $0 { highlight = option.id } }
-                .accessibilityLabel(Text(verbatim: option.title))
+                .accessibilityLabel(Text(verbatim: option.accessibleTitle))
                 .accessibilityAddTraits(option.id == selection ? .isSelected : [])
             }
         }
         .padding(.vertical, 6)
-        .frame(minWidth: 180)
-        .fixedSize()
-        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Palette.shadow, radius: 32, y: 14)
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onAppear {
-            highlight = selection
-            focused = true
-        }
-        .onKeyPress(.upArrow) { move(-1) }
-        .onKeyPress(.downArrow) { move(1) }
-        .onKeyPress(.return) { chooseHighlight() }
-        .onKeyPress(.space) { chooseHighlight() }
-        .onKeyPress(.escape) {
-            DropdownState.shared.open = nil
-            return .handled
-        }
     }
 
     private func move(_ step: Int) -> KeyPress.Result {
         let ids = options.map(\.id)
+        guard !ids.isEmpty else { return .ignored }
         let index = highlight.flatMap(ids.firstIndex) ?? 0
         highlight = ids[min(max(index + step, 0), ids.count - 1)]
         return .handled
@@ -163,7 +196,6 @@ private struct DropdownList<ID: Hashable>: View {
 /// Draws the open dropdown of the views inside it, above all of them, and closes it on a click
 /// or scroll anywhere else. Apply at the root of a surface whose content is clipped or scrolls.
 private struct DropdownLayer: ViewModifier {
-    @State private var listHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     /// Kept between the list and the layer's edge.
@@ -188,11 +220,11 @@ private struct DropdownLayer: ViewModifier {
     private func list(_ request: DropdownRequest, rect: CGRect, bounds: CGSize) -> some View {
         // Its top-trailing corner 6 pt under the trigger's bottom-trailing one, or above the
         // trigger when there is no room below.
-        let upward = rect.maxY + 6 + listHeight > bounds.height - Self.margin
-            && rect.minY - 6 - listHeight >= Self.margin
+        let below = max(0, bounds.height - Self.margin - rect.maxY - 6)
+        let above = max(0, rect.minY - 6 - Self.margin)
+        let upward = request.idealHeight > below && above > below
         let anchor: UnitPoint = upward ? .bottomTrailing : .topTrailing
-        return request.list
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+        return request.list(upward ? above : below)
             .alignmentGuide(.leading) { d in d.width - rect.maxX }
             .alignmentGuide(.top) { d in upward ? d.height - (rect.minY - 6) : -(rect.maxY + 6) }
             .id(request.id)

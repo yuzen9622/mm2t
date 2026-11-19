@@ -50,6 +50,7 @@ struct OnboardingView: View {
         // The window takes its size from this view; it stays this size on every screen.
         .frame(width: 600, height: 580)
         .background(Palette.window)
+        .dropdownLayer()
         .onAppear { app.setup.refresh() }
         // The last screen's fields write settings; what is still missing follows them.
         .onChange(of: app.settings.settings) { app.setup.recheck() }
@@ -96,6 +97,8 @@ struct OnboardingView: View {
             // Under the buttons, inside the bottom margin.
             Group {
                 switch flow.note {
+                case .chooseSpeechModel:
+                    Text("Choose a transcription model to continue.")
                 case .needsMicrophone:
                     Text("Allow microphone access to continue.")
                 case .finishingDownloads(let fraction):
@@ -278,7 +281,12 @@ private struct StepPage: View {
             if step == .models || step == .voice {
                 Group {
                     switch step {
-                    case .models: Text("About \(Self.megabytes(app.onboarding.modelBytes)) MB in total.")
+                    case .models:
+                        if showsSpeechPicker {
+                            Text("Selecting a speech model downloads it to this Mac.")
+                        } else {
+                            Text("About \(Self.megabytes(app.onboarding.modelBytes)) MB in total.")
+                        }
                     default: Text("Read this aloud at your normal speaking voice.")
                     }
                 }
@@ -305,12 +313,24 @@ private struct StepPage: View {
         .onAppear { shown = true }
     }
 
+    private var showsSpeechPicker: Bool {
+        !app.settings.settings.hasCompletedOnboarding || app.settings.settings.transcriptionOrder.contains(.local)
+    }
+
     @ViewBuilder private var rows: some View {
         Group {
             switch step {
             case .usage: UsageRows(flow: app.onboarding)
             case .permissions: PermissionRows(setup: app.setup, asSetupRows: true)
-            case .models: ModelRows(setup: app.setup)
+            case .models:
+                if showsSpeechPicker {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SpeechModelPicker(store: app.settings, setup: app.setup)
+                    }
+                    .setupRow()
+                }
+                CaptionTranslationRow(app: app).setupRow()
+                ModelRows(setup: app.setup)
             case .voice: VoiceEnrollmentView(model: app.enrollment, models: app.setup.models)
             case .services: ServiceRows(app: app)
             }
@@ -410,14 +430,6 @@ private struct ModelRows: View {
             Task { await setup.downloadModels() }
         }
         .arrives(2)
-        // Only the chosen caption language's models; none while translation is off.
-        if setup.translationTarget != nil {
-            ModelRow(name: "Translation",
-                     state: setup.translationModels, failure: "Couldn't download the translation model.") {
-                Task { await setup.downloadTranslationModels() }
-            }
-            .arrives(3)
-        }
     }
 }
 
@@ -610,8 +622,13 @@ private struct ServiceRows: View {
                         LLMServerFields(store: app.settings, key: setup.field(.openAICompatibleAPIKey))
                         CredentialFieldView(field: setup.field(.openAICompatibleAPIKey), setup: setup)
                     }
-                case .offlineModel(let model):
-                    OfflineModelRow(model: model, setup: setup, flow: flow)
+                case .offlineModel(.llm):
+                    OfflineModelRow(model: .llm, setup: setup, flow: flow)
+                case .offlineModel, .speechModelPicker:
+                    ServiceRow(title: Text("On-device transcription")) {
+                        SpeechModelPicker(store: app.settings, setup: setup)
+                        PillButton("Turn Off") { flow.turnOff(.transcription) }
+                    }
                 case .transcriptionSource:
                     ServiceRow(title: Text("Transcription"), purpose: Text(Copy.issue(.noTranscriptionSource))) {
                         Group {
@@ -645,7 +662,7 @@ private struct OfflineModelRow: View {
     let flow: OnboardingFlow
 
     var body: some View {
-        ModelRow(name: model == .transcription ? "On-device transcription" : "On-device language model",
+        ModelRow(name: "On-device language model",
                  state: setup.offlineModels[model] ?? .notDownloaded, failure: nil, detail: detail,
                  offersDownload: true,
                  retry: { Task { await setup.downloadOfflineModel(model) } },
@@ -654,8 +671,7 @@ private struct OfflineModelRow: View {
 
     /// The size, or why this Mac is not suited, in the words Settings uses.
     private var detail: Text {
-        let fit = model == .transcription ? setup.suitability.transcription : setup.suitability.llm
-        if case .unsuited(let reason) = fit {
+        if case .unsuited(let reason) = setup.fit(for: model) {
             switch reason {
             case .intelProcessor: return Text("Not recommended on a Mac with an Intel processor.")
             case .memory(let minimumGB): return Text("Not recommended: needs at least \(minimumGB) GB of memory.")

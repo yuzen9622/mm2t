@@ -102,6 +102,20 @@
 		};
 /* End PBXGroup section */
 
+/* Begin PBXShellScriptBuildPhase section */
+        A10000000000000000000807 /* Embed Breeze MLX */ = {
+            isa = PBXShellScriptBuildPhase;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ("$(SRCROOT)/Tools/breeze-mlx/worker.py", "$(SRCROOT)/Tools/breeze-mlx/build.sh", "$(SRCROOT)/Tools/breeze-mlx/requirements.txt");
+            outputPaths = ("$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/BreezeMLX.app");
+            name = "Embed Breeze MLX";
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/bash;
+            shellScript = "\"$SRCROOT/Tools/breeze-mlx/build.sh\" \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/BreezeMLX.app\"";
+        };
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXNativeTarget section */
 		A10000000000000000000701 /* mm2t */ = {
 			isa = PBXNativeTarget;
@@ -111,6 +125,7 @@
 				A10000000000000000000501 /* Frameworks */,
 				A10000000000000000000802 /* Resources */,
 				A10000000000000000000805 /* Embed Foundation Extensions */,
+				A10000000000000000000807 /* Embed Breeze MLX */,
 			);
 			buildRules = (
 			);
@@ -277,6 +292,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Config/MM2T.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = MM2T;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
@@ -302,6 +318,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = Config/MM2T.entitlements;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = MM2T;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;

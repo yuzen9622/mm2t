@@ -39,7 +39,11 @@ import Testing
         flow.advance()
 
         #expect(flow.step == .models)
-        #expect(flow.canContinue, "the downloads carry on in the background")
+        #expect(!flow.advance())
+        #expect(flow.note == .chooseSpeechModel)
+        await world.app.setup.selectSpeechModel(.breeze, for: \.localSpeechModel).value
+        #expect(world.offlineInstallers[.transcription]!.downloads.get == 1)
+        #expect(flow.canContinue, "choosing the former default also starts its download")
         flow.advance()
 
         #expect(flow.step == .voice)
@@ -58,6 +62,39 @@ import Testing
         await flow.startDownloads()
         #expect(flow.canContinue)
         #expect(flow.step == .services)
+    }
+
+    @Test func independentSelectionsDownloadSharedWeightsOnlyOnce() async throws {
+        let world = try firstRun()
+        let setup = world.app.setup
+        let installer = try #require(world.offlineInstallers[.parakeet])
+        let gate = Gate<Bool>()
+        installer.hold.set(gate)
+        let first = setup.selectSpeechModel(.parakeet, for: \.localSpeechModel)
+        #expect(world.app.settings.settings.effectiveCaptionModel == .parakeet)
+        #expect(await eventually { setup.offlineModels[.parakeet] == .downloading(0.5) })
+        await setup.selectSpeechModel(.parakeet, for: \.localCaptionModel).value
+        await gate.open(true)
+        await first.value
+        await setup.selectSpeechModel(.parakeet, for: \.localSpeechModel).value
+        #expect(installer.downloads.get == 1)
+        await setup.selectSpeechModel(.nemotron, for: \.localCaptionModel).value
+        let saved = SettingsStore(defaults: world.defaults).settings
+        #expect(saved.hasChosenSpeechModel)
+        #expect(saved.localSpeechModel == .parakeet && saved.localCaptionModel == .nemotron)
+        #expect(world.offlineInstallers[.nemotron]?.downloads.get == 1)
+        await setup.selectSpeechModel(.parakeet, for: \.localCaptionModel).value
+        await setup.selectSpeechModel(.nemotron, for: \.localSpeechModel).value
+        let reopened = SettingsStore(defaults: world.defaults).settings
+        #expect(reopened.localCaptionModel == nil && reopened.effectiveCaptionModel == .nemotron)
+    }
+
+    @Test func oldModelSettingsKeepTheirChoiceAndFreshSettingsStillNeedOneAfterReload() throws {
+        let old = Data(#"{"localSpeechModel":"parakeet"}"#.utf8)
+        let saved = try JSONDecoder().decode(AppSettings.self, from: old)
+        #expect(saved.hasChosenSpeechModel && saved.localSpeechModel == .parakeet && saved.effectiveCaptionModel == .parakeet)
+        let fresh = try JSONEncoder().encode(AppSettings())
+        #expect(try !JSONDecoder().decode(AppSettings.self, from: fresh).hasChosenSpeechModel)
     }
 
     @Test func backReversesTheTravelAndForwardRestoresIt() throws {
@@ -152,6 +189,7 @@ import Testing
         #expect(store.settings.transcriptionOrder == [.selfHosted, .cloud], "choosing what is set changes nothing")
         #expect(flow.services == [.transcriptionServer, .elevenLabs, .gemini])
 
+        store.settings.localSpeechModel = .breeze
         store.settings.transcriptionOrder = [.local]
         store.settings.llmLocation = .local
         world.app.setup.recheck()
@@ -164,12 +202,12 @@ import Testing
     /// Every issue there is, so that a new one cannot be left without a row.
     private static var everyIssue: [SetupIssue] {
         let issues: [SetupIssue] = Credential.allCases.map { .missingCredential($0) }
-            + [.missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource, .diarizationModelsMissing]
+            + [.speechModelNotSelected, .missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource, .diarizationModelsMissing]
             + OfflineModel.allCases.map { .offlineModelMissing($0) }
         // Fails to compile when SetupIssue gains a case, until it is added above.
         for issue in issues {
             switch issue {
-            case .missingCredential, .missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource,
+            case .speechModelNotSelected, .missingCredential, .missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource,
                  .diarizationModelsMissing, .offlineModelMissing: break
             }
         }
@@ -209,6 +247,7 @@ import Testing
         world.catalog.translationDownloaded.set(true)
         try await enrollVoice(world)
         world.app.settings.settings.hasCompletedOnboarding = true
+        world.app.settings.settings.localSpeechModel = .breeze
         change(&world.app.settings.settings)
         world.app.setup.refresh()
         world.app.onboarding.reopen()
@@ -236,6 +275,8 @@ import Testing
 
         await gate.open(false)
         await download.value
+        setup.refresh()
+        if case .failed = setup.offlineModels[.transcription] {} else { Issue.record("Failed download must remain retryable") }
         #expect(flow.note == .issue(.offlineModelMissing(.transcription)), "Retry is in the row")
 
         world.offlineInstallers[.transcription]!.hold.set(nil)
@@ -290,6 +331,11 @@ import Testing
         check()
         flow.advance()
         check()
+        #expect(flow.note == .chooseSpeechModel)
+        await world.app.setup.selectSpeechModel(.breeze, for: \.localCaptionModel).value
+        #expect(!flow.canContinue)
+        await world.app.setup.selectSpeechModel(.breeze, for: \.localSpeechModel).value
+        flow.advance()
         #expect(flow.note == .needsVoice)
         try await enrollVoice(world)
         check()

@@ -104,7 +104,7 @@ public final class AppController {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
-        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
+        translationInstaller: @escaping @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?,
         machine: MachineProfile = .current,
         validator: any KeyValidating,
         calendars: [any CalendarSource] = [],
@@ -120,7 +120,7 @@ public final class AppController {
         assistantConversations = AssistantConversations(directory: paths.assistantConversations)
         assistantPreferences = AssistantPreferences(file: paths.assistantPreferences)
         self.recordingTitle = recordingTitle
-        let settings = SettingsStore(defaults: defaults)
+        let settings = SettingsStore(defaults: defaults, machine: machine, installedMLX: offlineInstallers[.transcription]?.isDownloaded)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
         let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
@@ -154,9 +154,21 @@ public final class AppController {
             rules: { settings.settings.detectionRules },
             saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
-                // Only with hosted speech recognition and the on-device speaker model: an on-device
-                // speech model would compete with the meeting for the machine.
                 let current = settings.settings
+                let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
+                let mic = directory.appending(path: RecordingManifest.micFile)
+                let remote = directory.appending(path: RecordingManifest.remoteFile)
+                if current.transcriptionOrder.first == .local, let choice = current.localSpeechModel, choice.isBreeze {
+                    guard let breeze = catalog.localTranscription(model: choice, language: current.transcriptionLanguage) else { return nil }
+                    let names = await voiceprints.spokenNames()
+                    return LiveTranscriber(mic: mic, remote: remote, chain: TranscriptionChain([.init(.local, breeze)]),
+                        hints: names + current.vocabulary.filter { !names.contains($0) }, scratch: scratch,
+                        pieceSeconds: LiveTranscriber.breezePieceSeconds, configurationIsCurrent: {
+                            let latest = settings.settings
+                            return latest.transcriptionOrder == current.transcriptionOrder && latest.localSpeechModel == current.localSpeechModel
+                                && latest.transcriptionLanguage == current.transcriptionLanguage && latest.vocabulary == current.vocabulary
+                        })
+                }
                 guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
                       let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
                 let pipeline: MeetingProcessingPipeline
@@ -174,7 +186,6 @@ public final class AppController {
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
                     settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
-                let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let processing: LiveRecordingProcessor?
                 if current.llmLocation == .cloud, let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
                    let session = try? await factory.makeStreamingSession() {
@@ -184,8 +195,7 @@ public final class AppController {
                 let names = await voiceprints.spokenNames()
                 guard configurationIsCurrent(), !Task.isCancelled else { await processing?.discard(); return nil }
                 return LiveTranscriber(
-                    mic: directory.appending(path: RecordingManifest.micFile),
-                    remote: directory.appending(path: RecordingManifest.remoteFile),
+                    mic: mic, remote: remote,
                     chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
@@ -194,8 +204,10 @@ public final class AppController {
                 let current = settings.settings
                 guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
-                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator(for: target) {
-                    captions.translate(with: translator, to: target)
+                let source = current.captionEngine == .apple ? current.transcriptionLanguage.fixedCaptionSource : nil
+                if let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
+                    guard !Task.isCancelled else { return nil }
+                    captions.translate(with: translator, to: target, engine: current.captionEngine, source: source)
                 }
                 let names = await voiceprints.spokenNames()
                 return CaptionStream(
@@ -203,24 +215,30 @@ public final class AppController {
                     languageCode: current.transcriptionLanguage.code,
                     hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
             },
-            onRecorded: { id, live in
-                let prepared = live?.processing
-                if let live, let meeting = try? await library.meeting(id),
-                   let transcription = await live.finish(
-                       mic: await library.audioURL(meeting, track: .me), remote: await library.audioURL(meeting, track: .remote)) {
+            enqueueRecording: { id, live in
+                guard let live else { return queue.enqueue(.process, on: id) }
+                let prepared = live.processing
+                return queue.enqueue(.process, on: id, using: prepared?.pipeline, finalize: {
+                    guard let meeting = try? await library.meeting(id),
+                          let transcription = await live.finish(mic: library.audioURL(meeting, track: .me),
+                                                                remote: library.audioURL(meeting, track: .remote)),
+                          !Task.isCancelled else { return }
                     if (try? await prepared?.attach(transcription, to: id)) != true {
                         _ = try? await library.attach(transcription, to: id)
                     }
-                }
-                let reusable = await live?.isConfigurationCurrent() == true
-                await queue.run(.process, on: id, using: reusable ? prepared?.pipeline : nil,
-                                whileValid: { await live?.isConfigurationCurrent() == true })
+                }, whileValid: { await live.isConfigurationCurrent() })
             })
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
             translationInstaller: translationInstaller,
             suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
             settings: settings, runningBrowsers: runningBrowsers,
+            prepareCoreML: {
+                guard let engine = catalog.localTranscription(model: .breezeCoreML, language: .auto) as? any ClipTranscriber else {
+                    throw ProviderError(.localTranscription, .modelUnavailable)
+                }
+                try await engine.prepare()
+            },
             checkSetup: {
                 switch (try? pipelineSetup.build(settings.settings)) {
                 case .needsSetup(let issues): issues
@@ -264,23 +282,30 @@ public final class AppController {
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
         signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil, recordingTitle: String = "Recording",
         recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions(),
-        shareWidget: Bool = true
+        shareWidget: Bool = true, machine: MachineProfile = .current
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
         let info = { (key: String) in OAuthClientID.resolve(Bundle.main.object(forInfoDictionaryKey: key)) }
         let models = DiarizationModels(directory: paths.models)
-        let transcription = LocalTranscriptionModel.breeze(in: paths.models)
+        let transcription = LocalTranscriptionModel.breezeMLX(in: paths.models)
         let llm = LocalLLMModel.qwen35(in: paths.models)
         let translation = TranslationModels.mozilla(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
             catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm,
-                                         translationModels: translation),
+                                         translationModels: translation, machine: machine),
             recorder: recorder, permissions: permissions,
-            installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
-            translationInstaller: { translation.for($0) },
-            validator: LiveKeyValidator(),
+            installer: models, offlineInstallers: [.whisperCPU: LocalSpeechModel.whisperCPU.snapshot(in: paths.models), .transcription: transcription.snapshot, .breezeCoreML: LocalSpeechModel.breezeCoreML.snapshot(in: paths.models), .llm: llm.snapshot,
+                .parakeet: LocalSpeechModel.parakeet.snapshot(in: paths.models), .nemotron: LocalSpeechModel.nemotron.snapshot(in: paths.models)],
+            translationInstaller: { engine, target in
+                switch engine {
+                case .firefox: translation.for(target)
+                case .hyMT2: HyTranslationModels(in: paths.models)
+                case .apple: nil // System-owned; prepared with the system consent sheet.
+                }
+            },
+            machine: machine, validator: LiveKeyValidator(),
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
                 OnlineCalendar.google(clientID: info("MM2TGoogleClientID"), credentials: credentials),
@@ -295,8 +320,26 @@ public final class AppController {
             recordingTitle: recordingTitle)
     }
 
+    public var shouldPrepareBreeze: Bool {
+        let selected = settings.settings
+        return selected.transcriptionOrder.first == .local
+            && (selected.localSpeechModel == .breeze || (selected.liveCaptions && selected.effectiveCaptionModel == .breeze))
+            && setup.offlineModels[.transcription] == .downloaded
+    }
+
+    public func preparePreferredBreeze() async {
+        guard shouldPrepareBreeze, let breeze = pipelineSetup.catalog.localTranscription(model: .breeze,
+            language: settings.settings.transcriptionLanguage) as? any ClipTranscriber else { return }
+        try? await breeze.prepare()
+    }
+
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
+        Task(priority: .utility) {
+            if settings.settings.localSpeechModel == .breezeCoreML, settings.settings.transcriptionOrder.contains(.local),
+               setup.offlineModels[.breezeCoreML] == .downloaded { await setup.prepareInstalledCoreML() }
+            await preparePreferredBreeze()
+        }
         // Indexing reads every meeting; the rest of launch does not wait for it.
         Task { [searchSync] in await searchSync.start() }
         let scanner = RecordingRecoveryScanner(recordingsDirectory: paths.recordings, library: library)
@@ -326,10 +369,23 @@ public final class AppController {
 
     /// Live caption translation: the models the chosen language needs download when it is first
     /// chosen; other languages' models stay on disk. It applies from the next recording.
+    public func setCaptionEngine(_ engine: CaptionEngine) async {
+        if engine == .apple, #unavailable(macOS 26) { return }
+        guard settings.settings.captionEngine != engine else { return }
+        var current = settings.settings
+        current.captionEngine = engine
+        if let target = current.captionTranslation.target,
+           (engine == .firefox && !CaptionTarget.all.contains(target)) || (engine == .hyMT2 && !CaptionTarget.hyTargets.contains(target)) {
+            current.captionTranslation = .off
+        }
+        settings.settings = current
+        setup.refreshTranslation()
+    }
+
     public func setCaptionTranslation(_ choice: CaptionTranslation) async {
         settings.settings.captionTranslation = choice
         setup.refreshTranslation()
-        guard choice != .off else { return }
+        guard choice != .off, settings.settings.captionEngine == .firefox else { return }
         switch setup.translationModels {
         case .notDownloaded, .failed: await setup.downloadTranslationModels()
         case .downloading, .downloaded: break

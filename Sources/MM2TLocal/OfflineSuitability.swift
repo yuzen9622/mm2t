@@ -3,19 +3,24 @@ import Foundation
 /// The facts about this Mac that decide whether the on-device models run well on it.
 public struct MachineProfile: Equatable, Sendable {
     public let isAppleSilicon: Bool
+    public let isTranslated: Bool
     public let memoryBytes: UInt64
 
-    public init(isAppleSilicon: Bool, memoryBytes: UInt64) {
+    public init(isAppleSilicon: Bool, memoryBytes: UInt64, isTranslated: Bool = false) {
         self.isAppleSilicon = isAppleSilicon
+        self.isTranslated = isTranslated
         self.memoryBytes = memoryBytes
     }
 
     public static var current: MachineProfile {
-        var arm64: Int32 = 0
+        #if arch(arm64)
+        return MachineProfile(isAppleSilicon: true, memoryBytes: ProcessInfo.processInfo.physicalMemory)
+        #else
+        var translated: Int32 = 0
         var size = MemoryLayout<Int32>.size
-        // Reports 1 on Apple Silicon even when this process runs under Rosetta.
-        let found = sysctlbyname("hw.optional.arm64", &arm64, &size, nil, 0) == 0
-        return MachineProfile(isAppleSilicon: found && arm64 == 1, memoryBytes: ProcessInfo.processInfo.physicalMemory)
+        let rosetta = sysctlbyname("sysctl.proc_translated", &translated, &size, nil, 0) == 0 && translated == 1
+        return MachineProfile(isAppleSilicon: rosetta, memoryBytes: ProcessInfo.processInfo.physicalMemory, isTranslated: rosetta)
+        #endif
     }
 }
 
@@ -36,9 +41,6 @@ public struct OfflineSuitability: Equatable, Sendable {
     public let transcription: OfflineFit
     public let llm: OfflineFit
 
-    /// Measured on an M4 with 32 GB: Breeze-ASR-25 at 4 bits peaks near 1.2 GB resident while
-    /// transcribing, so 8 GB is enough. The 9B LLM peaks near 7 GB, which a 16 GB Mac absorbs beside
-    /// the system and an 8 GB one answers by swapping.
     public init(_ machine: MachineProfile) {
         guard machine.isAppleSilicon else {
             transcription = .unsuited(.intelProcessor)

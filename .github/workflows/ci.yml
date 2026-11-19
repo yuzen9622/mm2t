@@ -56,6 +56,8 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+      - name: Install the MLX helper build tool
+        run: command -v uv >/dev/null || brew install uv
       - name: Build the app (ad-hoc signed)
         run: |
           xcodebuild build \

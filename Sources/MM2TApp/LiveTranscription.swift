@@ -1,4 +1,5 @@
 import Foundation
+import MM2TLocal
 import MM2TCore
 import MM2TSystem
 import OSLog
@@ -14,11 +15,17 @@ public actor LiveTranscriber {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Transcription")
     /// Length of a piece. Shorter means less left at the end and more requests.
     public static let pieceSeconds: TimeInterval = 30
+    static let breezePieceSeconds: TimeInterval = 4
+    /// Breeze decodes a Whisper window of up to 30 s. Catch up using full windows and
+    /// finish a short backlog in one pass. At the live edge, keep the final tail short.
+    static func breezeWindow(remaining: TimeInterval, finishing: Bool) -> TimeInterval {
+        if finishing || remaining >= 30 { return 30 }
+        return remaining >= 12 ? 10 : breezePieceSeconds
+    }
     /// How far back from a piece's end to look for a quiet place to cut.
     static let searchSeconds: TimeInterval = 10
 
-    /// Uses only the hosted routes before the first on-device route. Local-first stays offline
-    /// while recording; a local fallback remains available to the full pipeline after stopping.
+    /// Hosted recording stops at the first local preference. Local-first Breeze has its own recording path.
     static func recordingChain(_ chain: TranscriptionChain) -> TranscriptionChain? {
         let hosted = Array(chain.routes.prefix { $0.source != .local })
         return hosted.isEmpty ? nil : TranscriptionChain(hosted)
@@ -65,6 +72,8 @@ public actor LiveTranscriber {
 
     /// Transcribes every whole piece the recording has grown past. Call it now and then while recording;
     /// a call made while an earlier one is still working waits for it rather than starting a second.
+    var pollingInterval: Duration { chain.routes.first?.source == .local ? .milliseconds(200) : .seconds(2) }
+
     public func advance() async {
         guard !isFinishing, await isConfigurationCurrent() else { return }
         if let retryAfter, now() < retryAfter { return }
@@ -78,7 +87,9 @@ public actor LiveTranscriber {
     public func prepareForMove() async {
         isFinishing = true
         await processing?.stopCheckpoints()
-        await working?.value
+        // MLX has already copied both WAV slices into memory before it waits for its helper.
+        // The finalizer can join that work after the recorder publishes the durable audio.
+        if !(chain.routes.first?.provider is BreezeMLX && processing == nil) { await working?.value }
     }
 
     /// Transcribes what is left once the recorder has closed the files, which by then have moved to
@@ -86,18 +97,22 @@ public actor LiveTranscriber {
     public func finish(mic: URL, remote: URL) async -> Transcription? {
         let started = ContinuousClock.now
         await prepareForMove()
+        let active = working
+        await withTaskCancellationHandler {
+            await active?.value
+        } onCancel: { active?.cancel() }
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        guard !Task.isCancelled else { await processing?.discard(); return nil }
         self.mic = mic
         self.remote = remote
         guard await isConfigurationCurrent() else {
-            try? FileManager.default.removeItem(at: scratch)
             return nil
         }
         // A temporary network failure leaves `cut` at the last fully successful pair of tracks.
         // Retry that piece rather than sending the whole meeting again.
         failed = false
-        defer { try? FileManager.default.removeItem(at: scratch) }
         await run { await self.transcribePieces(final: true) }
-        guard await isConfigurationCurrent() else { return nil }
+        guard !Task.isCancelled, await isConfigurationCurrent() else { await processing?.discard(); return nil }
         await processing?.finish()
         guard await isConfigurationCurrent() else { return nil }
         // Nothing heard at all is more likely this class judging quiet speech silent than a meeting
@@ -141,36 +156,47 @@ public actor LiveTranscriber {
             await work()
         }
         working = task
-        await task.value
+        if isFinishing {
+            await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        } else {
+            await task.value
+        }
     }
 
     private func transcribePieces(final: Bool) async {
-        while !failed, final || !isFinishing {
+        while !Task.isCancelled, !failed, final || !isFinishing {
             guard await isConfigurationCurrent() else { failed = true; return }
+            guard final || !isFinishing else { return }
             do {
                 let available = min(try WAVFormat.frameCount(mic), try WAVFormat.frameCount(remote))
                 let rate = try WAVFormat.read(mic, frames: 0..<1).sampleRate
-                let piece = max(1, Int(pieceSeconds * Double(rate)))
-                let search = min(piece, Int(Self.searchSeconds * Double(rate)))
+                let remaining = Double(available - cut) / Double(rate)
+                let mlx = chain.routes.first?.provider is BreezeMLX
+                let seconds = mlx ? 30 : chain.routes.first?.source == .local
+                    ? Self.breezeWindow(remaining: remaining, finishing: final) : pieceSeconds
+                let piece = max(1, Int(seconds * Double(rate)))
+                let search = min(piece / 2, Int(Self.searchSeconds * Double(rate)))
                 var end = available
                 if !final || available - cut > piece {
                     guard available - cut >= piece else { return }
                     // End the piece where both tracks are quietest, so no word is cut in half.
-                    let from = cut + piece - search
-                    let tail = (try WAVFormat.read(mic, frames: from..<cut + piece), try WAVFormat.read(remote, frames: from..<cut + piece))
-                    end = from + QuietCut.index(mic: tail.0.samples, remote: tail.1.samples, window: rate * 3 / 10)
-                    // Keep profile frames on one global timeline. Otherwise each piece's
-                    // partial 50 ms tail adds another frame and accumulated echo stats drift.
-                    let grid = max(1, Int(EchoCanceller.profileFrame * Double(rate)))
-                    end = max((cut / grid + 1) * grid, ((end + grid / 2) / grid) * grid)
-                    guard end <= available else { return }
+                    if mlx {
+                        end = cut + piece
+                    } else {
+                        let from = cut + piece - search
+                        let tail = (try WAVFormat.read(mic, frames: from..<cut + piece), try WAVFormat.read(remote, frames: from..<cut + piece))
+                        end = from + QuietCut.index(mic: tail.0.samples, remote: tail.1.samples, window: rate * 3 / 10)
+                        // Keep profile frames on one global timeline. Otherwise each piece's
+                        // partial 50 ms tail adds another frame and accumulated echo stats drift.
+                        let grid = max(1, Int(EchoCanceller.profileFrame * Double(rate)))
+                        end = max((cut / grid + 1) * grid, ((end + grid / 2) / grid) * grid)
+                        guard end <= available else { return }
+                    }
                 }
                 guard end > cut else { return }
                 let range = cut..<end
                 let started = ContinuousClock.now
-                async let mine = transcribe(.me, mic, range, rate, echoOf: remote)
-                async let theirs = transcribe(.remote, remote, range, rate)
-                let (a, b) = try await (mine, theirs)
+                let (a, b) = try await transcribePair(range, rate: rate)
                 guard await isConfigurationCurrent() else { failed = true; return }
                 for (track, result) in [(Track.me, a), (.remote, b)] {
                     words[track]! += result.words
@@ -182,9 +208,9 @@ public actor LiveTranscriber {
                 consecutiveFailures = 0
                 retryAfter = nil
                 Self.logger.info("event=live_piece elapsed_seconds=\(Self.seconds(since: started), privacy: .public) audio_seconds=\(Double(range.count) / Double(rate), privacy: .public)")
-                if !final, await isConfigurationCurrent(), !isFinishing, let transcript = currentTranscription,
+                if let processing, !final, await isConfigurationCurrent(), !isFinishing, let transcript = currentTranscription,
                    let manifest = try? RecordingManifest.read(from: mic.deletingLastPathComponent()) {
-                    await processing?.checkpoint(transcript, manifest: manifest)
+                    await processing.checkpoint(transcript, manifest: manifest)
                 }
                 if final, end == available { return }
             } catch {
@@ -200,6 +226,32 @@ public actor LiveTranscriber {
     private static func seconds(since start: ContinuousClock.Instant) -> Double {
         let elapsed = start.duration(to: .now).components
         return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+    }
+
+    private typealias Piece = (words: [TimedWord], source: TranscriptionSource?)
+
+    private func transcribePair(_ range: Range<Int>, rate: Int) async throws -> (Piece, Piece) {
+        guard rate == 16_000, chain.routes.count == 1, chain.routes[0].source == .local,
+              let breeze = chain.routes[0].provider as? any TrackTranscriber else {
+            async let mine = transcribe(.me, mic, range, rate, echoOf: remote)
+            async let theirs = transcribe(.remote, remote, range, rate)
+            return try await (mine, theirs)
+        }
+        let mine = try WAVFormat.read(mic, frames: range).samples
+        let theirs = try WAVFormat.read(remote, frames: range).samples
+        let cleaned = QuietCut.isSilent(mine) ? nil : EchoCanceller.clean(mic: mine, remote: theirs, sampleRate: rate)
+        let channels = [cleaned?.samples ?? mine, theirs]
+        let active = channels.indices.filter { !QuietCut.isSilent(channels[$0]) }
+        let pcm = active.map { channels[$0].map { Float($0) / 32768 } }
+        let results = try await breeze.transcribeTracks(pcm, hints: hints)
+        var pieces = [Piece](repeating: ([], nil), count: 2)
+        let offset = Double(range.lowerBound) / Double(rate)
+        for (channel, words) in zip(active, results) {
+            pieces[channel] = (words.filter { channel != 0 || cleaned?.echo.isEcho($0.range) != true }.map {
+                TimedWord(text: $0.text, range: TimeRange(start: $0.range.start + offset, end: $0.range.end + offset))
+            }, .local)
+        }
+        return (pieces[0], pieces[1])
     }
 
     /// The words of one piece of one track, timed from the start of the recording. The mic's piece
