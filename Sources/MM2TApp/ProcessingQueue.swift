@@ -87,11 +87,39 @@ public final class ProcessingQueue {
     /// Returns when this job (and every job queued before it) has finished.
     public func run(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline? = nil,
                     whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) async {
-        guard !isBusy(id) else { return }
-        jobs[id] = .queued
+        await enqueue(operation, on: id, using: prepared, whileValid: whileValid)?.value
+    }
+
+    /// Claims the meeting synchronously, before capture exposes its ID to the views.
+    /// Recording finalization can make its transcript readable while another meeting runs.
+    func enqueue(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline? = nil,
+                 finalize: (@MainActor @Sendable () async -> Void)? = nil,
+                 whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) -> Task<Void, Never>? {
+        guard !isBusy(id) else { return nil }
+        jobs[id] = finalize == nil ? .queued : .running(.transcribe)
+        revision += 1
         let previous = tail
         let token = UUID()
         let task = Task { @MainActor in
+            defer {
+                if self.tasks[id]?.token == token {
+                    self.tasks[id] = nil
+                    if Task.isCancelled, self.jobs[id]?.isActive == true { self.jobs[id] = nil }
+                    self.revision += 1
+                }
+            }
+            if let finalize {
+                await finalize()
+                if Task.isCancelled {
+                    if self.tasks[id]?.token == token {
+                        self.tasks[id] = nil
+                        self.jobs[id] = nil
+                    }
+                } else {
+                    self.jobs[id] = .queued
+                }
+                self.revision += 1
+            }
             await previous?.value
             guard !Task.isCancelled else { return }
             let current = await whileValid()
@@ -100,12 +128,7 @@ public final class ProcessingQueue {
         }
         tasks[id] = (token, task)
         tail = task
-        await task.value
-        // A newer job for this meeting may have started after this one was cancelled; it is not ours to clear.
-        guard tasks[id]?.token == token else { return }
-        tasks[id] = nil
-        if task.isCancelled, jobs[id]?.isActive == true { jobs[id] = nil }
-        revision += 1
+        return task
     }
 
     /// Stops a queued or running job. The meeting keeps its audio and every finished step, and

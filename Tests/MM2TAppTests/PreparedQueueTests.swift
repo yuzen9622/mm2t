@@ -4,6 +4,31 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct PreparedQueueTests {
+    @Test func finalizationOwnsTheMeetingUntilItCanBeRetried() async throws {
+        let world = try World()
+        let id = try await world.recordedMeeting(title: "To retry").id
+        let other = try await world.recordedMeeting(title: "Prior job").id
+        let priorGate = Gate<Bool>()
+        let gate = Gate<Bool>()
+        let queue = ProcessingQueue(makePipeline: { .needsSetup([]) }, makeLLM: { .needsSetup([]) })
+        let priorJob = queue.enqueue(.process, on: other, finalize: { _ = await priorGate.wait() })
+        let prior = try #require(priorJob)
+        let firstJob = queue.enqueue(.process, on: id, finalize: { _ = await gate.wait() })
+        let first = try #require(firstJob)
+        #expect(queue.jobs[id] == .running(.transcribe))
+        #expect(queue.enqueue(.process, on: id) == nil)
+        queue.cancel(id)
+        await gate.open(true)
+        #expect(await eventually { !queue.isBusy(id) })
+        let retry = try #require(queue.enqueue(.process, on: id))
+        #expect(queue.jobs[id] == .queued)
+        await priorGate.open(true)
+        await prior.value
+        await first.value
+        await retry.value
+        #expect(queue.jobs[id] == .needsSetup([]))
+    }
+
     @Test func queuedPreparationIsRevalidatedBeforeSelectingItsProvider() async throws {
         let world = try World()
         let first = try await world.recordedMeeting(title: "First")

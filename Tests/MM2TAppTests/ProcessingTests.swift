@@ -50,11 +50,19 @@ import Testing
         #expect(try issues { _ in }.isEmpty)
         #expect(try issues { $0.transcriptionOrder = [.selfHosted, .cloud] } == [.missingSelfHostedURL])
         #expect(try issues { $0.transcriptionOrder = [] } == [.noTranscriptionSource])
-        #expect(try issues { $0.transcriptionOrder = [.cloud, .local] } == [.offlineModelMissing(.transcription)])
+        #expect(try issues { $0.transcriptionOrder = [.cloud, .local] } == [.speechModelNotSelected])
+        #expect(try issues {
+            $0.localSpeechModel = .breeze
+            $0.transcriptionOrder = [.cloud, .local]
+        } == [.offlineModelMissing(.transcription)])
         #expect(try issues { $0.llmLocation = .local } == [.offlineModelMissing(.llm)])
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.catalog.offlineDownloaded[.llm]!.set(true)
-        #expect(try issues { $0.transcriptionOrder = [.cloud, .local]; $0.llmLocation = .local }.isEmpty)
+        #expect(try issues {
+            $0.localSpeechModel = .breeze
+            $0.transcriptionOrder = [.cloud, .local]
+            $0.llmLocation = .local
+        }.isEmpty)
 
         world.catalog.modelsDownloaded.set(false)
         #expect(try issues { _ in } == [.diarizationModelsMissing])
@@ -94,6 +102,7 @@ import Testing
     @Test func aLocalSpeechFallbackDoesNotSerializeTheCloudLLM() async throws {
         let world = try World()
         world.catalog.offlineDownloaded[.transcription]!.set(true)
+        world.app.settings.settings.localSpeechModel = .breeze
         world.app.settings.settings.transcriptionOrder = [.cloud, .local]
         let gate = Gate<Bool>()
         world.catalog.llm.holds.update { $0["inferNames"] = gate }
@@ -183,6 +192,7 @@ import Testing
             ([.local], .local, false, false),
         ] {
             var settings = AppSettings()
+            settings.localSpeechModel = .breeze
             settings.transcriptionOrder = speech
             settings.llmLocation = llm
             guard case .ready(let pipeline) = try setup.build(settings) else {

@@ -1,6 +1,7 @@
 import Foundation
 import MM2TCore
 import MM2TProviders
+import MM2TLocal
 import MM2TSystem
 
 /// Something the user has to configure before a meeting can be processed. The UI routes each
@@ -10,6 +11,7 @@ public enum SetupIssue: Hashable, Sendable {
     case missingSelfHostedURL
     /// The OpenAI-compatible large language model server needs a base URL and a model name.
     case missingLLMEndpoint
+    case speechModelNotSelected
     case noTranscriptionSource
     case diarizationModelsMissing
     case offlineModelMissing(OfflineModel)
@@ -18,7 +20,17 @@ public enum SetupIssue: Hashable, Sendable {
 /// The on-device models behind the two offline switches, each downloaded separately.
 public enum OfflineModel: String, Hashable, Sendable, CaseIterable {
     case transcription
-    case llm
+    case llm, parakeet, nemotron, breezeCoreML, whisperCPU
+
+    public init(_ speech: LocalSpeechModel) {
+        switch speech {
+        case .whisperCPU: self = .whisperCPU
+        case .breezeCoreML: self = .breezeCoreML
+        case .breeze: self = .transcription
+        case .parakeet: self = .parakeet
+        case .nemotron: self = .nemotron
+        }
+    }
 }
 
 public protocol CredentialStoring: Sendable {
@@ -47,17 +59,17 @@ public protocol ProviderCatalog: Sendable {
     func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider
     func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider
     /// nil until the model is on disk.
-    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)?
+    func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)?
     func llm(apiKey: Secret) -> any LLMProvider
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
     func localSpeakerModels() -> LocalSpeakerModels?
     /// nil until the model is on disk.
-    func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)?
+    func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)?
     /// nil until the model is on disk.
     func localLLM() -> (any LLMProvider)?
     /// Live caption translation into `target` on this Mac; nil until the models it needs are on disk.
-    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)?
+    func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) async -> (any CaptionTranslator)?
     var thresholds: MatchThresholds { get }
 }
 
@@ -104,10 +116,14 @@ public struct PipelineSetup: Sendable {
                     issues.append(.missingSelfHostedURL)
                 }
             case .local:
-                if let local = catalog.localTranscription(language: settings.transcriptionLanguage) {
+                guard let choice = settings.localSpeechModel else {
+                    issues.append(.speechModelNotSelected)
+                    continue
+                }
+                if let local = catalog.localTranscription(model: choice, language: settings.transcriptionLanguage) {
                     routes.append(.init(.local, local))
                 } else {
-                    issues.append(.offlineModelMissing(.transcription))
+                    issues.append(.offlineModelMissing(OfflineModel(choice)))
                 }
             }
         }
@@ -149,7 +165,11 @@ public struct PipelineSetup: Sendable {
                     routes.append(.init(.selfHosted, catalog.selfHostedStreamingTranscription(url: url, token: token)))
                 }
             case .local:
-                if let local = catalog.localStreamingTranscription() { routes.append(.init(.local, local)) }
+                let alongsideBreeze = settings.transcriptionOrder.first == .local && settings.localSpeechModel?.isBreeze == true
+                if let choice = settings.effectiveCaptionModel,
+                   let local = catalog.localStreamingTranscription(model: choice, alongsideBreeze: alongsideBreeze) {
+                    routes.append(.init(.local, local))
+                }
             }
         }
         return routes.isEmpty ? nil : StreamingTranscriptionChain(routes)

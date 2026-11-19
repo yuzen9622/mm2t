@@ -108,8 +108,6 @@ public final class CaptureController {
     public static let dismissalCooldown: TimeInterval = 120
     /// How long the capsule counts down after a meeting ends before the recording stops; zero stops at once.
     public static let endCountdown = Duration.seconds(5)
-    /// How often a recording in progress is checked for a new piece to transcribe.
-    static let liveInterval = Duration.seconds(2)
 
     public private(set) var state: CaptureState = .idle
     public let meters = RecordingMeters()
@@ -121,7 +119,7 @@ public final class CaptureController {
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let recordingsDirectory: URL
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let onRecorded: @MainActor (MeetingID, LiveTranscriber?) async -> Void
+    @ObservationIgnored private let enqueueRecording: @MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?
     @ObservationIgnored private let makeLive: @MainActor (URL) async -> LiveTranscriber?
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
@@ -152,7 +150,8 @@ public final class CaptureController {
         appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
         makeCaptions: @escaping @MainActor (LiveCaptions) async -> CaptionStream? = { _ in nil },
-        onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
+        enqueueRecording: (@MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?)? = nil,
+        onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void = { _, _ in }
     ) {
         self.rules = rules
         self.saveRules = saveRules
@@ -165,7 +164,7 @@ public final class CaptureController {
         self.library = library
         self.recordingsDirectory = recordingsDirectory
         self.now = now
-        self.onRecorded = onRecorded
+        self.enqueueRecording = enqueueRecording ?? { id, live in Task { await onRecorded(id, live) } }
     }
 
     // MARK: Detection
@@ -322,8 +321,9 @@ public final class CaptureController {
             liveTask = Task { [weak self] in
                 guard let live = await self?.makeLive(configuration.directory), !Task.isCancelled else { return }
                 self?.live = live
+                let interval = await live.pollingInterval
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: Self.liveInterval)
+                    try? await Task.sleep(for: interval)
                     if !Task.isCancelled { await live.advance() }
                 }
             }
@@ -415,6 +415,8 @@ public final class CaptureController {
         meters.highlightCount += 1
     }
 
+    public private(set) var lastSavedMeeting: MeetingID?
+
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
         guard state.isCapturing, let target = state.target, let session else { return }
@@ -440,8 +442,10 @@ public final class CaptureController {
             state = .failed(.saveFailed(String(describing: error)))
             return
         }
+        let job = enqueueRecording(id, live)
+        lastSavedMeeting = id
         state = .idle
-        await onRecorded(id, live)
+        await job?.value
         let elapsed = started.duration(to: .now).components
         let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         Self.logger.info("event=stop_to_processing_return elapsed_seconds=\(seconds, privacy: .public) live_enabled=\(live != nil, privacy: .public)")
