@@ -34,6 +34,11 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     public internal(set) var attribution: SpeakerAttribution?
     public internal(set) var transcription: Transcription?
     public internal(set) var utterances: [Utterance] = []
+
+    public var rawTrackPreview: [Utterance] {
+        guard utterances.isEmpty, let step = status.resumeStep, step <= .align else { return [] }
+        return transcription?.trackPreview(duration: metadata.duration) ?? []
+    }
     public internal(set) var suggestions = NameSuggestions()
     public internal(set) var outputs = LLMOutputs()
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
@@ -171,6 +176,12 @@ public struct SpeakerSegment: Codable, Hashable, Sendable {
 public struct Transcription: Codable, Hashable, Sendable {
     public let me: TrackTranscript
     public let remote: TrackTranscript
+    /// Temporary display grouped by audio track until speaker attribution is available.
+    public func trackPreview(duration: TimeInterval) -> [Utterance] {
+        let remoteTrack = SpeakerSegment(speaker: .remote(1), range: TimeRange(start: 0, end: duration))
+        return Alignment.utterances(me: me.words, remote: remote.words, segments: [remoteTrack], overlaps: [])
+    }
+
     public init(me: TrackTranscript, remote: TrackTranscript) {
         self.me = me
         self.remote = remote

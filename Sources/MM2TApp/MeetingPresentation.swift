@@ -6,6 +6,8 @@ import MM2TCore
 public struct PresentationLabels: Sendable {
     public var me: String
     public var viewTitle: @Sendable (TranscriptView) -> String
+    public var microphone = "Microphone"
+    public var remoteAudio = "Remote audio"
     public var overlapping: String
     public var notGenerated: String
     public var stale: String
@@ -17,9 +19,12 @@ public struct PresentationLabels: Sendable {
     public init(
         me: String, viewTitle: @escaping @Sendable (TranscriptView) -> String, overlapping: String,
         notGenerated: String, stale: String, decisions: String, discussionPoints: String,
-        actionItems: String, owner: @escaping @Sendable (String) -> String
+        actionItems: String, owner: @escaping @Sendable (String) -> String,
+        microphone: String = "Microphone", remoteAudio: String = "Remote audio"
     ) {
         self.me = me
+        self.microphone = microphone
+        self.remoteAudio = remoteAudio
         self.viewTitle = viewTitle
         self.overlapping = overlapping
         self.notGenerated = notGenerated
@@ -83,7 +88,10 @@ public struct MeetingPresentation: Sendable {
     public let names: [PersonID: String]
     public let labels: PresentationLabels
 
-    public init(meeting: Meeting, names: [PersonID: String], labels: PresentationLabels) {
+    private let trackPreview: [Utterance]
+
+    public init(meeting: Meeting, names: [PersonID: String], labels: PresentationLabels, trackPreview: [Utterance]? = nil) {
+        self.trackPreview = trackPreview ?? meeting.rawTrackPreview
         self.meeting = meeting
         self.names = names
         self.labels = labels
@@ -96,7 +104,14 @@ public struct MeetingPresentation: Sendable {
     }
 
     public var raw: [UtteranceRow] {
-        meeting.utterances.map {
+        if !trackPreview.isEmpty {
+            return trackPreview.map {
+                UtteranceRow(id: UtteranceID("track-" + $0.id.rawValue), start: $0.range.start, end: $0.range.end,
+                             speaker: $0.speaker, speakerName: $0.speaker == .me ? labels.microphone : labels.remoteAudio,
+                             text: $0.text, isOverlapping: false, isHighlighted: false, words: $0.words)
+            }
+        }
+        return meeting.utterances.map {
             UtteranceRow(id: $0.id, start: $0.range.start, end: $0.range.end, speaker: meeting.resolve($0.speaker),
                          speakerName: speakerName($0.speaker), text: $0.text,
                          isOverlapping: $0.isOverlapping, isHighlighted: meeting.isHighlighted($0), words: $0.words)

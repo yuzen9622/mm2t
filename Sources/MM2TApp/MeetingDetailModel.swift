@@ -37,6 +37,7 @@ public final class MeetingDetailModel {
     public var selectedView: TranscriptView = .raw
     /// The utterance a jump landed on, for the transcript to scroll to and mark.
     public private(set) var focusedUtterance: UtteranceID?
+    public private(set) var trackPreview: [Utterance] = []
     public private(set) var meeting: Meeting?
     public private(set) var names: [PersonID: String] = [:]
     public private(set) var people: [Person] = []
@@ -72,6 +73,10 @@ public final class MeetingDetailModel {
     public func load(at utterance: UtteranceID? = nil) async {
         do {
             let meeting = try await library.meeting(id)
+            if self.meeting?.status != meeting.status || self.meeting?.transcription != meeting.transcription
+                || self.meeting?.utterances.isEmpty != meeting.utterances.isEmpty || self.meeting?.metadata.duration != meeting.metadata.duration {
+                trackPreview = meeting.rawTrackPreview
+            }
             self.meeting = meeting
             names = await voiceprints.names()
             people = await voiceprints.allPersons().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -91,7 +96,7 @@ public final class MeetingDetailModel {
     }
 
     public var presentation: MeetingPresentation? {
-        meeting.map { MeetingPresentation(meeting: $0, names: names, labels: labels) }
+        meeting.map { MeetingPresentation(meeting: $0, names: names, labels: labels, trackPreview: trackPreview) }
     }
 
     public var job: JobState? { queue.jobs[id] }
@@ -282,6 +287,11 @@ public final class MeetingDetailModel {
     /// SubRip text; nil for the views that are not a timed transcript.
     public func subtitles(_ view: TranscriptView) -> String? {
         guard let meeting, let presentation else { return nil }
+        if view == .raw {
+            return Subtitles.srt(lines: presentation.raw.map {
+                (TimeRange(start: $0.start, end: $0.end), $0.speakerName, $0.text)
+            })
+        }
         return Subtitles.srt(meeting, view: view, name: presentation.speakerName)
     }
 

@@ -26,8 +26,12 @@ public enum Subtitles {
         case .perPerson, .summary:
             return nil
         }
+        return srt(lines: lines.map { ($0.0, name($0.1), $0.2) })
+    }
+
+    public static func srt(lines: [(TimeRange, String, String)]) -> String {
         let cues = lines.flatMap { range, speaker, text in
-            Self.cues(text, in: range).map { Cue(range: $0.range, text: "\(name(speaker)): \($0.text)") }
+            Self.cues(text, in: range).map { Cue(range: $0.range, text: "\(speaker): \($0.text)") }
         }
         return cues.enumerated().map { index, cue in
             "\(index + 1)\n\(timestamp(cue.range.start)) --> \(timestamp(cue.range.end))\n\(cue.text)\n"

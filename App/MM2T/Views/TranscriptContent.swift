@@ -88,7 +88,7 @@ struct TranscriptContent: View {
                      state: state,
                      playhead: playhead,
                      isFocused: raw && model.focusedUtterance?.rawValue == line.id,
-                     canEdit: model.canEditSpeakers,
+                     canEdit: model.canEditSpeakers && model.trackPreview.isEmpty,
                      play: {
                          followPaused = false
                          if raw, let row = presentation.raw.first(where: { $0.id.rawValue == line.id }) {

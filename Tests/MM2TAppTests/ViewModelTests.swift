@@ -45,6 +45,26 @@ import Testing
 }
 
 @MainActor @Suite struct MeetingDetailTests {
+    @Test func transcriptCanBeReadBeforeSpeakerSeparation() async throws {
+        let world = try World(keys: false)
+        let meeting = try await world.recordedMeeting()
+        let mic = TrackTranscript(source: .local, content: .unlabeled([TimedWord("好", 1, 2)]))
+        let remote = TrackTranscript(source: .local, content: .unlabeled([TimedWord("Hello", 0, 1)]))
+        try await world.library.attach(.init(me: mic, remote: remote), to: meeting.id)
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        #expect(detail.trackPreview.map(\.text) == ["Hello", "好"])
+        for format in [ExportFormat.plainText, .markdown] {
+            let exported = try #require(detail.export(.raw, as: format))
+            #expect(exported.contains("Hello") && exported.contains("好"))
+        }
+        let subtitles = try #require(detail.subtitles(.raw))
+        #expect(subtitles.contains("00:00:00,000 --> 00:00:01,000"))
+        #expect(subtitles.contains("Hello") && subtitles.contains("好"))
+        #expect(detail.trackPreview.last?.speaker == .me)
+        #expect(detail.meeting?.utterances.isEmpty == true)
+    }
+
     @Test func listRowsPreviewTheSummaryAndWhoSpoke() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()
