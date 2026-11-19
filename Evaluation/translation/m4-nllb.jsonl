@@ -1,0 +1,138 @@
+{"case": 1, "round": 0, "request_ms": 2503.75, "output": "If a single login fails, please use a backup account.", "ms": 377.312}
+{"case": 2, "round": 0, "request_ms": 1254.95, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 1254.819}
+{"case": 3, "round": 0, "request_ms": 484.5, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 484.406}
+{"case": 4, "round": 0, "request_ms": 512.38, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 512.232}
+{"case": 5, "round": 0, "request_ms": 483.05, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 482.929}
+{"case": 6, "round": 0, "request_ms": 622.81, "output": "Please don't try again when API 403 is backed up.", "ms": 622.696}
+{"case": 7, "round": 0, "request_ms": 373.05, "output": "If you don't get it tomorrow morning", "ms": 372.938}
+{"case": 8, "round": 0, "request_ms": 761.37, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 761.266}
+{"case": 9, "round": 0, "request_ms": 433.38, "output": "The first batch was 15 units, not 50.", "ms": 433.256}
+{"case": 10, "round": 0, "request_ms": 728.15, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 728.051}
+{"case": 11, "round": 0, "request_ms": 504.45, "output": "但保持警報啟動.", "ms": 504.348}
+{"case": 12, "round": 0, "request_ms": 647.8, "output": "請將截止日期從3月14日移至3月24日.", "ms": 647.696}
+{"case": 13, "round": 0, "request_ms": 453.14, "output": "單次登記是客人必須選擇的,", "ms": 453.031}
+{"case": 14, "round": 0, "request_ms": 356.57, "output": "而不是2%的錯誤率下降.", "ms": 356.447}
+{"case": 15, "round": 0, "request_ms": 250.07, "output": "如果補充再次失敗,", "ms": 249.946}
+{"case": 16, "round": 0, "request_ms": 465.54, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 465.428}
+{"case": 17, "round": 0, "request_ms": 598.09, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 597.968}
+{"case": 18, "round": 0, "request_ms": 519.85, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 519.713}
+{"case": 19, "round": 0, "request_ms": 464.38, "output": "発送量は80台から18台に増加しました.", "ms": 464.252}
+{"case": 20, "round": 0, "request_ms": 325.75, "output": "請重新啟動試驗環境,", "ms": 325.644}
+{"case": 21, "round": 0, "request_ms": 379.26, "output": "如果我們在星期五之前沒有收到預算,", "ms": 379.164}
+{"case": 22, "round": 0, "request_ms": 489.21, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 489.096}
+{"case": 23, "round": 0, "request_ms": 580.71, "output": "我們將日期從星期一推移到星期五.", "ms": 580.581}
+{"case": 6, "round": 1, "request_ms": 810.41, "output": "Please don't try again when API 403 is backed up.", "ms": 810.168}
+{"case": 7, "round": 1, "request_ms": 500.03, "output": "If you don't get it tomorrow morning", "ms": 499.888}
+{"case": 8, "round": 1, "request_ms": 911.94, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 911.781}
+{"case": 9, "round": 1, "request_ms": 439.66, "output": "The first batch was 15 units, not 50.", "ms": 439.573}
+{"case": 10, "round": 1, "request_ms": 902.33, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 902.23}
+{"case": 11, "round": 1, "request_ms": 524.36, "output": "但保持警報啟動.", "ms": 524.24}
+{"case": 12, "round": 1, "request_ms": 660.43, "output": "請將截止日期從3月14日移至3月24日.", "ms": 660.301}
+{"case": 13, "round": 1, "request_ms": 498.0, "output": "單次登記是客人必須選擇的,", "ms": 497.779}
+{"case": 14, "round": 1, "request_ms": 508.24, "output": "而不是2%的錯誤率下降.", "ms": 507.962}
+{"case": 15, "round": 1, "request_ms": 425.01, "output": "如果補充再次失敗,", "ms": 424.869}
+{"case": 16, "round": 1, "request_ms": 648.37, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 648.267}
+{"case": 17, "round": 1, "request_ms": 944.71, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 944.529}
+{"case": 18, "round": 1, "request_ms": 1266.18, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 1266.019}
+{"case": 19, "round": 1, "request_ms": 2335.48, "output": "発送量は80台から18台に増加しました.", "ms": 2334.667}
+{"case": 20, "round": 1, "request_ms": 1979.83, "output": "請重新啟動試驗環境,", "ms": 1978.973}
+{"case": 21, "round": 1, "request_ms": 978.82, "output": "如果我們在星期五之前沒有收到預算,", "ms": 976.955}
+{"case": 22, "round": 1, "request_ms": 1836.42, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 1836.232}
+{"case": 23, "round": 1, "request_ms": 899.52, "output": "我們將日期從星期一推移到星期五.", "ms": 899.355}
+{"case": 1, "round": 1, "request_ms": 1131.53, "output": "If a single login fails, please use a backup account.", "ms": 1131.364}
+{"case": 2, "round": 1, "request_ms": 4008.4, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 4008.165}
+{"case": 3, "round": 1, "request_ms": 1330.83, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 1330.625}
+{"case": 4, "round": 1, "request_ms": 1894.89, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 1894.71}
+{"case": 5, "round": 1, "request_ms": 2349.6, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 2349.291}
+{"case": 11, "round": 2, "request_ms": 826.08, "output": "但保持警報啟動.", "ms": 825.74}
+{"case": 12, "round": 2, "request_ms": 936.36, "output": "請將截止日期從3月14日移至3月24日.", "ms": 936.182}
+{"case": 13, "round": 2, "request_ms": 727.43, "output": "單次登記是客人必須選擇的,", "ms": 727.265}
+{"case": 14, "round": 2, "request_ms": 558.2, "output": "而不是2%的錯誤率下降.", "ms": 558.057}
+{"case": 15, "round": 2, "request_ms": 410.63, "output": "如果補充再次失敗,", "ms": 410.415}
+{"case": 16, "round": 2, "request_ms": 815.4, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 815.224}
+{"case": 17, "round": 2, "request_ms": 1373.66, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 1373.467}
+{"case": 18, "round": 2, "request_ms": 977.19, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 977.03}
+{"case": 19, "round": 2, "request_ms": 776.91, "output": "発送量は80台から18台に増加しました.", "ms": 776.754}
+{"case": 20, "round": 2, "request_ms": 430.94, "output": "請重新啟動試驗環境,", "ms": 430.795}
+{"case": 21, "round": 2, "request_ms": 660.64, "output": "如果我們在星期五之前沒有收到預算,", "ms": 660.507}
+{"case": 22, "round": 2, "request_ms": 794.04, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 793.885}
+{"case": 23, "round": 2, "request_ms": 603.77, "output": "我們將日期從星期一推移到星期五.", "ms": 603.621}
+{"case": 1, "round": 2, "request_ms": 695.41, "output": "If a single login fails, please use a backup account.", "ms": 695.28}
+{"case": 2, "round": 2, "request_ms": 2063.81, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 2063.666}
+{"case": 3, "round": 2, "request_ms": 675.65, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 675.517}
+{"case": 4, "round": 2, "request_ms": 728.73, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 728.568}
+{"case": 5, "round": 2, "request_ms": 615.58, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 615.446}
+{"case": 6, "round": 2, "request_ms": 604.38, "output": "Please don't try again when API 403 is backed up.", "ms": 604.28}
+{"case": 7, "round": 2, "request_ms": 481.52, "output": "If you don't get it tomorrow morning", "ms": 481.396}
+{"case": 8, "round": 2, "request_ms": 830.62, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 830.495}
+{"case": 9, "round": 2, "request_ms": 485.74, "output": "The first batch was 15 units, not 50.", "ms": 485.6}
+{"case": 10, "round": 2, "request_ms": 853.62, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 853.478}
+{"case": 16, "round": 3, "request_ms": 465.79, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 465.669}
+{"case": 17, "round": 3, "request_ms": 656.25, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 656.113}
+{"case": 18, "round": 3, "request_ms": 749.28, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 749.121}
+{"case": 19, "round": 3, "request_ms": 550.95, "output": "発送量は80台から18台に増加しました.", "ms": 550.808}
+{"case": 20, "round": 3, "request_ms": 586.81, "output": "請重新啟動試驗環境,", "ms": 586.672}
+{"case": 21, "round": 3, "request_ms": 541.56, "output": "如果我們在星期五之前沒有收到預算,", "ms": 541.434}
+{"case": 22, "round": 3, "request_ms": 749.19, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 749.062}
+{"case": 23, "round": 3, "request_ms": 600.35, "output": "我們將日期從星期一推移到星期五.", "ms": 600.255}
+{"case": 1, "round": 3, "request_ms": 604.65, "output": "If a single login fails, please use a backup account.", "ms": 604.54}
+{"case": 2, "round": 3, "request_ms": 2045.47, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 2045.262}
+{"case": 3, "round": 3, "request_ms": 711.26, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 711.112}
+{"case": 4, "round": 3, "request_ms": 884.33, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 884.19}
+{"case": 5, "round": 3, "request_ms": 829.0, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 828.866}
+{"case": 6, "round": 3, "request_ms": 696.32, "output": "Please don't try again when API 403 is backed up.", "ms": 696.192}
+{"case": 7, "round": 3, "request_ms": 446.23, "output": "If you don't get it tomorrow morning", "ms": 446.092}
+{"case": 8, "round": 3, "request_ms": 877.15, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 877.004}
+{"case": 9, "round": 3, "request_ms": 612.2, "output": "The first batch was 15 units, not 50.", "ms": 612.073}
+{"case": 10, "round": 3, "request_ms": 993.15, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 993.025}
+{"case": 11, "round": 3, "request_ms": 623.92, "output": "但保持警報啟動.", "ms": 623.781}
+{"case": 12, "round": 3, "request_ms": 916.51, "output": "請將截止日期從3月14日移至3月24日.", "ms": 916.321}
+{"case": 13, "round": 3, "request_ms": 593.77, "output": "單次登記是客人必須選擇的,", "ms": 593.617}
+{"case": 14, "round": 3, "request_ms": 435.1, "output": "而不是2%的錯誤率下降.", "ms": 434.962}
+{"case": 15, "round": 3, "request_ms": 534.62, "output": "如果補充再次失敗,", "ms": 534.476}
+{"case": 21, "round": 4, "request_ms": 1082.55, "output": "如果我們在星期五之前沒有收到預算,", "ms": 1082.388}
+{"case": 22, "round": 4, "request_ms": 1339.28, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 1339.103}
+{"case": 23, "round": 4, "request_ms": 1089.16, "output": "我們將日期從星期一推移到星期五.", "ms": 1088.992}
+{"case": 1, "round": 4, "request_ms": 697.32, "output": "If a single login fails, please use a backup account.", "ms": 697.187}
+{"case": 2, "round": 4, "request_ms": 2562.34, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 2562.154}
+{"case": 3, "round": 4, "request_ms": 938.28, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 937.986}
+{"case": 4, "round": 4, "request_ms": 990.0, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 989.822}
+{"case": 5, "round": 4, "request_ms": 911.05, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 910.869}
+{"case": 6, "round": 4, "request_ms": 1519.89, "output": "Please don't try again when API 403 is backed up.", "ms": 1519.729}
+{"case": 7, "round": 4, "request_ms": 836.25, "output": "If you don't get it tomorrow morning", "ms": 836.062}
+{"case": 8, "round": 4, "request_ms": 1084.69, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 1084.515}
+{"case": 9, "round": 4, "request_ms": 1033.45, "output": "The first batch was 15 units, not 50.", "ms": 1033.226}
+{"case": 10, "round": 4, "request_ms": 1120.38, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 1120.207}
+{"case": 11, "round": 4, "request_ms": 1393.59, "output": "但保持警報啟動.", "ms": 1393.386}
+{"case": 12, "round": 4, "request_ms": 1243.2, "output": "請將截止日期從3月14日移至3月24日.", "ms": 1243.021}
+{"case": 13, "round": 4, "request_ms": 656.77, "output": "單次登記是客人必須選擇的,", "ms": 656.586}
+{"case": 14, "round": 4, "request_ms": 519.99, "output": "而不是2%的錯誤率下降.", "ms": 519.74}
+{"case": 15, "round": 4, "request_ms": 540.8, "output": "如果補充再次失敗,", "ms": 540.626}
+{"case": 16, "round": 4, "request_ms": 803.0, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 802.823}
+{"case": 17, "round": 4, "request_ms": 1026.53, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 1026.338}
+{"case": 18, "round": 4, "request_ms": 901.05, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 900.869}
+{"case": 19, "round": 4, "request_ms": 813.26, "output": "発送量は80台から18台に増加しました.", "ms": 813.071}
+{"case": 20, "round": 4, "request_ms": 701.35, "output": "請重新啟動試驗環境,", "ms": 701.16}
+{"case": 3, "round": 5, "request_ms": 627.2, "output": "We need to reduce the 95% delay to less than 200 milliseconds.", "ms": 627.046}
+{"case": 4, "round": 5, "request_ms": 629.64, "output": "It's not Wednesday, it's Thursday at 3:30 p.m.", "ms": 629.486}
+{"case": 5, "round": 5, "request_ms": 637.87, "output": "The test environment can be restarted, but the formal environment is not.", "ms": 637.742}
+{"case": 6, "round": 5, "request_ms": 578.55, "output": "Please don't try again when API 403 is backed up.", "ms": 578.423}
+{"case": 7, "round": 5, "request_ms": 442.03, "output": "If you don't get it tomorrow morning", "ms": 441.885}
+{"case": 8, "round": 5, "request_ms": 779.84, "output": "If you don't get your tickets in the morning, don't book them first.", "ms": 779.695}
+{"case": 9, "round": 5, "request_ms": 506.02, "output": "The first batch was 15 units, not 50.", "ms": 505.904}
+{"case": 10, "round": 5, "request_ms": 877.69, "output": "Today, we don't talk about the price, but first see who is responsible for the testing.", "ms": 877.582}
+{"case": 11, "round": 5, "request_ms": 550.91, "output": "但保持警報啟動.", "ms": 550.771}
+{"case": 12, "round": 5, "request_ms": 724.18, "output": "請將截止日期從3月14日移至3月24日.", "ms": 724.039}
+{"case": 13, "round": 5, "request_ms": 490.7, "output": "單次登記是客人必須選擇的,", "ms": 490.582}
+{"case": 14, "round": 5, "request_ms": 424.76, "output": "而不是2%的錯誤率下降.", "ms": 424.632}
+{"case": 15, "round": 5, "request_ms": 266.24, "output": "如果補充再次失敗,", "ms": 266.095}
+{"case": 16, "round": 5, "request_ms": 511.88, "output": "如果備份再次失敗, 不要删除原始文件.", "ms": 511.759}
+{"case": 17, "round": 5, "request_ms": 743.79, "output": "会議は火曜日の朝から金曜日の午後に変更され,キャンセルされないようにしてください.", "ms": 743.644}
+{"case": 18, "round": 5, "request_ms": 543.55, "output": "テスト環境では2つの要素の検証が可能です.", "ms": 543.416}
+{"case": 19, "round": 5, "request_ms": 523.22, "output": "発送量は80台から18台に増加しました.", "ms": 523.088}
+{"case": 20, "round": 5, "request_ms": 378.83, "output": "請重新啟動試驗環境,", "ms": 378.685}
+{"case": 21, "round": 5, "request_ms": 492.76, "output": "如果我們在星期五之前沒有收到預算,", "ms": 492.628}
+{"case": 22, "round": 5, "request_ms": 607.58, "output": "Nevymažte zálohy a uchovejte je na 30 dní.", "ms": 607.47}
+{"case": 23, "round": 5, "request_ms": 510.45, "output": "我們將日期從星期一推移到星期五.", "ms": 510.287}
+{"case": 1, "round": 5, "request_ms": 504.39, "output": "If a single login fails, please use a backup account.", "ms": 504.258}
+{"case": 2, "round": 5, "request_ms": 2002.69, "output": "This is the first time that a user has been able to get a copy of a new account, and the last time that they have been able to get a copy of a new account, they have been able to get a copy of it.", "ms": 2002.568}
