@@ -205,9 +205,12 @@ public struct MeetingProcessingPipeline: Sendable {
         switch step {
         case .inferNames: meeting.suggestions = done.suggestions
         case .cleanTranscript: meeting.outputs.cleaned = done.outputs.cleaned
-        case .digestPerPerson: meeting.outputs.digests = done.outputs.digests
+        case .digestPerPerson:
+            meeting.outputs.digests = done.outputs.digests
+            meeting.perPersonMarkdown = nil
         case .summarize:
             meeting.outputs.summary = done.outputs.summary
+            meeting.summaryMarkdown = nil
             meeting.outputs.isStale = done.outputs.isStale
             meeting.metadata.title = done.metadata.title
         case .transcribe, .diarize, .matchVoiceprints, .align:

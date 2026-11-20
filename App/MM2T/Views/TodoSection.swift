@@ -10,13 +10,7 @@ struct TodoSection: View {
     let model: MeetingDetailModel
 
     var highlight: String? = nil
-    private var visible: [SourcedRow] {
-        func marked(_ row: SourcedRow, _ mark: TodoStatus.Mark) -> Bool {
-            guard let key = model.markKey(row) else { return false }
-            return model.todos?.marks[key]?.contains(mark) == true
-        }
-        return rows.filter { !marked($0, .deleted) }.sorted { marked($0, .pinned) && !marked($1, .pinned) }
-    }
+    private var visible: [SourcedRow] { model.visibleActionItems(rows) }
     private var access: RemindersAccess? { model.remindersAccess }
     private var unlinked: [SourcedRow] { visible.filter { !model.isInReminders($0) } }
 
@@ -60,7 +54,6 @@ struct TodoSection: View {
                 } else { content }
             }
         }
-        .card()
     }
 }
 
@@ -111,11 +104,7 @@ private struct TodoRowView: View {
                 }
             }
             if let jump = row.jump {
-                Button { model.jump(to: jump) } label: {
-                    Text(MeetingPresentation.timestamp(jump.time)).font(Typo.caption).monospacedDigit()
-                        .foregroundStyle(Palette.secondary)
-                }
-                .buttonStyle(.plain)
+                IconButton("Show in transcript", icon: "file-text") { model.jump(to: jump) }
             }
         }
         .onHover { hovering = $0 }

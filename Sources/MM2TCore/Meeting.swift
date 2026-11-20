@@ -45,6 +45,14 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
         guard let translation, translation.source == outputs.cleaned else { return nil }
         return translation
     }
+    /// User-authored Markdown. Meetings without edits render from their structured outputs.
+    public internal(set) var summaryMarkdown: String?
+    public internal(set) var perPersonMarkdown: String?
+
+    public func editedMarkdown(_ kind: MeetingDocumentKind) -> String? {
+        kind == .summary ? summaryMarkdown : perPersonMarkdown
+    }
+
     public internal(set) var outputs = LLMOutputs()
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
 

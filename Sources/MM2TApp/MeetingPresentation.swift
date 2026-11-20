@@ -185,7 +185,43 @@ public struct MeetingPresentation: Sendable {
 
     // MARK: Export
 
+    /// The same editable source feeds the document page, Markdown download and Word layout.
+    public func documentMarkdown(_ kind: MeetingDocumentKind, actionItems: [SourcedRow]? = nil, completed: Set<String> = []) -> String {
+        if let edited = meeting.editedMarkdown(kind) { return edited }
+        var out = ExportText(format: .markdown)
+        out.heading(1, labels.viewTitle(kind.view))
+        out.line(meeting.metadata.title)
+        func section(_ title: String, _ rows: [SourcedRow]) {
+            guard !rows.isEmpty else { return }
+            out.heading(2, title)
+            for row in rows {
+                var details = row.speakerName.map { [labels.owner($0)] } ?? []
+                if let due = row.due {
+                    details.append(due.date.formatted(Date.FormatStyle(date: .abbreviated,
+                        time: due.hasTime ? .shortened : .omitted, timeZone: TimeZone(identifier: due.timeZoneIdentifier) ?? .current)))
+                }
+                let text = completed.contains(row.id) ? "✓ ~~" + row.text + "~~" : row.text
+                out.bullet(text + (details.isEmpty ? "" : " (" + details.joined(separator: " · ") + ")"))
+            }
+        }
+        switch kind {
+        case .summary:
+            if let summary {
+                section(labels.decisions, summary.decisions)
+                section(labels.discussionPoints, summary.discussionPoints)
+                section(labels.actionItems, actionItems ?? summary.actionItems)
+            }
+        case .perPerson:
+            for digest in digests ?? [] { section(digest.speakerName, digest.points) }
+        }
+        return out.text
+    }
+
     public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String {
+        if let kind = view.document, format == .markdown { return documentMarkdown(kind) }
+        if let kind = view.document, let edited = meeting.editedMarkdown(kind) {
+            return MeetingMarkdown.attributed(edited).string
+        }
         let headings = includeTranslation ? translationHeadings(view) : [:]
         func bilingual(_ id: String, _ original: String) -> String {
             guard let text = headings[id], !text.isEmpty else { return original }

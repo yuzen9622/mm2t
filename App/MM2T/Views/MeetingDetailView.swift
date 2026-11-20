@@ -3,7 +3,6 @@ import MM2TApp
 import MM2TCore
 import MM2TLocal
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct MeetingDetailView: View {
     let app: AppController
@@ -67,20 +66,25 @@ struct MeetingDetailView: View {
                     banners
                     Segmented(options: TranscriptView.allCases, selection: $model.selectedView) { Copy.view(for: $0) }
                     if let presentation = model.presentation {
-                        TranscriptContent(model: model, presentation: presentation, playhead: playhead, showsTranslation: showsTranslation, todoKey: todoKey)
-                            .overlay(alignment: .bottom) {
-                                if let playback = model.playback {
-                                    TransportBar(playhead: playhead, status: playback.status, toggle: {
-                                        playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
-                                        sample()
-                                    }, seek: { time in
-                                        playback.seek(to: time)
-                                        sample()
-                                    })
-                                    .frame(maxWidth: 560)
-                                    .padding(.bottom, 16)
+                        if let kind = model.selectedView.document {
+                            MeetingDocumentPage(kind: kind, model: model, presentation: presentation, todoKey: todoKey)
+                                .id(kind)
+                        } else {
+                            TranscriptContent(model: model, presentation: presentation, playhead: playhead, showsTranslation: showsTranslation)
+                                .overlay(alignment: .bottom) {
+                                    if let playback = model.playback {
+                                        TransportBar(playhead: playhead, status: playback.status, toggle: {
+                                            playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
+                                            sample()
+                                        }, seek: { time in
+                                            playback.seek(to: time)
+                                            sample()
+                                        })
+                                        .frame(maxWidth: 560)
+                                        .padding(.bottom, 16)
+                                    }
                                 }
-                            }
+                        }
                     } else {
                         Spacer()
                     }
@@ -110,6 +114,9 @@ struct MeetingDetailView: View {
                 guard playhead.isPlaying else { break }
                 try? await Task.sleep(for: .milliseconds(50))
             }
+        }
+        .onChange(of: model.selectedView) { _, view in
+            if view.document != nil { model.playback?.pause() }
         }
         .onChange(of: model.playback?.duration) { sample() }
         .onChange(of: model.playback?.status) { sample() }
@@ -156,7 +163,7 @@ struct MeetingDetailView: View {
         .confirmationDialog("Regenerate the cleaned transcript, summary and notes?", isPresented: $confirmRegenerate) {
             Button("Regenerate") { Task { await model.regenerate() } }
         } message: {
-            Text("Corrections you made to the cleaned transcript will be replaced.")
+            Text("Regenerating replaces your edits to the cleaned transcript, summary, and by-person notes.")
         }
         .confirmationDialog("Separate speakers again?", isPresented: $confirmReseparate) {
             Button("Separate Again", role: .destructive) { Task { await model.reseparate() } }
@@ -180,7 +187,9 @@ struct MeetingDetailView: View {
 
     /// Puts the view on screen on the clipboard as plain text.
     private func copy() {
-        guard let text = model.export(model.selectedView, as: .plainText) else { return }
+        let document = model.selectedView.document != nil
+        guard let exported = model.export(model.selectedView, as: document ? .markdown : .plainText) else { return }
+        let text = document ? MeetingMarkdown.attributed(exported).string : exported
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
@@ -220,7 +229,7 @@ struct MeetingDetailView: View {
             Banner(icon: "refresh", tone: .info) {
                 Text("Speakers changed since the generated views were written.")
                 Spacer()
-                PillButton("Regenerate") { Task { await model.regenerate() } }
+                PillButton("Regenerate") { confirmRegenerate = true }
                     .disabled(model.isProcessing)
             }
         }
@@ -254,50 +263,6 @@ struct Banner<Content: View>: View {
         .background(tone == .danger ? Palette.danger.opacity(0.10) : Palette.orangeSoft,
                     in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         .entrance(from: .top, distance: 8)
-    }
-}
-
-struct ExportMenu: View {
-    @State private var includeTranslation = false
-    let model: MeetingDetailModel
-
-    var body: some View {
-        Menu {
-            ForEach(TranscriptView.allCases, id: \.self) { view in
-                Section(Copy.view(for: view)) {
-                    if view == .cleaned, model.meeting?.currentTranslation != nil { Toggle("Include translation", isOn: $includeTranslation) }
-                    Button("Markdown…") { save(view, .markdown) }
-                    Button("Plain Text…") { save(view, .plainText) }
-                    if view == .raw || view == .cleaned { Button("Subtitles (.srt)…") { saveSubtitles(view) } }
-                }
-            }
-        } label: {
-            Icon("upload", size: 17).frame(width: 32, height: 32).contentShape(Circle())
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Export")
-    }
-
-    private func save(_ view: TranscriptView, _ format: ExportFormat) {
-        guard let text = model.export(view, as: format, includeTranslation: includeTranslation) else { return }
-        write(text, view, format == .markdown ? UTType(filenameExtension: "md") ?? .plainText : .plainText)
-    }
-
-    private func saveSubtitles(_ view: TranscriptView) {
-        guard let text = model.subtitles(view, includeTranslation: includeTranslation) else { return }
-        write(text, view, UTType(filenameExtension: "srt") ?? .plainText)
-    }
-
-    private func write(_ text: String, _ view: TranscriptView, _ type: UTType) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [type]
-        panel.nameFieldStringValue = "\(model.meeting?.metadata.title ?? "mm2t") - \(Copy.view(for: view))"
-        WindowSharing.exclude(panel)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
     }
 }
 

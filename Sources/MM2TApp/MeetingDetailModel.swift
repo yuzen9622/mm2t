@@ -189,6 +189,14 @@ public final class MeetingDetailModel {
         todoID(row).map { todos?.isDone($0) ?? false } ?? false
     }
 
+    public func visibleActionItems(_ rows: [SourcedRow]) -> [SourcedRow] {
+        func marked(_ row: SourcedRow, _ mark: TodoStatus.Mark) -> Bool {
+            guard let key = markKey(row) else { return false }
+            return todos?.marks[key]?.contains(mark) == true
+        }
+        return rows.filter { !marked($0, .deleted) }.sorted { marked($0, .pinned) && !marked($1, .pinned) }
+    }
+
     public func toggleDone(_ row: SourcedRow) {
         guard let id = todoID(row), let index = Int(row.id.dropFirst("action-".count)),
               let items = meeting?.outputs.summary?.actionItems, items.indices.contains(index) else { return }
@@ -223,6 +231,8 @@ public final class MeetingDetailModel {
     // MARK: Actions
 
     public func regenerate() async {
+        await documentWriter?.value
+        guard documentDrafts.isEmpty else { return }
         await queue.run(.regenerate, on: id)
         await load()
     }
@@ -341,8 +351,66 @@ public final class MeetingDetailModel {
         } catch { translationError = error.localizedDescription }
     }
 
+    private struct DocumentDraft {
+        var text: String
+        var original: Meeting
+        var failure: String?
+    }
+
+    private var documentDrafts: [MeetingDocumentKind: DocumentDraft] = [:]
+    @ObservationIgnored private var documentWriter: Task<Void, Never>?
+
+    public func updateDocument(_ text: String, kind: MeetingDocumentKind) {
+        guard let meeting, canEditSpeakers else { return }
+        let original = documentDrafts[kind]?.original ?? meeting
+        documentDrafts[kind] = DocumentDraft(text: text, original: original)
+        writePendingDocuments()
+    }
+
+    public func documentSaveFailure(_ kind: MeetingDocumentKind) -> String? { documentDrafts[kind]?.failure }
+
+    public func retryDocumentSave(_ kind: MeetingDocumentKind) {
+        documentDrafts[kind]?.failure = nil
+        writePendingDocuments()
+    }
+
+    /// Coalesce edits made while an atomic write is in flight. Navigation can release the
+    /// page immediately: this task owns the pending writes until they have finished.
+    private func writePendingDocuments() {
+        guard documentWriter == nil else { return }
+        documentWriter = Task {
+            defer { documentWriter = nil }
+            while let (kind, draft) = documentDrafts.first(where: { $0.value.failure == nil }) {
+                do {
+                    try await saveDocument(draft.text, kind: kind, editing: draft.original)
+                    if documentDrafts[kind]?.text == draft.text {
+                        documentDrafts[kind] = nil
+                    } else if let meeting {
+                        documentDrafts[kind]?.original = meeting
+                    }
+                } catch {
+                    documentDrafts[kind]?.failure = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    public func saveDocument(_ text: String, kind: MeetingDocumentKind, editing original: Meeting) async throws {
+        guard canEditSpeakers else { throw TranscriptEditError.meetingIsProcessing }
+        meeting = try await library.saveMarkdown(text, kind: kind, editing: original)
+    }
+
     public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String? {
-        presentation?.export(view, as: format, includeTranslation: includeTranslation)
+        if let kind = view.document, let draft = documentDrafts[kind] {
+            return format == .markdown ? draft.text : MeetingMarkdown.attributed(draft.text).string
+        }
+        guard let presentation else { return nil }
+        if view == .summary, format == .markdown, presentation.meeting.summaryMarkdown == nil,
+           let summary = presentation.summary {
+            let rows = visibleActionItems(summary.actionItems)
+            return presentation.documentMarkdown(.summary, actionItems: rows, completed: Set(rows.filter(isDone).map(\.id)))
+        }
+        return presentation.export(view, as: format, includeTranslation: includeTranslation)
     }
 
     /// SubRip text; nil for the views that are not a timed transcript.

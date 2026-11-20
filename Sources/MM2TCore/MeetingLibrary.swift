@@ -91,6 +91,22 @@ public actor MeetingLibrary {
         observer?(meeting.id)
     }
 
+    public func saveMarkdown(_ text: String, kind: MeetingDocumentKind, editing original: Meeting) throws -> Meeting {
+        var current = try meeting(original.id)
+        if case .pending = current.status { throw TranscriptEditError.meetingIsProcessing }
+        guard current.editedMarkdown(kind) == original.editedMarkdown(kind) else { throw LibraryError.transcriptChanged }
+        switch kind {
+        case .summary:
+            guard current.outputs.summary == original.outputs.summary else { throw LibraryError.transcriptChanged }
+            current.summaryMarkdown = text
+        case .perPerson:
+            guard current.outputs.digests == original.outputs.digests else { throw LibraryError.transcriptChanged }
+            current.perPersonMarkdown = text
+        }
+        try save(current)
+        return current
+    }
+
     public func saveTranslation(_ translation: TranscriptTranslation, for id: MeetingID) throws -> Meeting {
         var current = try meeting(id)
         guard current.outputs.cleaned == translation.source else { throw LibraryError.transcriptChanged }

@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Show in transcript": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "查看原始逐字稿"}}}},
+    "Edit Markdown": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "編輯 Markdown"}}}},
+    "Manage action items": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "管理待辦事項"}}}},
+    "Couldn’t save document": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法儲存文件"}}}},
+    "Couldn’t export file": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法匯出檔案"}}}},
+    "Export…": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "匯出⋯"}}}},
+    "Content": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "匯出內容"}}}},
+    "File format": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "檔案格式"}}}},
+    "Plain text": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "純文字"}}}},
+    "Subtitles": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "字幕"}}}},
+    "Regenerating replaces your edits to the cleaned transcript, summary, and by-person notes.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "重新產生會取代你對整理版逐字稿、摘要及依人彙整所做的編輯。"}}}},
     "Folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "資料夾"}}}},
     "New Folder": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "新增資料夾"}}}},
     "My Folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "我的資料夾"}}}},
@@ -929,16 +940,6 @@
         }
       }
     },
-    "Corrections you made to the cleaned transcript will be replaced.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "你對整理版逐字稿做的修改會被取代。"
-          }
-        }
-      }
-    },
     "Couldn't access the keychain: %@": {
       "localizations": {
         "zh-Hant": {
@@ -1601,16 +1602,6 @@
         }
       }
     },
-    "Markdown…": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Markdown⋯"
-          }
-        }
-      }
-    },
     "Me": {
       "localizations": {
         "zh-Hant": {
@@ -2077,16 +2068,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "人物"
-          }
-        }
-      }
-    },
-    "Plain Text…": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "純文字⋯"
           }
         }
       }
@@ -2757,16 +2738,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即停止"
-          }
-        }
-      }
-    },
-    "Subtitles (.srt)…": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "字幕檔（.srt）⋯"
           }
         }
       }

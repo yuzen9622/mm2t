@@ -1,4 +1,5 @@
 import AppKit
+import MM2TApp
 import SwiftUI
 
 /// Every color the app draws with. Two values each: light, dark.
@@ -52,15 +53,26 @@ enum Radius {
 
 /// One type scale for the whole app, all in the rounded design.
 enum Typo {
-    static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
+    static let titleSize: CGFloat = 20
+    static let readingSize: CGFloat = 16
+    static let title = Font.system(size: titleSize, weight: .semibold, design: .rounded)
     static let heading = Font.system(size: 15, weight: .semibold, design: .rounded)
     static let body = Font.system(size: 14, weight: .regular, design: .rounded)
     static let bodyStrong = Font.system(size: 14, weight: .medium, design: .rounded)
     static let caption = Font.system(size: 12, weight: .regular, design: .rounded)
     static let captionStrong = Font.system(size: 12, weight: .medium, design: .rounded)
     /// Transcript text, set for reading at length rather than scanning.
-    static let reading = Font.system(size: 16, weight: .regular)
+    static let reading = Font.system(size: readingSize, weight: .regular)
     static let readingLineSpacing: CGFloat = 6
+}
+
+extension MeetingMarkdown.Style {
+    static var meetingDocument: Self {
+        Self(text: NSColor(Palette.text), secondary: NSColor(Palette.secondary),
+             accent: NSColor(Palette.orange), surface: NSColor(Palette.field),
+             separator: NSColor(Palette.tonal), bodySize: Typo.readingSize,
+             titleSize: Typo.titleSize, lineSpacing: Typo.readingLineSpacing)
+    }
 }
 
 /// The app's motion vocabulary. Each case is one kind of change, so the same change always moves

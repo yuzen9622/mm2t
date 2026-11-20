@@ -5,6 +5,20 @@ public enum TranscriptView: String, Sendable, CaseIterable {
     case cleaned
     case perPerson
     case summary
+
+    public var document: MeetingDocumentKind? {
+        switch self {
+        case .summary: .summary
+        case .perPerson: .perPerson
+        case .raw, .cleaned: nil
+        }
+    }
+}
+
+public enum MeetingDocumentKind: String, Codable, Sendable {
+    case summary, perPerson
+
+    public var view: TranscriptView { self == .summary ? .summary : .perPerson }
 }
 
 public enum ExportFormat: Sendable {

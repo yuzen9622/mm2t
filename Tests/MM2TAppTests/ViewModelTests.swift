@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 @testable import MM2TCore
 import MM2TProviders
 import MM2TSystem
@@ -292,6 +292,101 @@ import Testing
         #expect(detail.speakers.filter { !$0.isMe }.map(\.label) == ["A", "B"])
         #expect(detail.separationFailure == nil && !detail.canReseparate)
         #expect(detail.isStale)
+    }
+
+    @Test func inlineMarkdownEditsMapToTheirActualSourceRanges() throws {
+        let text = "# 開場😀\r\n\r\n題獻\r\n---\r\n\r\n同名 **同名** [參考][a]\r\n\r\n[a]: https://example.org\r\n\r\n---\r\n\r\n| A | B |\r\n|---|---|\r\n|一|二|"
+        let layout = MeetingMarkdown.layout(text)
+        let blocks = layout.blocks.map { (text as NSString).substring(with: $0.source) }
+        #expect(blocks == ["# 開場😀", "題獻\r\n---", "同名 **同名** [參考][a]", "---", "| A | B |\r\n|---|---|\r\n|一|二|"])
+        let block = layout.blocks[2]
+        let repeated = (layout.preview.string as NSString).range(of: "同名", options: .backwards, range: block.display)
+        #expect(layout.caret(at: repeated.location, in: block) == ("同名 **" as NSString).length)
+        #expect((text as NSString).replacingCharacters(in: block.source, with: "修改").contains("修改\r\n\r\n[a]: https://example.org"))
+        let adjacent = "# 題獻\n---\n\n| A | B |\n|---|---|"
+        #expect(MeetingMarkdown.layout(adjacent).blocks.map { (adjacent as NSString).substring(with: $0.source) }
+            == ["# 題獻", "---", "| A | B |\n|---|---|"])
+        #expect(MeetingMarkdown.layout("").blocks.first?.source == NSRange(location: 0, length: 0))
+    }
+
+    @Test func inlineDocumentExportsLatestTypingAndPersistsAcrossTabs() async throws {
+        let world = try World()
+        let original = try await world.recordedMeeting()
+        let detail = world.detail(original.id)
+        await detail.load()
+        for i in 0..<8 {
+            detail.updateDocument("## 題獻 \(i)", kind: .summary)
+            await Task.yield()
+        }
+        detail.selectedView = .perPerson
+        detail.updateDocument("## 小明", kind: .perPerson)
+        #expect(detail.export(.summary, as: .markdown) == "## 題獻 7")
+        #expect(detail.export(.perPerson, as: .markdown) == "## 小明")
+        #expect(await eventually {
+            detail.meeting?.summaryMarkdown == "## 題獻 7" && detail.meeting?.perPersonMarkdown == "## 小明"
+        })
+        let saved = try await world.library.meeting(original.id)
+        #expect(saved.summaryMarkdown == "## 題獻 7" && saved.perPersonMarkdown == "## 小明")
+    }
+
+    @Test func markdownTableKeepsItsColumnsAndInlineFormatting() throws {
+        let source = """
+            | 左 | 中 | 右 |
+            | :--- | :---: | ---: |
+            | | **置中** | [網站](https://example.org "說明") |
+            """
+        let text = MeetingMarkdown.attributed(source)
+        func cell(_ word: String) throws -> (NSTextTableBlock, NSParagraphStyle, Int) {
+            let offset = (text.string as NSString).range(of: word).location
+            try #require(offset != NSNotFound)
+            let paragraph = try #require(text.attribute(.paragraphStyle, at: offset, effectiveRange: nil) as? NSParagraphStyle)
+            return (try #require(paragraph.textBlocks.first as? NSTextTableBlock), paragraph, offset)
+        }
+        let (header, _, _) = try cell("左")
+        let (center, layout, offset) = try cell("置中")
+        #expect(header.table === center.table && header.table.numberOfColumns == 3)
+        #expect(center.startingRow == 1 && center.startingColumn == 1 && layout.alignment == .center)
+        let font = try #require(text.attribute(.font, at: offset, effectiveRange: nil) as? NSFont)
+        #expect(font.fontDescriptor.symbolicTraits.contains(.bold))
+        let (_, right, link) = try cell("網站")
+        #expect(right.alignment == .right)
+        #expect(text.attribute(.toolTip, at: link, effectiveRange: nil) as? String == "說明")
+    }
+
+    @Test func editedDocumentsSurviveReloadAndExportWithoutChangingTasks() async throws {
+        let world = try World()
+        let original = try await world.recordedMeeting()
+        let detail = world.detail(original.id)
+        await detail.load()
+        let task = try #require(detail.presentation?.summary?.actionItems.first)
+        detail.toggleDone(task)
+        #expect(detail.export(.summary, as: .markdown)?.contains("✓ ~~" + task.text + "~~") == true)
+        let key = try #require(detail.markKey(task))
+        detail.todos?.set(.deleted, for: key, enabled: true)
+        #expect(detail.export(.summary, as: .markdown)?.contains(task.text) == false)
+        let summary = "# 自訂摘要\n\n## 決議\n\n- **決定**使用 A & B"
+        let notes = "# 依人彙整\n\n## 小明\n\n1. 保留 [m1] 原文"
+        try await detail.saveDocument(summary, kind: .summary, editing: original)
+        try await detail.saveDocument(notes, kind: .perPerson, editing: original)
+        let reopened = world.detail(original.id)
+        await reopened.load()
+        #expect(reopened.export(.summary, as: .markdown) == summary)
+        #expect(reopened.export(.perPerson, as: .markdown) == notes)
+        #expect(reopened.meeting?.outputs.summary?.actionItems == original.outputs.summary?.actionItems)
+        await #expect(throws: LibraryError.transcriptChanged) {
+            try await reopened.saveDocument("obsolete", kind: .summary, editing: original)
+        }
+        for (view, content) in [(TranscriptView.summary, "決定使用 A & B"), (.perPerson, "保留 [m1] 原文")] {
+            let markdown = try #require(reopened.export(view, as: .markdown))
+            let data = try MeetingMarkdown.wordData(markdown)
+            #expect(data.starts(with: [0x50, 0x4b]))
+            let word = try NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.officeOpenXML], documentAttributes: nil)
+            #expect(word.string.contains(content))
+            #expect(!word.string.contains("[00:"))
+        }
+        await reopened.regenerate()
+        #expect(reopened.meeting?.summaryMarkdown == nil && reopened.meeting?.perPersonMarkdown == nil)
+        #expect(reopened.export(.summary, as: .markdown)?.contains("## 決議") == true)
     }
 
     @Test func exportsEachViewAsMarkdownAndPlainTextWithLocalizedLabels() async throws {
