@@ -44,6 +44,7 @@ public final class CollabAccount {
     @ObservationIgnored var beforeSignOut: (() async -> Void)?
     @ObservationIgnored private var monitoring: Task<Void, Never>?
     @ObservationIgnored private var replaying: Task<Void, Never>?
+    @ObservationIgnored private var roomEndWrites: [CollabPendingEnds.Room: Task<Void, Never>] = [:]
 
     init(configuration: CollabConfiguration, credentials: any CredentialStoring, pendingEndsFile: URL,
          session: URLSession = .shared, endRetrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
@@ -124,13 +125,23 @@ public final class CollabAccount {
 
     func waitForPendingEnds() async { await replaying?.value }
 
+    public var hasPendingRoomEndWrites: Bool { !roomEndWrites.isEmpty }
+
+    public func waitForRoomEndWrites() async {
+        while let write = roomEndWrites.values.first { await write.value }
+    }
+
     func recordRoomEnd(_ room: CollabRoom, owner: String) -> Task<Void, Never> {
         let ending = CollabPendingEnds.Room(apiURL: configuration.apiURL, owner: owner, id: room.roomId)
+        if let write = roomEndWrites[ending] { return write }
         pendingEnds.reserve(ending)
-        return Task {
+        let write = Task {
+            defer { roomEndWrites.removeValue(forKey: ending) }
             do { try await pendingEnds.record(ending) }
             catch { self.error = .pendingEndPersistence }
         }
+        roomEndWrites[ending] = write
+        return write
     }
 
     func closeRoom(_ room: CollabRoom, owner: String) async {

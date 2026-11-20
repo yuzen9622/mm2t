@@ -89,8 +89,9 @@ import Testing
         let ending = f.session.end()
         #expect(f.session.room == nil)
         #expect(f.session.state == .ended)
-        let pendingFile = f.pendingFile
-        try #require(await waitForCollabEvent { FileManager.default.fileExists(atPath: pendingFile.path) })
+        #expect(f.account.hasPendingRoomEndWrites)
+        await f.account.waitForRoomEndWrites()
+        #expect(!f.account.hasPendingRoomEndWrites)
         let recordedBeforeDrain = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
         #expect(recordedBeforeDrain == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
         try #require(await waitForCollabEvent { await sender.isSealed })
@@ -161,6 +162,21 @@ import Testing
         try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
         await f.account.waitForPendingEnds()
         #expect(CollabBackend.endBearers.get == Array(repeating: "Bearer test-access", count: 5))
+    }
+
+    @Test func nextSuccessfulPendingEndWriteAlsoSavesPreviouslyUnwrittenRooms() async throws {
+        let f = try await Fixture()
+        try FileManager.default.createDirectory(at: f.pendingFile, withIntermediateDirectories: true)
+        let pending = CollabPendingEnds(file: f.pendingFile, sleep: { _ in })
+        let first = CollabPendingEnds.Room(apiURL: f.configuration.apiURL, owner: "test", id: "first")
+        let second = CollabPendingEnds.Room(apiURL: f.configuration.apiURL, owner: "test", id: "second")
+        pending.reserve(first)
+        await #expect(throws: CollabError.pendingEndPersistence) { try await pending.record(first) }
+        try FileManager.default.removeItem(at: f.pendingFile)
+        pending.reserve(second)
+        try await pending.record(second)
+        let saved = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
+        #expect(saved == [first, second])
     }
 
     @Test func refreshFailureHidesRoomAndOnlyOriginalAccountCanResumeOrEndIt() async throws {

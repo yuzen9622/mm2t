@@ -84,6 +84,7 @@ final class CollabPendingEnds {
 
     private actor FileStore {
         let file: URL
+        private var unwritten: Set<Room> = []
 
         init(file: URL) { self.file = file }
 
@@ -93,14 +94,17 @@ final class CollabPendingEnds {
         }
 
         func persist(adding added: Room? = nil, removing removed: Room? = nil) throws {
+            if let added { unwritten.insert(added) }
+            if let removed { unwritten.remove(removed) }
             do {
                 let stored = try read()
-                var rooms = stored
-                if let added { rooms.insert(added) }
+                var rooms = stored.union(unwritten)
                 if let removed { rooms.remove(removed) }
-                guard rooms != stored else { return }
-                try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try JSONEncoder().encode(rooms).write(to: file, options: .atomic)
+                if rooms != stored {
+                    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try JSONEncoder().encode(rooms).write(to: file, options: .atomic)
+                }
+                unwritten.removeAll()
             } catch {
                 CollabPendingEnds.logger.error("Could not save pending collaboration room closures: \(String(describing: error), privacy: .private)")
                 throw CollabError.pendingEndPersistence
