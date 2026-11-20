@@ -454,6 +454,25 @@ import Testing
         ])
     }
 
+    @Test func oversizedGraphemeSplitsOnScalarBoundariesWithoutChangingUTF8() async throws {
+        let f = try await Fixture()
+        let grapheme = "e" + String(repeating: "\u{301}", count: 150_000)
+        try #require(grapheme.count == 1)
+        let text = "prefix\n" + grapheme + " suffix"
+        let op = CollabOp.appendText(id: "model-id", field: .markdown, text: text)
+        let line = String(decoding: try JSONEncoder().encode(op), as: UTF8.self)
+        f.llm.answerChunks.set(Fixture.create + [line + "\n", Fixture.done])
+        f.begin()
+        try #require(await eventually { f.session.commandStatus == .completed("會議決議") })
+        let parts = CollabBackend.ops.get.compactMap { op -> String? in
+            if case .appendText(_, _, let text) = op { return text }
+            return nil
+        }
+        #expect(parts.count > 1)
+        #expect(Data(parts.joined().utf8) == Data(text.utf8))
+        #expect(CollabBackend.opBodySizes.get.allSatisfy { $0 <= 262_144 })
+    }
+
     @Test func oversizedTextDoesNotStopLaterValidOps() async throws {
         let f = try await Fixture()
         let text = String(repeating: "頁", count: 75_000) + "\n" + String(repeating: "界", count: 40_000)
@@ -644,6 +663,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let requests = Box<[String]>([])
     static let document = Box<Document?>(nil)
     static let extraComponent = Box<String?>(nil)
+    static let opBodySizes = Box<[Int]>([])
     static let events = Box<[String]>([])
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
@@ -657,7 +677,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
-        extraComponent.set(nil)
+        extraComponent.set(nil); opBodySizes.set([])
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
     }
 
@@ -709,7 +729,9 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 reply(status: 409, body: Data(#"{"error":"room_ended"}"#.utf8))
                 return
             }
-            guard let batch = try? JSONDecoder().decode(Batch.self, from: body()) else {
+            let wireBody = body()
+            Self.opBodySizes.update { $0.append(wireBody.count) }
+            guard let batch = try? JSONDecoder().decode(Batch.self, from: wireBody) else {
                 reply(status: 400, body: Data()); return
             }
             Self.ops.update { $0 += batch.ops }

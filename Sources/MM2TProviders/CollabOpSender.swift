@@ -31,15 +31,33 @@ public actor CollabOpSender {
         func part(endingAt end: Int) -> CollabOp {
             .appendText(id: id, field: field, text: String(characters[start..<end]))
         }
-        while start < characters.count {
+        func fittingEnd(from start: Int, through end: Int, part: (Int) -> CollabOp) throws -> Int {
             var low = start
-            var high = characters.count
+            var high = end
             while low < high {
                 let middle = low + (high - low + 1) / 2
-                if try fits(part(endingAt: middle)) { low = middle }
+                if try fits(part(middle)) { low = middle }
                 else { high = middle - 1 }
             }
-            guard low > start else { return [] }
+            return low
+        }
+        while start < characters.count {
+            var low = try fittingEnd(from: start, through: characters.count, part: part(endingAt:))
+            if low == start {
+                let scalars = Array(characters[start].unicodeScalars)
+                var offset = 0
+                while offset < scalars.count {
+                    func scalarPart(_ end: Int) -> CollabOp {
+                        .appendText(id: id, field: field, text: String(String.UnicodeScalarView(scalars[offset..<end])))
+                    }
+                    let end = try fittingEnd(from: offset, through: scalars.count, part: scalarPart)
+                    guard end > offset else { return [] }
+                    parts.append(scalarPart(end))
+                    offset = end
+                }
+                start += 1
+                continue
+            }
             if field == .markdown, low < characters.count,
                let line = characters[(start + (low - start) / 2)..<low].lastIndex(where: \.isNewline) {
                 low = line + 1
