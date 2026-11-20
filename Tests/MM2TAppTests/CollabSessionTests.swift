@@ -412,6 +412,43 @@ import Testing
     }
 
     @Test(arguments: [false, true])
+    func cleanupReusesAppliedBatchAfterLostResponses(signInAgain: Bool) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let original = try #require(CollabBackend.document.get)
+        let modelGate = Gate<Bool>()
+        defer { Task { await modelGate.open(true) } }
+        f.llm.holds.set(["answer": modelGate])
+        f.llm.failsStream.set(true)
+        f.llm.answerChunks.set(["{\"op\":\"appendText\",\"id\":\"\(original.id)\",\"field\":\"markdown\",\"text\":\"變更\"}\n"])
+        f.session.run(command: "修改既有文件")
+        try #require(await eventually { CollabBackend.document.get?.content == "變更" })
+        CollabBackend.doneBodies.set([])
+        CollabBackend.dropDoneResponse.set(true)
+        await modelGate.open(true)
+        await f.session.waitForWork()
+        let lostResponses = CollabBackend.doneBodies.get
+        #expect(lostResponses.count == 3)
+        let firstBody = try #require(lostResponses.first)
+        #expect(CollabBackend.document.get?.rev == original.rev + 1)
+        #expect(f.session.commandStatus == .failed(.service(.unreachable)))
+
+        CollabBackend.dropDoneResponse.set(false)
+        if signInAgain {
+            CollabBackend.expired.set(true)
+            await #expect(throws: CollabError.notSignedIn) { try await f.account.service.me() }
+            try #require(await eventually { f.session.room == nil && f.account.user == nil })
+            try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
+        } else {
+            f.session.retry()
+        }
+        await f.session.waitForWork()
+        #expect(CollabBackend.doneBodies.get == Array(repeating: firstBody, count: 4))
+        #expect(CollabBackend.document.get?.rev == original.rev + 1)
+        #expect(f.session.showsCommandButton)
+    }
+
+    @Test(arguments: [false, true])
     func itemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
         let f = try await Fixture()
         try await f.makeRoom()
@@ -657,13 +694,17 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         let source: CollabSource
         let updatedAt = "1970-01-01T00:17:00Z"
         var building = true
+        var rev = 0
         var content = ""
     }
 
     static let requests = Box<[String]>([])
     static let document = Box<Document?>(nil)
     static let extraComponent = Box<String?>(nil)
+    static let appliedBatches = Box<Set<UUID>>([])
+    static let doneBodies = Box<[Data]>([])
     static let opBodySizes = Box<[Int]>([])
+    static let dropDoneResponse = Box(false)
     static let events = Box<[String]>([])
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
@@ -677,7 +718,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
-        extraComponent.set(nil); opBodySizes.set([])
+        extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
     }
 
@@ -735,29 +776,22 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 reply(status: 400, body: Data()); return
             }
             Self.ops.update { $0 += batch.ops }
-            if Self.rejectDone.get, batch.ops.contains(where: { if case .done = $0 { true } else { false } }) {
+            let hasDone = batch.ops.contains { if case .done = $0 { true } else { false } }
+            if hasDone, batch.ops.count == 1 { Self.doneBodies.update { $0.append(wireBody) } }
+            if Self.rejectDone.get, hasDone {
                 reply(status: 503, body: Data())
                 return
             }
-            Self.document.update { document in
-                for op in batch.ops {
-                    if case .create(let id, _, let title, let source) = op {
-                        document = Document(id: id, title: title, source: source)
-                        continue
-                    }
-                    guard document?.id == op.id else { continue }
-                    switch op {
-                    case .appendText(_, _, let text): document?.content += text
-                    case .replaceText(_, _, let text): document?.content = text
-                    case .done: document?.building = false
-                    case .remove: document = nil
-                    default: break
-                    }
-                }
+            var duplicate = false
+            Self.appliedBatches.update { duplicate = !$0.insert(batch.batchId).inserted }
+            if !duplicate { Self.apply(batch.ops) }
+            if hasDone, Self.dropDoneResponse.get {
+                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                return
             }
-            let finish: @Sendable () -> Void = { [self] in
+            let finish: @Sendable () -> Void = { [self, duplicate] in
                 Self.events.update { $0.append("ops-complete") }
-                reply(status: 200, body: Data("{\"applied\":\(batch.ops.count),\"duplicate\":false}".utf8))
+                reply(status: 200, body: Data("{\"applied\":\(batch.ops.count),\"duplicate\":\(duplicate)}".utf8))
             }
             if Self.holdOps.get {
                 Self.deferredReply.set(finish)
@@ -776,6 +810,27 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         default: response = (404, Data())
         }
         reply(status: response.0, body: response.1)
+    }
+
+    private static func apply(_ ops: [CollabOp]) {
+        document.update { document in
+            for op in ops {
+                if case .create(let id, _, let title, let source) = op {
+                    document = Document(id: id, title: title, source: source)
+                    continue
+                }
+                guard document?.id == op.id else { continue }
+                switch op {
+                case .appendText(_, _, let text): document?.content += text
+                case .replaceText(_, _, let text): document?.content = text
+                case .done:
+                    document?.building = false
+                    document?.rev += 1
+                case .remove: document = nil
+                default: break
+                }
+            }
+        }
     }
 
     private func reply(status: Int, body: Data) {

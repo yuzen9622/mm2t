@@ -107,6 +107,13 @@ public actor CollabOpSender {
         if isSealed { throw CancellationError() }
     }
 
+    package func finish(batch: CollabOpBatch) async throws {
+        guard !closed else { throw CancellationError() }
+        ready.append(batch)
+        startWorker()
+        try await finish()
+    }
+
     public func close() async {
         discardQueued()
         _ = await worker?.result
@@ -128,6 +135,10 @@ public actor CollabOpSender {
         ready.append(CollabOpBatch(pending))
         pending = []
         pendingBytes = Self.envelopeBytes
+        startWorker()
+    }
+
+    private func startWorker() {
         if worker == nil { worker = Task { try await drain() } }
     }
 

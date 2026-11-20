@@ -38,7 +38,7 @@ public final class CollabSession {
         let owner: String
         let room: CollabRoom
         let target: String
-        let created: Bool
+        let batch: CollabOpBatch
     }
 
     private struct Caption {
@@ -532,7 +532,8 @@ public final class CollabSession {
                     retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
                 }
                 if route.needsCleanup {
-                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, created: route.created)
+                    let batch = CollabOpBatch([route.created ? .remove(id: target) : .done(id: target)])
+                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: batch)
                     pendingCleanup = cleanup
                     if !Task.isCancelled, !Self.lostAuthorization(error) {
                         try await cleanUpCommand(cleanup, checkingServer: route.created || route.removed)
@@ -559,8 +560,7 @@ public final class CollabSession {
         let cleanup = makeSender(intent.room, owner: intent.owner)
         sender = cleanup
         defer { sender = nil }
-        try await cleanup.append(intent.created ? .remove(id: intent.target) : .done(id: intent.target))
-        try await cleanup.finish()
+        try await cleanup.finish(batch: intent.batch)
     }
 
     private func makeSender(_ room: CollabRoom, owner: String) -> CollabOpSender {

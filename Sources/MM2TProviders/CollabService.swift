@@ -43,7 +43,7 @@ public struct CollabRoomComponents: Decodable, Sendable {
     public let components: [CollabComponent]
 }
 
-public struct CollabOpBatch: Encodable, Sendable {
+public struct CollabOpBatch: Encodable, Equatable, Sendable {
     static let byteLimit = 262_144
     public let batchId: UUID
     public let ops: [CollabOp]
