@@ -24,7 +24,7 @@ export function Privacy() {
   const before = karaokeText(t("錄音、聲紋和會議紀錄都存在"), 0, locale);
   const accent = karaokeText(t("這台 Mac"), before.end, locale);
   const after = karaokeText(
-    t("。mm2t 沒有自己的伺服器：轉錄和摘要用你自己的 API 金鑰直接連到服務商，也可以改用你自架的轉錄伺服器。"),
+    t("。選用雲端轉錄時，音訊會送到服務商；選用雲端摘要時，則會送出逐字稿。"),
     accent.end,
     locale,
   );

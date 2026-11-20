@@ -10,10 +10,11 @@ import {
   SheetDescription,
   SheetClose,
 } from "@/components/ui/sheet";
+import { guidePages, sitePath, type GuidePage } from "@/lib/guide";
 import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
-const links = [
+const homeLinks = [
   { label: "使用流程", href: "#flow" },
   { label: "四種讀法", href: "#views" },
   { label: "隱私", href: "#privacy" },
@@ -52,8 +53,15 @@ function useGroundUnderHeader() {
   return ground;
 }
 
-export function Header() {
+export function Header({ page }: { page?: GuidePage }) {
   const { t, locale } = useCopy();
+  const links = [
+    ...homeLinks.map(({ href, label }) => ({ label, href: (page ? sitePath(locale) : "") + href })),
+    ...(["models", "pricing"] as const).map((key) => ({
+      label: guidePages[key].label,
+      href: sitePath(locale, key),
+    })),
+  ];
   const [open, setOpen] = useState(false);
   const ground = useGroundUnderHeader();
   const stage = ground === "stage";
@@ -73,12 +81,13 @@ export function Header() {
           {t("跳至主要內容")}
         </a>
         <Brand tone={stage ? "stage" : "ink"} />
-        <nav className="ml-6 hidden items-center gap-7 lg:flex" aria-label={t("主要導覽")}>
+        <nav className="ml-6 hidden items-center gap-5 lg:flex" aria-label={t("主要導覽")}>
           {links.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              className={cn("link-draw inline-flex min-h-11 items-center text-sm", quiet)}
+              aria-current={page && link.href === sitePath(locale, page) ? "page" : undefined}
+              className={cn("link-draw inline-flex min-h-11 items-center text-sm aria-[current=page]:font-semibold", quiet)}
             >
               {t(link.label)}
             </a>
@@ -87,7 +96,7 @@ export function Header() {
         <div className={cn("ml-auto flex items-center gap-1", quiet)}>
           <a
             className="btn grid size-11 place-items-center rounded-full text-[13px] font-medium"
-            href={locale === "en" ? "/" : "/en/"}
+            href={sitePath(locale === "en" ? "zh" : "en", page)}
             hrefLang={locale === "en" ? "zh-Hant" : "en"}
             lang={locale === "en" ? "zh-Hant" : "en"}
             aria-label={locale === "en" ? "切換為繁體中文" : "Switch to English"}
@@ -134,6 +143,7 @@ export function Header() {
                   <a
                     key={link.href}
                     href={link.href}
+                    aria-current={page && link.href === sitePath(locale, page) ? "page" : undefined}
                     onClick={() => setOpen(false)}
                     className="flex min-h-16 items-center text-2xl tracking-[-0.02em]"
                   >

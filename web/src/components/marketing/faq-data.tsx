@@ -8,7 +8,7 @@ export function getFaqs(t: (text: string) => string) {
       answer: (
         <>
           {t(
-            "mm2t 免費、開放原始碼，採用 AGPL-3.0 授權。選用 ElevenLabs、Google Gemini 等雲端服務時，需填入自己的 API 金鑰，使用費由服務商直接計算。也可以使用自己的轉錄伺服器。",
+            "mm2t 採用 AGPL-3.0 授權。你可以免費使用本機模型，或自備 API 金鑰使用全部功能，由服務商計費。規劃中的免費方案每月包含 120 分鐘，由 mm2t 負擔轉錄與雲端處理費用。",
           )}
         </>
       ),
@@ -42,7 +42,7 @@ export function getFaqs(t: (text: string) => string) {
       answer: (
         <>
           {t(
-            "可以自架轉錄伺服器，讓音訊在自己的設備之間傳輸。本機轉錄與本機語言模型仍在開發中；若選用雲端摘要，逐字稿文字仍會傳至所選服務商。",
+            "可以。在支援的 Mac 上下載語音與語言模型後，就能在本機轉錄與整理摘要。你也可以連到自己架設的轉錄伺服器。",
           )}
           <a
             href={`${REPO}/blob/main/PRIVACY.md`}

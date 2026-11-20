@@ -8,6 +8,10 @@ const root = fileURLToPath(new URL("../out/", import.meta.url));
 for (const [route, lang] of [
   ["index.html", "zh-Hant"],
   ["en/index.html", "en"],
+  ["models/index.html", "zh-Hant"],
+  ["en/models/index.html", "en"],
+  ["pricing/index.html", "zh-Hant"],
+  ["en/pricing/index.html", "en"],
 ]) {
   const html = fs.readFileSync(path.join(root, route), "utf8");
   const ids = new Set(
@@ -44,15 +48,27 @@ for (const [route, lang] of [
     html.includes("data-enter") && html.includes("m-enter"),
     "The hero entrance must be gated by the m-enter head script",
   );
-  assert.equal(
-    [...html.matchAll(/data-product-scene="/g)].length,
-    1,
-    "Expected one product scene",
-  );
+  const page = route.split("/").at(-2);
+  const guide = page === "models" || page === "pricing";
+  const localRoot = lang === "en" ? "/en/" : "/";
+  const otherRoot = lang === "en" ? "/" : "/en/";
+  for (const name of ["models", "pricing"])
+    assert(html.includes(`href="${localRoot}${name}/"`), `${route}: missing ${name} navigation`);
   assert(
-    html.includes('href="/en/"') || html.includes('href="/"'),
-    "Missing language switch",
+    html.includes(`href="${otherRoot}${guide ? page + "/" : ""}"`),
+    `${route}: missing language switch`,
   );
+  if (!guide) {
+    assert.equal([...html.matchAll(/data-product-scene="/g)].length, 1, "Expected one product scene");
+  } else if (page === "pricing") {
+    const pricing = html.replaceAll("<!-- -->", "");
+    assert(pricing.includes("<table"), `${route}: missing plan comparison`);
+    for (const fee of ["NT$0", "NT$199", "NT$399"])
+      assert(pricing.includes(fee), `${route}: missing price ${fee}`);
+  } else {
+    for (const section of ["live", "translation", "transcription", "llm"])
+      assert(ids.has(section), `${route}: missing model category ${section}`);
+  }
   if (lang === "en") {
     const visible = html
       .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/g, "")
@@ -64,7 +80,7 @@ for (const [route, lang] of [
     );
   }
   console.log(
-    `${route}: ${assets.size} assets, anchors, language, metadata, and scene passed.`,
+    `${route}: ${assets.size} assets, anchors, language and navigation passed.`,
   );
 }
 for (const asset of [

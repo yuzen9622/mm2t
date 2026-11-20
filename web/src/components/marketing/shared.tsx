@@ -2,6 +2,7 @@
 import Image from "next/image";
 import { Icon } from "@/components/icon";
 import { useCopy } from "@/components/i18n";
+import { sitePath } from "@/lib/guide";
 import { cn } from "@/lib/utils";
 
 export const REPO = "https://github.com/yuzen9622/mm2t";
@@ -17,14 +18,14 @@ export const h2 =
 export const lead = "text-base leading-[1.65] text-muted-foreground lg:text-lg";
 
 export function Brand({ tone = "ink" }: { tone?: "ink" | "stage" }) {
-  const { t } = useCopy();
+  const { t, locale } = useCopy();
   return (
     <a
       className={cn(
         "inline-flex min-h-11 items-center gap-2.5 text-[20px] font-semibold tracking-[-0.03em]",
         tone === "stage" ? "text-stage-ink" : "text-foreground",
       )}
-      href="#top"
+      href={sitePath(locale)}
       aria-label={t("mm2t 首頁")}
     >
       <Image src="/media/icon.png" width={28} height={28} alt="" className="rounded-[7px]" />

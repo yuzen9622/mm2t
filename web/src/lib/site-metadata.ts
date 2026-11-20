@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import type { Locale } from "./messages";
-export function siteMetadata(locale: Locale): Metadata {
+import { guidePages, sitePath, type GuidePage } from "./guide";
+
+export function siteMetadata(locale: Locale, page?: GuidePage): Metadata {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   const en = locale === "en";
-  const title = en
+  const guide = page && guidePages[page];
+  const title = guide ? (en ? guide.en : guide.label) + " · mm2t" : en
     ? "mm2t — Meeting notes for Mac that know who spoke"
     : "mm2t — Mac 會議記錄，認得每位說話者";
-  const description = en
+  const description = guide ? (en ? guide.enDescription : guide.description) : en
     ? "mm2t records your microphone and meeting audio with no bot in the call, tells the speakers apart on your Mac, and writes the transcript and summary. Free and open source for macOS 14.2 or later."
     : "mm2t 直接錄下麥克風與會議 App 的聲音，不需要機器人進會議，在 Mac 上分出說話者，整理成逐字稿與摘要。免費開源，支援 macOS 14.2 以上。";
   return {
@@ -16,8 +19,8 @@ export function siteMetadata(locale: Locale): Metadata {
       ? {
           metadataBase: new URL(siteUrl),
           alternates: {
-            canonical: en ? "/en/" : "/",
-            languages: { "zh-Hant": "/", en: "/en/", "x-default": "/" },
+            canonical: sitePath(locale, page),
+            languages: { "zh-Hant": sitePath("zh", page), en: sitePath("en", page), "x-default": sitePath("zh", page) },
           },
         }
       : {}),
