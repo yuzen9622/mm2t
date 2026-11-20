@@ -89,6 +89,8 @@ import Testing
         let ending = f.session.end()
         #expect(f.session.room == nil)
         #expect(f.session.state == .ended)
+        let pendingFile = f.pendingFile
+        try #require(await waitForCollabEvent { FileManager.default.fileExists(atPath: pendingFile.path) })
         let recordedBeforeDrain = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
         #expect(recordedBeforeDrain == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
         try #require(await waitForCollabEvent { await sender.isSealed })
@@ -152,7 +154,6 @@ import Testing
         try FileManager.default.createDirectory(at: f.pendingFile, withIntermediateDirectories: false)
         CollabBackend.offlineEnd.set(true)
         let ending = f.session.end()
-        #expect(f.account.error == .pendingEndPersistence)
         await ending?.value
         #expect(f.account.error == .pendingEndPersistence)
         try FileManager.default.removeItem(at: f.pendingFile)

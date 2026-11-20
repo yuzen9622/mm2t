@@ -124,9 +124,13 @@ public final class CollabAccount {
 
     func waitForPendingEnds() async { await replaying?.value }
 
-    func recordRoomEnd(_ room: CollabRoom, owner: String) {
-        do { try pendingEnds.record(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId)) }
-        catch { self.error = .pendingEndPersistence }
+    func recordRoomEnd(_ room: CollabRoom, owner: String) -> Task<Void, Never> {
+        let ending = CollabPendingEnds.Room(apiURL: configuration.apiURL, owner: owner, id: room.roomId)
+        pendingEnds.reserve(ending)
+        return Task {
+            do { try await pendingEnds.record(ending) }
+            catch { self.error = .pendingEndPersistence }
+        }
     }
 
     func closeRoom(_ room: CollabRoom, owner: String) async {

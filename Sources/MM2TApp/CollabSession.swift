@@ -213,15 +213,15 @@ public final class CollabSession {
         let previous = closingRoom
         let draining = draining
         guard room != nil || creation != nil else { return }
-        if let room { account.recordRoomEnd(room.room, owner: room.owner) }
+        let recorded = room.map { account.recordRoomEnd($0.room, owner: $0.owner) }
         closingRoom = Task { [account] in
+            let ending = if let room { room } else { try? await creation?.value }
+            guard let ending else { return }
+            let persistence = recorded ?? account.recordRoomEnd(ending.room, owner: ending.owner)
+            await persistence.value
             await previous?.value
             await draining?.value
-            let ending = if let room { room } else { try? await creation?.value }
-            if let ending {
-                if room == nil { account.recordRoomEnd(ending.room, owner: ending.owner) }
-                await account.closeRoom(ending.room, owner: ending.owner)
-            }
+            await account.closeRoom(ending.room, owner: ending.owner)
         }
     }
 
