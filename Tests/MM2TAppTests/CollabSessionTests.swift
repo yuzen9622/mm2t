@@ -263,13 +263,15 @@ import Testing
         #expect(f.session.state == .confirmingStart)
     }
 
-    @Test func doneOnlyUpdateAdvancesLocalTimeAndCaptionCursorWithoutSendingOps() async throws {
+    @Test(arguments: [false, true])
+    func doneOnlyUpdateAdvancesLocalTimeAndCaptionCursorWithoutSendingOps(trailingOutput: Bool) async throws {
         let f = try await Fixture()
         try await f.makeRoom()
         let doc = try #require(CollabBackend.document.get)
         let oldOps = CollabBackend.events.get
         let oldInputs = f.llm.answerInputs.get.count
-        f.llm.answerChunks.set(["{\"op\":\"done\",\"id\":\"\(doc.id)\"}"])
+        let done = "{\"op\":\"done\",\"id\":\"\(doc.id)\"}"
+        f.llm.answerChunks.set([trailingOutput ? done + "\n" + done + "\n{" : done])
         f.clock.update { $0.addTimeInterval(90) }
         f.captions.receive(.final(String(repeating: "甲", count: 200)))
         await f.session.waitForWork()
@@ -289,7 +291,8 @@ import Testing
         await f.session.end()?.value
     }
 
-    @Test func rejectedUpdateKeepsCaptionCursor() async throws {
+    @Test(arguments: [false, true])
+    func rejectedUpdateKeepsCaptionCursor(malformedLine: Bool) async throws {
         let f = try await Fixture()
         try await f.makeRoom()
         let doc = try #require(CollabBackend.document.get)
@@ -298,7 +301,7 @@ import Testing
         let done = "{\"op\":\"done\",\"id\":\"\(doc.id)\"}"
         let tooLarge = CollabOp.replaceText(id: doc.id, field: .markdown, text: String(repeating: "大", count: 90_000))
         let line = String(decoding: try JSONEncoder().encode(tooLarge), as: UTF8.self)
-        f.llm.answerChunks.set([line + "\n" + done])
+        f.llm.answerChunks.set([(malformedLine ? "{" : line) + "\n" + done])
         f.clock.update { $0.addTimeInterval(90) }
         f.captions.receive(.final(String(repeating: "甲", count: 200)))
         await f.session.waitForWork()
@@ -406,6 +409,49 @@ import Testing
         #expect(f.llm.answerInputs.get.count == prompts)
         #expect(CollabBackend.ops.get.last == .done(id: previous))
         await f.session.end()?.value
+    }
+
+    @Test(arguments: [false, true])
+    func itemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let second = hasBothIDs ? #", "é":{"id":"é","label":"Second","shape":"ellipse"}"# : ""
+        CollabBackend.extraComponent.set("""
+        {"id":"board","kind":"whiteboard","title":"Board","source":"command","building":false,
+         "updatedAt":"1970-01-01T00:17:00Z","nodes":{"é":{"id":"é","label":"First","shape":"box"}\(second)}}
+        """)
+        let before = CollabBackend.ops.get.count
+        f.llm.answerChunks.set(["""
+        {"op":"upsertItem","id":"board","collection":"nodes","item":{"id":"e\u{301}","label":"Second patch"}}
+        {"op":"upsertItem","id":"board","collection":"nodes","item":{"id":"é","label":"First patch"}}
+        {"op":"done","id":"board"}
+        """])
+        f.session.run(command: "Update nodes")
+        await f.session.waitForWork()
+        let ids = CollabBackend.ops.get.dropFirst(before).compactMap { op -> Data? in
+            guard case .upsertItem(_, .nodes, let item) = op, case .string(let id) = item["id"] else { return nil }
+            return Data(id.utf8)
+        }
+        #expect(ids == (hasBothIDs ? [Data("e\u{301}".utf8), Data("é".utf8)] : [Data("é".utf8)]))
+        #expect(f.session.commandStatus == .completed("Board"))
+    }
+
+    @Test func malformedRemoveDoesNotDeleteComponentOrDiscardLaterUpdates() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let id = try #require(CollabBackend.document.get?.id)
+        let before = CollabBackend.ops.get.count
+        f.llm.answerChunks.set(["""
+        {"op":"remove","id":"\(id)","collection":"rows","itemId":"row"}
+        {"op":"replaceText","id":"\(id)","field":"markdown","text":"kept"}
+        {"op":"done","id":"\(id)"}
+        """])
+        f.session.run(command: "Update document")
+        await f.session.waitForWork()
+        #expect(CollabBackend.document.get?.content == "kept")
+        #expect(Array(CollabBackend.ops.get.dropFirst(before)) == [
+            .replaceText(id: id, field: .markdown, text: "kept"), .done(id: id),
+        ])
     }
 
     @Test func oversizedTextDoesNotStopLaterValidOps() async throws {
@@ -597,6 +643,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static let requests = Box<[String]>([])
     static let document = Box<Document?>(nil)
+    static let extraComponent = Box<String?>(nil)
     static let events = Box<[String]>([])
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
@@ -610,6 +657,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
+        extraComponent.set(nil)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
     }
 
@@ -652,9 +700,9 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         case "/v1/rooms":
             response = (201, Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8))
         case "/v1/rooms/room/components":
-            let docs = Self.document.get.map { [$0] } ?? []
-            let json = (try? JSONEncoder().encode(docs)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
-            response = (200, Data("{\"status\":\"live\",\"components\":\(json)}".utf8))
+            let doc = Self.document.get.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) }
+            let json = [doc, Self.extraComponent.get].compactMap { $0 }.joined(separator: ",")
+            response = (200, Data("{\"status\":\"live\",\"components\":[\(json)]}".utf8))
         case "/v1/rooms/room/ops":
             Self.events.update { $0.append("ops-start") }
             if Self.roomEnded.get {

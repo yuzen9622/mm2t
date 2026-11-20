@@ -200,7 +200,8 @@ public actor CollabService {
     }
 
     public func components(in id: String, owner: String) async throws -> CollabRoomComponents {
-        try parse(CollabRoomComponents.self, from: await authorized(Request("rooms", id, "components"), owner: owner))
+        try parse(CollabRoomComponents.self, from: await authorized(Request("rooms", id, "components"), owner: owner),
+                  decoder: CollabComponent.snapshotDecoder())
     }
 
     @discardableResult
@@ -295,8 +296,8 @@ public actor CollabService {
         try parse(type, from: await send(request))
     }
 
-    private func parse<T: Decodable>(_ type: T.Type, from response: (Data, Int)) throws -> T {
-        do { return try JSONDecoder().decode(type, from: response.0) }
+    private func parse<T: Decodable>(_ type: T.Type, from response: (Data, Int), decoder: JSONDecoder = JSONDecoder()) throws -> T {
+        do { return try decoder.decode(type, from: response.0) }
         catch { throw CollabError.server(status: response.1) }
     }
 

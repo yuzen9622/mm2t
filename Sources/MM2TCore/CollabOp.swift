@@ -34,6 +34,13 @@ public indirect enum CollabJSON: Codable, Equatable, Sendable {
     }
 }
 
+private struct CollabJSONKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+    init(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { nil }
+}
+
 public struct CollabComponent: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let kind: CollabComponentKind
@@ -42,6 +49,36 @@ public struct CollabComponent: Codable, Equatable, Sendable, Identifiable {
     public let building: Bool
     public let updatedAt: String
     public let fields: [String: CollabJSON]
+    public let itemsByWireID: [CollabOp.Collection: [Data: [String: CollabJSON]]]
+
+    private static let exactItemKeys = CodingUserInfoKey(rawValue: "CollabComponent.exactItemKeys")!
+
+    public static func snapshotDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.userInfo[exactItemKeys] = true
+        decoder.keyDecodingStrategy = .custom { path in
+            let key = path[path.count - 1]
+            guard path.count == 4, path[0].stringValue == "components",
+                  CollabOp.Collection(rawValue: path[2].stringValue) != nil else { return key }
+            return CollabJSONKey(stringValue: Data(key.stringValue.utf8).base64EncodedString())
+        }
+        return decoder
+    }
+
+    private struct ItemMap: Decodable {
+        let items: [Data: [String: CollabJSON]]
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CollabJSONKey.self)
+            let escaped = decoder.userInfo[CollabComponent.exactItemKeys] as? Bool == true
+            var items: [Data: [String: CollabJSON]] = [:]
+            for key in c.allKeys {
+                let id = escaped ? Data(base64Encoded: key.stringValue) : Data(key.stringValue.utf8)
+                if let id { items[id] = try c.decode([String: CollabJSON].self, forKey: key) }
+            }
+            self.items = items
+        }
+    }
 
     public init(from decoder: any Decoder) throws {
         fields = try decoder.singleValueContainer().decode([String: CollabJSON].self)
@@ -52,6 +89,14 @@ public struct CollabComponent: Codable, Equatable, Sendable, Identifiable {
         source = try c.decode(CollabSource.self, forKey: .source)
         building = try c.decode(Bool.self, forKey: .building)
         updatedAt = try c.decode(String.self, forKey: .updatedAt)
+        let raw = try decoder.container(keyedBy: CollabJSONKey.self)
+        var items: [CollabOp.Collection: [Data: [String: CollabJSON]]] = [:]
+        for key in raw.allKeys {
+            if let collection = CollabOp.Collection(rawValue: key.stringValue) {
+                items[collection] = try raw.decode(ItemMap.self, forKey: key).items
+            }
+        }
+        itemsByWireID = items
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -141,12 +186,30 @@ public enum CollabOp: Codable, Equatable, Sendable {
     }
 
     private enum Key: String, CodingKey { case op, id, kind, title, source, field, value, collection, item, itemId, text }
-    private enum Tag: String, Codable { case create, set, upsertItem, removeItem, appendText, replaceText, done, remove }
+    private enum Tag: String, Codable {
+        case create, set, upsertItem, removeItem, appendText, replaceText, done, remove
+
+        var payloadKeys: [Key] {
+            switch self {
+            case .create: [.kind, .title, .source]
+            case .set: [.field, .value]
+            case .upsertItem: [.collection, .item]
+            case .removeItem: [.collection, .itemId]
+            case .appendText, .replaceText: [.field, .text]
+            case .done, .remove: []
+            }
+        }
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: Key.self)
         let id = try c.decode(String.self, forKey: .id)
         let tag = try c.decode(Tag.self, forKey: .op)
+        let allowed = Set(([.op, .id] + tag.payloadKeys).map(\.rawValue))
+        let raw = try decoder.container(keyedBy: CollabJSONKey.self)
+        if let extra = raw.allKeys.first(where: { !allowed.contains($0.stringValue) }) {
+            throw DecodingError.dataCorruptedError(forKey: extra, in: raw, debugDescription: "Unexpected collaboration operation key")
+        }
         func invalid(_ key: Key) -> DecodingError { .dataCorruptedError(forKey: key, in: c, debugDescription: "Invalid collaboration operation") }
         guard id.wholeMatch(of: /[a-z0-9-]{1,40}/) != nil else { throw invalid(.id) }
         switch tag {
@@ -220,11 +283,20 @@ public struct CollabOpStreamParser: Sendable {
 
     public init() {}
 
+    public struct ParsedOp: Sendable {
+        public let op: CollabOp
+        public let precedingRejectedLines: Int
+    }
+
     public mutating func feed(_ fragment: String) -> [CollabOp] {
-        var result: [CollabOp] = []
+        feedWithRejections(fragment).map(\.op)
+    }
+
+    public mutating func feedWithRejections(_ fragment: String) -> [ParsedOp] {
+        var result: [ParsedOp] = []
         for byte in fragment.utf8 {
             if byte == 10 {
-                if let op = finishLine() { result.append(op) }
+                if let op = finishWithRejections() { result.append(op) }
             } else if !discardingLine {
                 if pending.count == Self.maxLineBytes {
                     pending.removeAll(keepingCapacity: true)
@@ -239,16 +311,17 @@ public struct CollabOpStreamParser: Sendable {
     }
 
     public mutating func finish() -> [CollabOp] {
-        finishLine().map { [$0] } ?? []
+        finishWithRejections().map { [$0.op] } ?? []
     }
 
-    private mutating func finishLine() -> CollabOp? {
+    public mutating func finishWithRejections() -> ParsedOp? {
         defer {
             pending.removeAll(keepingCapacity: true)
             discardingLine = false
         }
         guard !discardingLine, !pending.isEmpty else { return nil }
-        return parse(String(decoding: pending, as: UTF8.self))
+        guard let op = parse(String(decoding: pending, as: UTF8.self)) else { return nil }
+        return ParsedOp(op: op, precedingRejectedLines: rejectedLines)
     }
 
     private mutating func parse(_ line: String) -> CollabOp? {

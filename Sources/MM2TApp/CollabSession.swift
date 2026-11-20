@@ -445,7 +445,7 @@ public final class CollabSession {
         let captions = recent(300, at: time)
         let snapshot = totalCharacters
         let result = try await stream(room: room, system: CollabPrompts.command(source: command.source, newID: newID, retryTarget: retrying?.id),
-                                      route: .init(components: components, newID: newID, source: command.source, retrying: retrying), showTitle: true) {
+                                      route: { .init(components: components, newID: newID, source: command.source, retrying: retrying) }, showTitle: true) {
             ["instruction": .string(command.text), "captions": .string(captions.joined(separator: "\n")),
              "components": .array(components.map { .object(CollabModelWork.promptFields($0)) }),
              "date": .string(time.formatted(Date.ISO8601FormatStyle(timeZone: .current).timeZone(separator: .colon))), "timeZone": .string(TimeZone.current.identifier)]
@@ -498,7 +498,7 @@ public final class CollabSession {
                 let snapshot = totalCharacters
                 let captions = transcript.lazy.filter { $0.position > mark.captionCount }.map(\.segment.text)
                 let texts = Array(captions)
-                _ = try await stream(room: room, system: CollabPrompts.update, route: .init(updating: component)) {
+                _ = try await stream(room: room, system: CollabPrompts.update, route: { .init(updating: component) }) {
                     ["component": .object(CollabModelWork.promptFields(component)), "captions": .string(texts.joined(separator: "\n"))]
                 }
                 try Task.checkCancellation()
@@ -512,16 +512,16 @@ public final class CollabSession {
         }
     }
 
-    private func stream(room: CollabRoom, system: String, route: CollabGeneration, showTitle: Bool = false,
+    private func stream(room: CollabRoom, system: String, route: @Sendable () -> CollabGeneration, showTitle: Bool = false,
                         input: @escaping @Sendable () -> [String: CollabJSON]) async throws -> CollabGeneration {
         guard let binding = ownedRoom, binding.room == room else { throw CollabError.notSignedIn }
         try Task.checkCancellation()
         let sender = makeSender(room, owner: binding.owner)
         self.sender = sender
         defer { self.sender = nil }
-        let model = CollabModelWork(makeLLM: llmSnapshot(), route: route)
+        let model = CollabModelWork(makeLLM: llmSnapshot())
         do {
-            return try await model.stream(system: system, input: input, sender: sender) { [weak self] title in
+            return try await model.stream(system: system, route: route, input: input, sender: sender) { [weak self] title in
                 if showTitle, !Task.isCancelled { self?.commandStatus = .building(title) }
             }
         } catch {

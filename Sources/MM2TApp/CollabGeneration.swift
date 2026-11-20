@@ -9,7 +9,7 @@ struct CollabGeneration: Sendable {
     private let components: [CollabComponent]
     private var kind: CollabComponentKind?
     private var modelID: String?
-    private var items: [CollabOp.Collection: [String: [String: CollabJSON]]] = [:]
+    private var items: [CollabOp.Collection: [Data: [String: CollabJSON]]] = [:]
     private var changed = false
     private(set) var removed = false
     private(set) var target: String?
@@ -32,6 +32,7 @@ struct CollabGeneration: Sendable {
     }
 
     mutating func accept(_ op: CollabOp) throws -> CollabOp? {
+        if finished { rejected += 1; return nil }
         let wireOp: CollabOp
         if case .create(_, let kind, let title, _) = op, case .command(let newID, let source) = mode {
             wireOp = .create(id: newID, kind: kind, title: title, source: source)
@@ -47,7 +48,6 @@ struct CollabGeneration: Sendable {
     }
 
     private mutating func route(_ op: CollabOp) -> CollabOp? {
-        if finished { rejected += 1; return nil }
         if case .create(let id, let kind, let title, _) = op {
             guard target == nil, case .command(let newID, let source) = mode, !title.isEmpty else { rejected += 1; return nil }
             modelID = id
@@ -74,11 +74,12 @@ struct CollabGeneration: Sendable {
             return changed && !removed ? op.targeting(target) : nil
         case .upsertItem(_, let collection, let fields):
             guard case .string(let itemID) = fields["id"] else { rejected += 1; return nil }
-            let merged = (items[collection]?[itemID] ?? [:]).merging(fields) { _, patch in patch }
+            let key = Data(itemID.utf8)
+            let merged = (items[collection]?[key] ?? [:]).merging(fields) { _, patch in patch }
             guard collection.validates(merged) else { rejected += 1; return nil }
-            items[collection, default: [:]][itemID] = merged
+            items[collection, default: [:]][key] = merged
         case .removeItem(_, let collection, let itemID):
-            items[collection]?.removeValue(forKey: itemID)
+            items[collection]?.removeValue(forKey: Data(itemID.utf8))
         case .remove:
             removed = true
         case .set(_, .title, .string(let title)):
@@ -94,14 +95,7 @@ struct CollabGeneration: Sendable {
         target = component.id
         kind = component.kind
         title = component.title
-        for key in component.fields.keys {
-            guard let collection = CollabOp.Collection(rawValue: key) else { continue }
-            guard case .object(let values) = component.fields[key] else { continue }
-            items[collection] = values.compactMapValues { value in
-                guard case .object(let fields) = value else { return nil }
-                return fields
-            }
-        }
+        items = component.itemsByWireID
     }
 
     private func allowed(_ op: CollabOp, for kind: CollabComponentKind) -> Bool {
@@ -146,9 +140,8 @@ actor CollabModelWork {
     private let makeLLM: @Sendable () throws -> LLMBuild
     private(set) var generation: CollabGeneration?
 
-    init(makeLLM: @escaping @Sendable () throws -> LLMBuild, route: CollabGeneration? = nil) {
+    init(makeLLM: @escaping @Sendable () throws -> LLMBuild) {
         self.makeLLM = makeLLM
-        generation = route
     }
 
     static func promptFields(_ component: CollabComponent) -> [String: CollabJSON] {
@@ -173,11 +166,13 @@ actor CollabModelWork {
         return try JSONDecoder().decode(SuggestionResponse.self, from: Data(answer.utf8)).suggestion
     }
 
-    func stream(system: String, input: @Sendable () -> [String: CollabJSON], sender: CollabOpSender,
+    func stream(system: String, route makeRoute: @Sendable () -> CollabGeneration,
+                input: @Sendable () -> [String: CollabJSON], sender: CollabOpSender,
                 onTitle: @MainActor @Sendable (String?) -> Void) async throws -> CollabGeneration {
-        guard var route = generation else { throw Failure.invalidOutput }
+        var route = makeRoute()
         var parser = CollabOpStreamParser()
         var oversized = 0
+        var rejectedBeforeDone = 0
         defer {
             generation = route
             let discarded = parser.rejectedLines + route.rejected + oversized
@@ -191,13 +186,18 @@ actor CollabModelWork {
         while true {
             try Task.checkCancellation()
             let fragment = try await fragments.next()
-            let ops = fragment.map { parser.feed($0) } ?? parser.finish()
-            for op in ops {
+            let ops = fragment.map { parser.feedWithRejections($0) } ?? (parser.finishWithRejections().map { [$0] } ?? [])
+            for parsed in ops {
                 try Task.checkCancellation()
-                let beforeAppend: CollabGeneration? = if case .appendText = op { route } else { nil }
+                let op = parsed.op
+                let wasFinished = route.finished
+                let beforeAppend: CollabGeneration? = if case .appendText = op, !wasFinished { route } else { nil }
                 if let approved = try route.accept(op), try await !sender.append(approved) {
                     if let beforeAppend { route = beforeAppend }
                     oversized += 1
+                }
+                if !wasFinished, route.finished {
+                    rejectedBeforeDone = parsed.precedingRejectedLines + route.rejected + oversized
                 }
                 if route.title != previousTitle {
                     previousTitle = route.title
@@ -206,7 +206,7 @@ actor CollabModelWork {
             }
             if fragment == nil { break }
         }
-        guard route.finished, route.needsCleanup || parser.rejectedLines + route.rejected + oversized == 0 else {
+        guard route.finished, route.needsCleanup || rejectedBeforeDone == 0 else {
             throw Failure.invalidOutput
         }
         try Task.checkCancellation()
