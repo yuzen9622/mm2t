@@ -71,9 +71,10 @@ final class FloatingPanelController {
                 NSApp.activate()
                 panel.makeKeyAndOrderFront(nil)
             } else {
+                let hadKeyboardFocus = panel.isKeyWindow
                 panel.resignKey()
                 panel.acceptsKeyboard = false
-                if let previousApp, NSApp.isActive {
+                if let previousApp, hadKeyboardFocus, NSApp.isActive {
                     NSApp.yieldActivation(to: previousApp)
                     previousApp.activate()
                 }
