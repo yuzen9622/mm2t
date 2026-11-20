@@ -2,7 +2,8 @@ import Foundation
 import MM2TProviders
 import OSLog
 
-actor CollabPendingEnds {
+@MainActor
+final class CollabPendingEnds {
     struct Room: Codable, Hashable, Sendable {
         let apiURL: URL
         let owner: String
@@ -12,6 +13,8 @@ actor CollabPendingEnds {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     private let file: URL
     private let sleep: @Sendable (Duration) async throws -> Void
+    private var pending: Set<Room> = []
+    private var draining: Set<Room> = []
     private var inFlight: Set<Room> = []
 
     init(file: URL, sleep: @escaping @Sendable (Duration) async throws -> Void) {
@@ -19,36 +22,45 @@ actor CollabPendingEnds {
         self.sleep = sleep
     }
 
-    func close(_ room: Room, service: CollabService) async {
+    func record(_ room: Room) throws {
+        draining.insert(room)
+        pending.insert(room)
+        try persist()
+    }
+
+    func close(_ room: Room, service: CollabService) async throws {
+        draining.remove(room)
         guard inFlight.insert(room).inserted else { return }
         defer { inFlight.remove(room) }
-        remember(room, pending: true)
         let delays: [Duration] = [.seconds(2), .seconds(10), .seconds(30)]
         for attempt in 0...delays.count {
             do {
                 if attempt > 0 { try await sleep(delays[attempt - 1]) }
                 try await service.endRoom(room.id, owner: room.owner)
-                remember(room, pending: false)
-                return
             } catch {
-                if Self.noLongerExists(error) {
-                    remember(room, pending: false)
-                    return
+                if !Self.noLongerExists(error) {
+                    guard attempt < delays.count, Self.canRetry(error) else { throw error }
+                    continue
                 }
-                guard attempt < delays.count, Self.canRetry(error) else { break }
             }
+            pending.remove(room)
+            try persist(removing: room)
+            return
         }
-        if !Task.isCancelled { Self.logger.error("Could not end a collaboration room") }
     }
 
     func replay(apiURL: URL, owner: String, service: CollabService) async {
-        do {
-            for room in try read() where room.apiURL == apiURL && room.owner == owner {
-                guard !Task.isCancelled else { return }
-                await close(room, service: service)
-            }
-        } catch {
+        let stored: Set<Room>
+        do { stored = try read() }
+        catch {
+            stored = []
             Self.logger.error("Could not read pending collaboration room closures: \(String(describing: error), privacy: .private)")
+        }
+        for room in stored.union(pending) where room.apiURL == apiURL && room.owner == owner {
+            guard !Task.isCancelled else { return }
+            guard !draining.contains(room) else { continue }
+            do { try await close(room, service: service) }
+            catch { Self.logger.error("Could not end a collaboration room: \(String(describing: error), privacy: .private)") }
         }
     }
 
@@ -72,18 +84,17 @@ actor CollabPendingEnds {
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return [] }
     }
 
-    private func remember(_ room: Room, pending: Bool) {
+    private func persist(removing room: Room? = nil) throws {
         do {
-            var rooms = try read()
-            if pending {
-                guard rooms.insert(room).inserted else { return }
-            } else {
-                guard rooms.remove(room) != nil else { return }
-            }
+            let stored = try read()
+            var rooms = stored.union(pending)
+            if let room { rooms.remove(room) }
+            guard rooms != stored else { return }
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(rooms).write(to: file, options: .atomic)
         } catch {
             Self.logger.error("Could not save pending collaboration room closures: \(String(describing: error), privacy: .private)")
+            throw CollabError.pendingEndPersistence
         }
     }
 }

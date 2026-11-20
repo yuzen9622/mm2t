@@ -124,8 +124,18 @@ public final class CollabAccount {
 
     func waitForPendingEnds() async { await replaying?.value }
 
+    func recordRoomEnd(_ room: CollabRoom, owner: String) {
+        do { try pendingEnds.record(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId)) }
+        catch { self.error = .pendingEndPersistence }
+    }
+
     func closeRoom(_ room: CollabRoom, owner: String) async {
-        await pendingEnds.close(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId), service: service)
+        do {
+            try await pendingEnds.close(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId), service: service)
+        } catch CollabError.notSignedIn {
+        } catch {
+            if self.error != .pendingEndPersistence { self.error = error as? CollabError ?? .unreachable }
+        }
     }
 
     public func signOut() async {

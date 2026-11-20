@@ -75,30 +75,25 @@ import Testing
 
     @Test func endWaitsForInFlightOpsAndDiscardsQueuedWrites() async throws {
         let f = try await Fixture()
-        let (received, signal) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
-        CollabBackend.holdOps.set(signal)
+        CollabBackend.holdOps.set(true)
         defer {
+            CollabBackend.holdOps.set(false)
             CollabBackend.releaseOps()
-            CollabBackend.holdOps.set(nil)
-            signal.finish()
         }
         f.llm.answerChunks.set(Fixture.create + Array(repeating:
             #"{"op":"appendText","id":"model-id","field":"markdown","text":"字"}"# + "\n", count: 45)
-            + [#"{"op":"done","id":"model-id"}"#])
+            + [Fixture.done])
         f.begin()
-        var arrived = received.makeAsyncIterator()
-        await arrived.next()
+        try #require(await waitForCollabEvent { CollabBackend.deferredReply.get != nil })
         let sender = try #require(f.session.sender)
         let ending = f.session.end()
         #expect(f.session.room == nil)
         #expect(f.session.state == .ended)
-        for _ in 0..<1_000 {
-            if await sender.isSealed { break }
-            await Task.yield()
-        }
-        #expect(await sender.isSealed)
+        let recordedBeforeDrain = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
+        #expect(recordedBeforeDrain == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
+        try #require(await waitForCollabEvent { await sender.isSealed })
         #expect(CollabBackend.events.get == ["ops-start"])
-        CollabBackend.holdOps.set(nil)
+        CollabBackend.holdOps.set(false)
         CollabBackend.releaseOps()
         await ending?.value
         await f.session.waitForWork()
@@ -107,7 +102,7 @@ import Testing
         #expect(CollabBackend.events.get == ["ops-start", "ops-complete", "end"])
     }
 
-    @Test func opsConflictEndsSessionWithoutOfferingRetry() async throws {
+    @Test func opsConflictEndsSessionWithoutCommandButtonOrRetry() async throws {
         let f = try await Fixture()
         CollabBackend.roomEnded.set(true)
         f.llm.answerChunks.set(Fixture.create + [Fixture.done])
@@ -115,6 +110,7 @@ import Testing
         try #require(await eventually { f.session.state == .ended })
         await f.session.waitForWork()
         await f.session.waitForRoomClosure()
+        #expect(!f.session.showsCommandButton)
         #expect(f.session.commandStatus == .hidden)
         #expect(f.session.room == nil)
         #expect(CollabBackend.events.get == ["ops-start", "end"])
@@ -148,6 +144,22 @@ import Testing
         await restored.waitForPendingEnds()
         #expect(CollabBackend.events.get.filter { $0 == "end" }.count == 9)
         #expect(try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile)).isEmpty)
+    }
+
+    @Test func unwritablePendingEndReportsErrorAndReplaysFromMemory() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        try FileManager.default.createDirectory(at: f.pendingFile, withIntermediateDirectories: false)
+        CollabBackend.offlineEnd.set(true)
+        let ending = f.session.end()
+        #expect(f.account.error == .pendingEndPersistence)
+        await ending?.value
+        #expect(f.account.error == .pendingEndPersistence)
+        try FileManager.default.removeItem(at: f.pendingFile)
+        CollabBackend.offlineEnd.set(false)
+        try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
+        await f.account.waitForPendingEnds()
+        #expect(CollabBackend.endBearers.get == Array(repeating: "Bearer test-access", count: 5))
     }
 
     @Test func refreshFailureHidesRoomAndOnlyOriginalAccountCanResumeOrEndIt() async throws {
@@ -440,6 +452,16 @@ import Testing
         await f.session.end()?.value
     }
 
+    private func waitForCollabEvent(_ event: @MainActor () async -> Bool) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(3)
+        while clock.now < deadline, !Task.isCancelled {
+            if await event() { return true }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return false
+    }
+
     @MainActor private struct Fixture {
         static let verifier = String(repeating: "a", count: 43)
         static let create = [#"{"op":"create","id":"model-id","kind":"document","title":"會議決議","source":"command"}"# + "\n"]
@@ -521,12 +543,12 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let rejectDone = Box(false)
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
-    static let holdOps = Box<AsyncStream<Void>.Continuation?>(nil)
+    static let holdOps = Box(false)
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
-        offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(nil); deferredReply.set(nil)
+        offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
     }
 
     static func releaseOps() {
@@ -605,9 +627,9 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 Self.events.update { $0.append("ops-complete") }
                 reply(status: 200, body: Data("{\"applied\":\(batch.ops.count),\"duplicate\":false}".utf8))
             }
-            if let held = Self.holdOps.get {
+            if Self.holdOps.get {
                 Self.deferredReply.set(finish)
-                held.yield(())
+                if !Self.holdOps.get { Self.releaseOps() }
             } else { finish() }
             return
         case "/v1/rooms/room/end":

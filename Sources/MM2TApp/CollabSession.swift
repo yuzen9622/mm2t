@@ -45,6 +45,7 @@ public final class CollabSession {
     public private(set) var commandStatus: CommandStatus = .hidden
     public private(set) var suggestion: CollabSuggestion?
     public private(set) var card: SuggestionPolicy.Card?
+    public var showsCommandButton: Bool { state != .ended }
     public var wantsKeyboard: Bool { commandStatus == .input || state == .confirmingStart }
     public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
     public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
@@ -193,11 +194,15 @@ public final class CollabSession {
         let previous = closingRoom
         let draining = draining
         guard room != nil || creation != nil else { return }
+        if let room { account.recordRoomEnd(room.room, owner: room.owner) }
         closingRoom = Task { [account] in
             await previous?.value
             await draining?.value
             let ending = if let room { room } else { try? await creation?.value }
-            if let ending { await account.closeRoom(ending.room, owner: ending.owner) }
+            if let ending {
+                if room == nil { account.recordRoomEnd(ending.room, owner: ending.owner) }
+                await account.closeRoom(ending.room, owner: ending.owner)
+            }
         }
     }
 

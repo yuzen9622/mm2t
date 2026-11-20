@@ -10,6 +10,7 @@ public enum CollabError: Error, Equatable, Sendable {
     case server(status: Int)
     case invalidBatch
     case credentialCleanup
+    case pendingEndPersistence
 }
 
 public enum CollabLoginProvider: String, Sendable { case google, apple }

@@ -597,7 +597,9 @@ struct CapsuleBar: View {
             }
             if let collaboration {
                 if let url = collaboration.room?.shareUrl { CollabCopyLink(url: url) }
-                CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
+                if collaboration.showsCommandButton {
+                    CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
+                }
             }
             CircleButton("Finish", icon: "check", kind: .primary, action: finish)
         }
