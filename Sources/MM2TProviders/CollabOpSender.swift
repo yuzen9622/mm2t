@@ -124,6 +124,7 @@ public actor CollabOpSender {
                         try await send(batch)
                         break
                     } catch {
+                        if error as? CollabError == .roomEnded { throw error }
                         if isSealed { return }
                         if attempt == 2 { throw error }
                     }

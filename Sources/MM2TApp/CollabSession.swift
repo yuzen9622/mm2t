@@ -364,7 +364,10 @@ public final class CollabSession {
         guard let binding = ownedRoom, binding.room == room else { throw CollabError.notSignedIn }
         let response = try await account.service.components(in: room.roomId, owner: binding.owner)
         try Task.checkCancellation()
-        guard response.status == .live else { throw CollabError.roomEnded }
+        guard response.status == .live else {
+            _ = end()
+            throw CollabError.roomEnded
+        }
         knownComponents = response.components
         pruneCaptions()
         return response.components
@@ -516,8 +519,17 @@ public final class CollabSession {
     }
 
     private func makeSender(_ room: CollabRoom, owner: String) -> CollabOpSender {
-        CollabOpSender { [service = account.service] batch in
-            try await service.sendOps(batch, to: room.roomId, owner: owner)
+        CollabOpSender { [weak self, service = account.service] batch in
+            do { try await service.sendOps(batch, to: room.roomId, owner: owner) }
+            catch CollabError.roomEnded {
+                await self?.didDetectEndedRoom(room, owner: owner)
+                throw CollabError.roomEnded
+            }
         }
+    }
+
+    private func didDetectEndedRoom(_ room: CollabRoom, owner: String) {
+        guard ownedRoom?.room == room, ownedRoom?.owner == owner else { return }
+        _ = end()
     }
 }

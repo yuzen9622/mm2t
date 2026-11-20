@@ -107,6 +107,20 @@ import Testing
         #expect(CollabBackend.events.get == ["ops-start", "ops-complete", "end"])
     }
 
+    @Test func opsConflictEndsSessionWithoutOfferingRetry() async throws {
+        let f = try await Fixture()
+        CollabBackend.roomEnded.set(true)
+        f.llm.answerChunks.set(Fixture.create + [Fixture.done])
+        f.begin()
+        try #require(await eventually { f.session.state == .ended })
+        await f.session.waitForWork()
+        await f.session.waitForRoomClosure()
+        #expect(f.session.commandStatus == .hidden)
+        #expect(f.session.room == nil)
+        #expect(CollabBackend.events.get == ["ops-start", "end"])
+        #expect(try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile)).isEmpty)
+    }
+
     @Test func offlineEndPersistsAndReplaysOnStartupAndSignIn() async throws {
         let retry = Gate<Bool>()
         let f = try await Fixture(waitOnRetry: { _ = await retry.wait() })
@@ -454,6 +468,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
     static let exchanges = Box<[[String: String]]>([])
+    static let roomEnded = Box(false)
     static let rejectDone = Box(false)
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
@@ -462,7 +477,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
-        offlineEnd.set(false); rejectDone.set(false); expired.set(false); holdOps.set(nil); deferredReply.set(nil)
+        offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(nil); deferredReply.set(nil)
     }
 
     static func releaseOps() {
@@ -509,6 +524,10 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             response = (200, Data("{\"status\":\"live\",\"components\":\(json)}".utf8))
         case "/v1/rooms/room/ops":
             Self.events.update { $0.append("ops-start") }
+            if Self.roomEnded.get {
+                reply(status: 409, body: Data(#"{"error":"room_ended"}"#.utf8))
+                return
+            }
             guard let batch = try? JSONDecoder().decode(Batch.self, from: body()) else {
                 reply(status: 400, body: Data()); return
             }
@@ -549,7 +568,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
                 return
             }
-            response = (204, Data())
+            response = (200, Data(#"{"status":"ended"}"#.utf8))
         case "/v1/auth/logout": response = (200, Data(#"{"ok":true}"#.utf8))
         default: response = (404, Data())
         }

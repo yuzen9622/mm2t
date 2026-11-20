@@ -16,9 +16,9 @@ struct CollabServiceTests {
             case "/v1/auth/exchange": .status(200, Self.login)
             case "/v1/me": .status(200, Self.profile)
             case "/v1/rooms": .status(201, #"{"roomId":"r","shareUrl":"https://web.invalid/r/share","hostUrl":"https://web.invalid/r/share#host=code"}"#)
-            case "/v1/rooms/r/components": .status(200, #"{"status":"live","components":[{"id":"doc","kind":"document","title":"Meeting","source":"command","building":false,"updatedAt":"2026-11-20T12:00:00Z","content":"Text"}]}"#)
+            case "/v1/rooms/r/components": .status(200, #"{"status":"live","components":[{"id":"doc","kind":"document","title":"Meeting","source":"command","building":false,"createdAt":"2026-11-20T11:00:00.000Z","updatedAt":"2026-11-20T12:00:00.000Z","rev":1,"content":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Text"}]}]}}]}"#)
             case "/v1/rooms/r/ops": .status(200, #"{"applied":1,"duplicate":false}"#)
-            case "/v1/rooms/r/end": .status(204, "")
+            case "/v1/rooms/r/end": .status(200, #"{"status":"ended"}"#)
             case "/v1/auth/logout": .status(200, #"{"ok":true}"#)
             default: .status(500, "")
             }
@@ -40,29 +40,37 @@ struct CollabServiceTests {
         let room = try await service.createRoom(title: "會議", owner: "u")
         #expect(room.roomId == "r" && room.shareUrl.absoluteString == "https://web.invalid/r/share" && room.hostUrl.fragment == "host=code")
         let components = try await service.components(in: room.roomId, owner: "u")
-        #expect(components.components.first?.fields["content"] == .string("Text"))
+        let document = try #require(components.components.first)
+        #expect(document.updatedAt == "2026-11-20T12:00:00.000Z")
+        #expect(document.fields["content"] == .object([
+            "type": .string("doc"), "content": .array([.object([
+                "type": .string("paragraph"), "content": .array([.object(["type": .string("text"), "text": .string("Text")])]),
+            ])]),
+        ]))
         let batch = CollabOpBatch([.done(id: "doc")])
         let result = try await service.sendOps(batch, to: room.roomId, owner: "u")
         #expect(result.applied == 1 && !result.duplicate)
+        try await service.endRoom(room.roomId, owner: "u")
         try await service.endRoom(room.roomId, owner: "u")
         try await service.logout()
         #expect(store.saved?.isEmpty == true)
         await #expect(throws: CollabError.notSignedIn) { try await service.me() }
         let calls = server.requests
-        #expect(calls.map(\.url.path) == ["/v1/auth/exchange", "/v1/me", "/v1/rooms", "/v1/rooms/r/components", "/v1/rooms/r/ops", "/v1/rooms/r/end", "/v1/auth/logout"])
-        #expect(calls.map(\.method) == ["POST", "GET", "POST", "GET", "POST", "POST", "POST"])
+        #expect(calls.map(\.url.path) == ["/v1/auth/exchange", "/v1/me", "/v1/rooms", "/v1/rooms/r/components", "/v1/rooms/r/ops", "/v1/rooms/r/end", "/v1/rooms/r/end", "/v1/auth/logout"])
+        #expect(calls.map(\.method) == ["POST", "GET", "POST", "GET", "POST", "POST", "POST", "POST"])
         #expect(calls[0].headers["Authorization"] == nil)
         #expect(calls.dropFirst().dropLast().allSatisfy { $0.headers["Authorization"] == "Bearer a1" })
         #expect(calls.allSatisfy { $0.headers["Accept"] == "application/json" })
         let json = JSONDecoder()
         #expect(try json.decode([String: String].self, from: calls[0].body) == ["code": "one-time", "codeVerifier": Self.verifier])
-        #expect(calls[6].headers["Authorization"] == nil)
-        #expect(try json.decode([String: String].self, from: calls[6].body) == ["refreshToken": "r1"])
+        #expect(calls[7].headers["Authorization"] == nil)
+        #expect(try json.decode([String: String].self, from: calls[7].body) == ["refreshToken": "r1"])
         #expect(try json.decode([String: String].self, from: calls[2].body) == ["title": "會議", "aiSource": "own"])
         let wire = try json.decode(OpWire.self, from: calls[4].body)
         #expect(wire.batchId == batch.batchId)
         #expect(wire.ops == [.done(id: "doc")])
         #expect(calls[4].headers["Content-Type"] == "application/json")
+        #expect(calls[1].body.isEmpty && calls[3].body.isEmpty && calls[5].body.isEmpty && calls[6].body.isEmpty)
     }
 
     @Test func refreshRotatesCredentialsAndRetryOnlyOnce() async throws {
@@ -206,6 +214,29 @@ struct CollabServiceTests {
     private struct OpWire: Decodable {
         let batchId: UUID
         let ops: [CollabOp]
+    }
+
+    @Test func endedRoomDropsQueuedOpsWithoutRetrying() async throws {
+        let server = StubServer { call in
+            call.url.path == "/v1/auth/exchange" ? .status(200, Self.login) : .status(409, #"{"error":"room_ended"}"#)
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let (release, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+        defer { continuation.finish() }
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }) { batch in
+            for await _ in release { break }
+            try await service.sendOps(batch, to: "r", owner: "u")
+        }
+        let ops = (0..<21).map { CollabOp.done(id: "doc-\($0)") }
+        for op in ops { try await sender.append(op) }
+        continuation.yield(())
+        continuation.finish()
+        await #expect(throws: CollabError.roomEnded) { try await sender.finish() }
+        await #expect(throws: CollabError.roomEnded) { try await sender.append(.done(id: "late")) }
+        let calls = server.requests.filter { $0.url.path == "/v1/rooms/r/ops" }
+        try #require(calls.count == 1)
+        #expect(try JSONDecoder().decode(OpWire.self, from: calls[0].body).ops == Array(ops.prefix(20)))
     }
 
     @Test func lostResponseRetriesIdenticalBatchWithoutReapplying() async throws {

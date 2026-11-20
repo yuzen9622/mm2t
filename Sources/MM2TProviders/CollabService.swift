@@ -79,6 +79,7 @@ public actor CollabService {
     }
 
     private struct Logout: Decodable { let ok: Bool }
+    private struct End: Decodable { let status: CollabRoomComponents.Status }
 
     private struct Failure: Decodable {
         let error: String
@@ -193,7 +194,8 @@ public actor CollabService {
     }
 
     public func endRoom(_ id: String, owner: String) async throws {
-        _ = try await authorized(Request(post: ["rooms", id, "end"]), owner: owner)
+        let response = try await authorized(Request(post: ["rooms", id, "end"]), owner: owner)
+        guard try parse(End.self, from: response).status == .ended else { throw CollabError.server(status: response.1) }
     }
 
     public func components(in id: String, owner: String) async throws -> CollabRoomComponents {
@@ -323,7 +325,7 @@ public actor CollabService {
         if status == 429, failure?.error == "quota_exceeded", let used = failure?.used, let limit = failure?.limit {
             throw CollabError.quotaExceeded(used: used, limit: limit)
         }
-        if failure?.error == "room_ended" { throw CollabError.roomEnded }
+        if status == 409, failure?.error == "room_ended" { throw CollabError.roomEnded }
         throw CollabError.server(status: status)
     }
 }
