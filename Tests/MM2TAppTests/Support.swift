@@ -130,6 +130,12 @@ final class FakeStreamingSession: StreamingTranscriptionSession, @unchecked Send
     private let continuation: AsyncThrowingStream<StreamingTranscriptEvent, Error>.Continuation
     let sent = Box<[[Float]]>([])
     let closed = Box(false)
+    let discardGate = Box<Gate<Bool>?>(nil)
+
+    func discard() async {
+        if let gate = discardGate.get { _ = await gate.wait() }
+        await close()
+    }
 
     init() { (events, continuation) = AsyncThrowingStream.makeStream() }
 

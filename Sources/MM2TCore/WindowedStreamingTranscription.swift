@@ -41,6 +41,17 @@ public protocol ClipTranscriber: Sendable {
     func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest) async throws -> String
 }
 
+public protocol ProgressiveClipTranscriber: ClipTranscriber {
+    func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest,
+                    onPartial: @escaping @Sendable (String) -> Void) async throws -> String
+}
+
+extension ProgressiveClipTranscriber {
+    public func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest) async throws -> String {
+        try await transcribe(clip: samples, request: request, onPartial: { _ in })
+    }
+}
+
 /// Streams by re-decoding the segment being spoken as it grows, then settling it at a pause.
 public struct WindowedStreamingTranscription: StreamingTranscriptionProvider {
     let transcriber: any ClipTranscriber
@@ -86,16 +97,23 @@ actor WindowedSession: StreamingTranscriptionSession {
 
     func close() async {
         isClosed = true
+        output.finish()
         worker?.cancel()
         wake.finish()
-        output.finish()
     }
 
     private func work() async {
         for await _ in wakes {
             while !Task.isCancelled, let (clip, isFinal) = nextClip() {
                 do {
-                    let text = try await transcriber.transcribe(clip: clip, request: request)
+                    let text: String
+                    if let progressive = transcriber as? any ProgressiveClipTranscriber {
+                        text = try await progressive.transcribe(clip: clip, request: request) { [output] text in
+                            output.yield(.partial(text))
+                        }
+                    } else {
+                        text = try await transcriber.transcribe(clip: clip, request: request)
+                    }
                     guard !Task.isCancelled else { return }
                     output.yield(isFinal ? .final(text) : .partial(text))
                 } catch {

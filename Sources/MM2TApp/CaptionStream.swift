@@ -45,6 +45,7 @@ public actor CaptionStream {
         guard !isStopped, audioTask == nil else { return }
         self.sampleRate = sampleRate
         await captions.set(.connecting)
+        guard !isStopped else { return }
         audioTask = Task { [weak self] in
             for await samples in audio {
                 await self?.feed(samples)
@@ -58,6 +59,7 @@ public actor CaptionStream {
         guard !isStopped, !isPaused else { return }
         isPaused = true
         await disconnect()
+        guard !isStopped else { return }
         await captions.settlePartial()
     }
 
@@ -66,6 +68,7 @@ public actor CaptionStream {
         isPaused = false
         failures = 0
         await captions.set(.connecting)
+        guard !isStopped else { return }
         connect()
     }
 
@@ -95,7 +98,11 @@ public actor CaptionStream {
         pending = []
         let open = connection
         connection = nil
-        if discard { await open?.discard() } else { await open?.close() }
+        if discard {
+            if let open { Task { await open.discard() } }
+        } else {
+            await open?.close()
+        }
     }
 
     private func isCurrent(_ run: Int) -> Bool {
@@ -114,7 +121,7 @@ public actor CaptionStream {
                 let session = try await provider.open(StreamingTranscriptionRequest(
                     languageCode: languageCode, hints: hints, sampleRate: sampleRate, previousText: previous))
                 guard isCurrent(run) else {
-                    await session.close()
+                    if isStopped { await session.discard() } else { await session.close() }
                     return
                 }
                 connection = session
@@ -130,6 +137,7 @@ public actor CaptionStream {
                 guard isCurrent(run) else { return }
                 Self.logger.error("event=captions_unavailable")
                 await disconnect()
+                guard !isStopped else { return }
                 await captions.set(.unavailable(reason))
                 return
             } catch {
@@ -141,6 +149,7 @@ public actor CaptionStream {
             connection = nil
             pending = []
             await lost?.close()
+            guard isCurrent(run) else { return }
             failures += 1
             await captions.set(.reconnecting)
         }

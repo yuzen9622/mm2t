@@ -75,21 +75,21 @@ public actor LiveTranscriber {
     var pollingInterval: Duration { chain.routes.first?.source == .local ? .milliseconds(200) : .seconds(2) }
 
     public func advance() async {
-        guard !isFinishing, await isConfigurationCurrent() else { return }
+        guard await isConfigurationCurrent(), !isFinishing else { return }
+        if let working { await working.value; return }
         if let retryAfter, now() < retryAfter { return }
         failed = false
-        await run { await self.transcribePieces(final: false) }
+        let task = Task { await self.transcribePieces(final: false) }
+        working = task
+        await task.value
+        working = nil
     }
 
-    /// Stops reading new pieces and lets the current upload finish before the recorder's files
-    /// move into the library. Otherwise an in-flight advance can read an old path after the move
-    /// and discard all the work done during the meeting.
+    /// Cancel the live request without making durable storage wait for its provider.
     public func prepareForMove() async {
         isFinishing = true
+        working?.cancel()
         await processing?.stopCheckpoints()
-        // MLX has already copied both WAV slices into memory before it waits for its helper.
-        // The finalizer can join that work after the recorder publishes the durable audio.
-        if !(chain.routes.first?.provider is BreezeMLX && processing == nil) { await working?.value }
     }
 
     /// Transcribes what is left once the recorder has closed the files, which by then have moved to
@@ -111,7 +111,7 @@ public actor LiveTranscriber {
         // A temporary network failure leaves `cut` at the last fully successful pair of tracks.
         // Retry that piece rather than sending the whole meeting again.
         failed = false
-        await run { await self.transcribePieces(final: true) }
+        await transcribePieces(final: true)
         guard !Task.isCancelled, await isConfigurationCurrent() else { await processing?.discard(); return nil }
         await processing?.finish()
         guard await isConfigurationCurrent() else { return nil }
@@ -149,20 +149,6 @@ public actor LiveTranscriber {
             remote: TrackTranscript(source: sources[.remote] ?? fallback, content: .unlabeled(words[.remote]!)))
     }
 
-    private func run(_ work: @escaping @Sendable () async -> Void) async {
-        let previous = working
-        let task = Task {
-            await previous?.value
-            await work()
-        }
-        working = task
-        if isFinishing {
-            await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
-        } else {
-            await task.value
-        }
-    }
-
     private func transcribePieces(final: Bool) async {
         while !Task.isCancelled, !failed, final || !isFinishing {
             guard await isConfigurationCurrent() else { failed = true; return }
@@ -198,6 +184,7 @@ public actor LiveTranscriber {
                 let started = ContinuousClock.now
                 let (a, b) = try await transcribePair(range, rate: rate)
                 guard await isConfigurationCurrent() else { failed = true; return }
+                guard !Task.isCancelled else { return }
                 for (track, result) in [(Track.me, a), (.remote, b)] {
                     words[track]! += result.words
                     if let source = result.source { sources[track] = source }
@@ -214,6 +201,7 @@ public actor LiveTranscriber {
                 }
                 if final, end == available { return }
             } catch {
+                guard !Task.isCancelled else { return }
                 failed = true
                 consecutiveFailures += 1
                 let delay = min(120.0, 30.0 * pow(2, Double(min(consecutiveFailures - 1, 2))))

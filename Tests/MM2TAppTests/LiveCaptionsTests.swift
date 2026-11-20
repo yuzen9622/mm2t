@@ -308,8 +308,14 @@ import Testing
         session.say(.partial("今天"))
         #expect(await eventually { world.capture.captions.partial == "今天" })
 
-        await world.capture.stop()
-        #expect(session.closed.get)
+        let gate = Gate<Bool>()
+        session.discardGate.set(gate)
+        let stopping = Task { await world.capture.stop() }
+        #expect(await eventually { world.capture.lastSavedMeeting != nil && world.capture.state == .idle })
+        #expect(!session.closed.get)
+        await gate.open(true)
+        await stopping.value
+        #expect(await eventually { session.closed.get })
         #expect(world.capture.captions.segments.isEmpty)
         #expect(world.capture.captions.partial.isEmpty)
         #expect(world.capture.captions.status == .off)

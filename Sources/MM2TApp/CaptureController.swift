@@ -428,14 +428,14 @@ public final class CaptureController {
         eventTask = nil
         liveTask?.cancel()
         liveTask = nil
-        await stopCaptions()
         let live = self.live
         self.live = nil
         self.session = nil
+        await live?.prepareForMove()
+        await stopCaptions()
         let id: MeetingID
         do {
             let recording = try await session.stop()
-            await live?.prepareForMove()
             id = try await library.create(recording).id
             try? FileManager.default.removeItem(at: recording.micTrack.deletingLastPathComponent())
         } catch {

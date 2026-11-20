@@ -81,7 +81,7 @@ public struct LocalTranscription: TranscriptionProvider {
 }
 
 /// Live captions on this Mac: each clip is decoded from memory by the model the recordings use.
-extension LocalTranscription: ClipTranscriber {
+extension LocalTranscription: ProgressiveClipTranscriber {
     public func prepare() async throws {
         do {
             try await engine.prepare()
@@ -90,10 +90,11 @@ extension LocalTranscription: ClipTranscriber {
         }
     }
 
-    public func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest) async throws -> String {
+    public func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest,
+                           onPartial: @escaping @Sendable (String) -> Void) async throws -> String {
         do {
             let clip = Self.resampled(samples, from: request.sampleRate, to: WhisperKit.sampleRate)
-            return Alignment.joined(try await engine.transcribe(clip: clip, hints: request.hints, languageCode: request.languageCode))
+            return Alignment.joined(try await engine.transcribe(clip: clip, hints: request.hints, languageCode: request.languageCode, onPartial: onPartial))
         } catch let error as ProviderError {
             throw error.asTranscriptionError
         } catch is CancellationError {
@@ -163,16 +164,38 @@ actor WhisperEngine {
         try await exclusively { _ = try await load() }
     }
 
-    /// A clip under 30 s is one Whisper window: no chunking or word timings, and a single
-    /// temperature fallback, so a caption is never held up by retries.
-    func transcribe(clip: [Float], hints: [String], languageCode: String?) async throws -> [TimedWord] {
-        try await exclusively {
+    /// Caption progress belongs to one decoding pass. A retry would mix detached token updates
+    /// from competing hypotheses; the separate timed recording transcript keeps its retries.
+    func transcribe(clip: [Float], hints: [String], languageCode: String?,
+                    onPartial: @escaping @Sendable (String) -> Void) async throws -> [TimedWord] {
+        let logger = Logger(subsystem: "dev.mm2t.app", category: "Captions")
+        logger.info("event=breeze_caption_queued frames=\(clip.count, privacy: .public)")
+        return try await exclusively {
+            try Task.checkCancellation()
+            logger.info("event=breeze_caption_decode_started")
             let whisper = try await load()
             var options = DecodingOptions(
-                task: .transcribe, language: languageCode, temperatureFallbackCount: 1, usePrefillPrompt: true,
+                task: .transcribe, language: languageCode, temperatureFallbackCount: 0, usePrefillPrompt: true,
                 detectLanguage: languageCode == nil, skipSpecialTokens: true, withoutTimestamps: true)
             options.promptTokens = Self.promptTokens(hints, tokenizer: whisper.tokenizer)
-            return Self.words(try await whisper.transcribe(audioArray: clip, decodeOptions: options).flatMap(\.segments))
+            let prompt = options.promptTokens.flatMap { whisper.tokenizer?.decode(tokens: $0) } ?? ""
+            // WhisperKit delivers token updates on detached tasks, including after a clip returns.
+            let lastTokenCount = OSAllocatedUnfairLock<Int?>(initialState: 0)
+            defer { lastTokenCount.withLock { $0 = nil } }
+            let results: [TranscriptionResult] = try await whisper.transcribe(audioArray: clip, decodeOptions: options) { progress in
+                lastTokenCount.withLock { count in
+                    guard let previous = count, progress.tokens.count > previous else { return }
+                    let raw = progress.text
+                    guard raw.hasPrefix(prompt) else { return }
+                    let text = raw.dropFirst(prompt.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return }
+                    if previous == 0 { logger.info("event=breeze_caption_first_token") }
+                    count = progress.tokens.count
+                    onPartial(text)
+                }
+                return nil
+            }
+            return Self.words(results.flatMap(\.segments))
         }
     }
 

@@ -62,6 +62,29 @@ import Testing
         #expect(try await events.next() == nil)
     }
 
+    @Test func aSettledClipPublishesDecoderProgressBeforeTheFinalText() async throws {
+        struct Decoder: ProgressiveClipTranscriber {
+            let acknowledged: AsyncStream<Void>
+            func prepare() async throws {}
+            func transcribe(clip samples: [Float], request: StreamingTranscriptionRequest,
+                            onPartial: @escaping @Sendable (String) -> Void) async throws -> String {
+                onPartial("你")
+                for await _ in acknowledged { return "你好" }
+                throw TranscriptionError.failed("partial did not reach consumer during decode")
+            }
+        }
+        let (ack, signal) = AsyncStream<Void>.makeStream()
+        let timeout = Task { try await Task.sleep(for: .seconds(3)); signal.finish() }
+        defer { timeout.cancel(); signal.finish() }
+        let session = try await WindowedStreamingTranscription(Decoder(acknowledged: ack)).open(request)
+        var events = session.events.makeAsyncIterator()
+        try await session.send(speech(1) + silence(1))
+        #expect(try await events.next() == .partial("你"))
+        signal.yield(())
+        #expect(try await events.next() == .final("你好"))
+        await session.close()
+    }
+
     @Test func aSlowModelSkipsStalePartialsButSettlesEverySegmentInOrder() async throws {
         let clips = FakeClips(delay: .milliseconds(50))
         let session = try await WindowedStreamingTranscription(clips).open(request)
