@@ -202,6 +202,29 @@ import Testing
 }
 
 @MainActor @Suite struct DashboardTests {
+    @Test func pinDeleteAndRestoreShareTheSameMeetingItem() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let dashboard = world.app.dashboard
+        await dashboard.reload()
+        let todo = try #require(dashboard.todos.first)
+        let row = try #require(detail.presentation?.summary?.actionItems.first)
+        #expect(detail.markKey(row) == todo.key)
+        #expect(detail.isPersonal(row) == todo.isMine)
+        let status = dashboard.status
+        #expect(status.set(.pinned, for: todo.key, enabled: true))
+        #expect(status.set(.deleted, for: todo.key, enabled: true))
+        #expect(dashboard.todos.isEmpty)
+        let restored = TodoStatus(file: world.root.appending(path: "todos.json"))
+        #expect(restored.snapshot.deleted == [todo.key])
+        #expect(restored.marks[todo.key]?.contains(.pinned) == true)
+        #expect(status.set(.deleted, for: todo.key, enabled: false))
+        #expect(dashboard.todos.first?.key == todo.key)
+        #expect(!status.isDone(todo.id))
+    }
+
     @Test func collectsTodosTalkTimeAndActivityFromFinishedMeetings() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()

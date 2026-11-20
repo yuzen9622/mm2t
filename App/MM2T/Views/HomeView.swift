@@ -6,7 +6,7 @@ import SwiftUI
 /// The dashboard: the calendar first, then what the user owes, then what their meetings add up to.
 struct HomeView: View {
     let app: AppController
-    let open: (MeetingID) -> Void
+    let open: (MeetingID, String) -> Void
     /// Numbers, bars and the heatmap start empty and run up to their values once the data is in.
     @State private var revealed = false
 
@@ -40,6 +40,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
             }
         }
+        .dropdownLayer()
         .task(id: app.queue.revision) {
             await model.reload()
             revealed = true
@@ -516,77 +517,70 @@ private struct SourceRow: View {
 
 private struct TodoCard: View {
     let model: DashboardModel
-    let open: (MeetingID) -> Void
+    let open: (MeetingID, String) -> Void
 
-    private var shown: [TodoRow] {
-        Array((model.todos.filter { !$0.isDone } + model.todos.filter(\.isDone)).prefix(7))
-    }
+    @State private var mine = true
 
     var body: some View {
-        let remaining = model.todos.filter { !$0.isDone }.count
+        let shown = model.todos.filter { !mine || $0.isMine || model.status.marks[$0.key]?.contains(.personal) == true }
         DashCard(title: "To-dos", icon: "circle-check") {
-            if !model.todos.isEmpty {
+            if let key = model.status.lastDeleted {
+                Button("Undo Delete") { model.status.set(.deleted, for: key, enabled: false) }.buttonStyle(.link)
+            }
+            if !shown.isEmpty {
+                let remaining = shown.count { !$0.isDone }
                 Text("\(remaining) open").font(Typo.caption).foregroundStyle(Palette.secondary).monospacedDigit()
                     .contentTransition(.numericText(value: Double(remaining)))
                     .motion(Motion.select, value: remaining)
             }
+            Dropdown(label: "To-dos", options: [
+                .init(id: true, title: String(localized: "My to-dos")),
+                .init(id: false, title: String(localized: "All"))
+            ], selection: $mine)
         } content: {
-            if model.todos.isEmpty {
-                Hint(text: "Action items from your meetings' summaries collect here.")
+            if shown.isEmpty {
+                Hint(text: mine ? "No personal to-dos" : "Action items from your meetings' summaries collect here.")
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(shown) { todo in TodoRowView(todo: todo, toggle: { model.toggle(todo) }, open: { open(todo.meeting) }) }
-                        let visible = shown.filter { !$0.isDone }.count
-                        if remaining > visible { Hint(text: "\(remaining - visible) more in your meetings") }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                List(shown) { todo in
+                    HomeTodoRow(todo: todo, pinned: model.status.marks[todo.key]?.contains(.pinned) == true,
+                                toggle: { model.toggle(todo) }, open: { open(todo.meeting, todo.key) })
+                        .modifier(TodoActions(status: model.status, key: todo.key, allowPersonal: !todo.isMine))
+                        .listRowSeparator(.hidden)
+                }.listStyle(.plain).scrollContentBackground(.hidden)
                     .motion(Motion.select, value: shown.map(\.id))
-                }
             }
         }
     }
 }
 
-private struct TodoRowView: View {
+private struct HomeTodoRow: View {
     let todo: TodoRow
+    let pinned: Bool
     let toggle: () -> Void
     let open: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 2) {
             Button(action: toggle) {
-                ZStack {
-                    Circle().strokeBorder(todo.isDone ? Palette.orange : Palette.muted, lineWidth: 1.5)
-                    if todo.isDone {
-                        Circle().fill(Palette.orange)
-                        Icon("check", size: 11).foregroundStyle(.white)
-                    }
-                }
-                .frame(width: 18, height: 18)
-                .contentShape(Circle())
-            }
-            .buttonStyle(Pressable())
-            .accessibilityLabel(todo.isDone ? "Mark as not done" : "Mark as done")
-            Button(action: open) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(todo.text)
-                        .strikethrough(todo.isDone)
+                HStack(alignment: .top, spacing: 10) {
+                    ZStack {
+                        Circle().strokeBorder(todo.isDone ? Palette.orange : Palette.muted, lineWidth: 1.5)
+                        if todo.isDone {
+                            Circle().fill(Palette.orange)
+                            Icon("check", size: 11).foregroundStyle(.white)
+                        }
+                    }.frame(width: 18, height: 18)
+                    Text(todo.text).strikethrough(todo.isDone)
                         .foregroundStyle(todo.isDone ? Palette.muted : Palette.text)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: [todo.owner, todo.meetingTitle].compactMap { $0 }.joined(separator: " · "))
-                        .font(Typo.caption)
-                        .foregroundStyle(hovering ? Palette.orange : Palette.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
+                        .multilineTextAlignment(.leading).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    if pinned { Image(systemName: "pin.fill").font(.caption) }
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(Pressable())
+            Button(action: open) {
+                Text(verbatim: [todo.owner, todo.meetingTitle].compactMap { $0 }.joined(separator: " · "))
+                    .font(Typo.caption).foregroundStyle(hovering ? Palette.orange : Palette.secondary).lineLimit(1)
+            }.buttonStyle(.plain).onHover { hovering = $0 }.padding(.leading, 28)
         }
         .motion(Motion.touch, value: hovering)
         .motion(Motion.select, value: todo.isDone)

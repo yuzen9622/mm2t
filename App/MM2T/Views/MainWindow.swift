@@ -95,6 +95,7 @@ struct MainWindow: View {
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
     @State private var utterance: UtteranceID?
+    @State private var todoKey: String?
     @State private var destinationID = UUID()
     @State private var vocabularyEditor: VocabularyView.Editor?
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
@@ -377,7 +378,7 @@ struct MainWindow: View {
         SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
     }
 
-    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
+    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil) {
         if item == .settings {
             MainNavigation.shared.settingsOpen = true
             return
@@ -392,6 +393,7 @@ struct MainWindow: View {
         section = item
         self.meeting = meeting
         self.utterance = utterance
+        self.todoKey = todoKey
         destinationID = UUID()
     }
 
@@ -415,10 +417,10 @@ struct MainWindow: View {
         ZStack {
             switch section {
             case .home, .settings:
-                HomeView(app: app, open: { show(.meetings, meeting: $0) }).transition(.opacity)
+                HomeView(app: app, open: { show(.meetings, meeting: $0, todoKey: $1) }).transition(.opacity)
             case .meetings:
                 if let meeting {
-                    MeetingDetailView(app: app, id: meeting, utterance: utterance, back: { self.meeting = nil })
+                    MeetingDetailView(app: app, id: meeting, utterance: utterance, todoKey: todoKey, back: { self.meeting = nil })
                         .id(destinationID)
                         .entrance(from: .trailing, distance: 28)
                 } else {

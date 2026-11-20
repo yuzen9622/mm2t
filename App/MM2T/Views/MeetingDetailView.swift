@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct MeetingDetailView: View {
     let app: AppController
     let back: () -> Void
+    let todoKey: String?
     let utterance: UtteranceID?
     @State private var openedAtUtterance = false
     @State private var model: MeetingDetailModel
@@ -20,9 +21,10 @@ struct MeetingDetailView: View {
     @State private var playhead = Playhead()
     @State private var confirmRegenerate = false
 
-    init(app: AppController, id: MeetingID, utterance: UtteranceID? = nil, back: @escaping () -> Void) {
+    init(app: AppController, id: MeetingID, utterance: UtteranceID? = nil, todoKey: String? = nil, back: @escaping () -> Void) {
         self.app = app
         self.utterance = utterance
+        self.todoKey = todoKey
         self.back = back
         _model = State(initialValue: app.detail(id, labels: Copy.presentationLabels, playback: TwoTrackPlayer()))
     }
@@ -55,7 +57,7 @@ struct MeetingDetailView: View {
                     banners
                     Segmented(options: TranscriptView.allCases, selection: $model.selectedView) { Copy.view(for: $0) }
                     if let presentation = model.presentation {
-                        TranscriptContent(model: model, presentation: presentation, playhead: playhead)
+                        TranscriptContent(model: model, presentation: presentation, playhead: playhead, todoKey: todoKey)
                             .overlay(alignment: .bottom) {
                                 if let playback = model.playback {
                                     TransportBar(playhead: playhead, status: playback.status, toggle: {
@@ -85,6 +87,7 @@ struct MeetingDetailView: View {
             .motion(Motion.page, value: showSpeakers)
         }
         .task(id: app.queue.revision) {
+            if !openedAtUtterance, todoKey != nil { model.selectedView = .summary }
             await model.load(at: openedAtUtterance ? nil : utterance)
             if !Task.isCancelled { openedAtUtterance = true }
             sample()

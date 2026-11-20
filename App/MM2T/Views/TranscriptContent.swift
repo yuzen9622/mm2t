@@ -6,6 +6,8 @@ struct TranscriptContent: View {
     let model: MeetingDetailModel
     let presentation: MeetingPresentation
     let playhead: Playhead
+    var todoKey: String? = nil
+    @State private var highlight: String?
     /// Set when the user scrolls away while playing; the view stops following until they come back.
     @State private var followPaused = false
 
@@ -38,6 +40,15 @@ struct TranscriptContent: View {
             }
             .onChange(of: model.focusedUtterance, initial: true) { _, id in
                 if let id { withAnimation(Motion.page) { proxy.scrollTo(anchors[id.rawValue] ?? id.rawValue, anchor: .center) } }
+            }
+            .task(id: todoKey) {
+                guard let todoKey, model.selectedView == .summary else { return }
+                proxy.scrollTo("summary-actions", anchor: .top)
+                await Task.yield()
+                proxy.scrollTo(todoKey, anchor: .center)
+                highlight = todoKey
+                try? await Task.sleep(for: .seconds(2))
+                highlight = nil
             }
             .onChange(of: currentID) { _, id in
                 guard let id, playhead.isPlaying, !followPaused else { return }
@@ -154,7 +165,7 @@ struct TranscriptContent: View {
             section(Copy.presentationLabels.decisions, summary.decisions, speakers: false)
             section(Copy.presentationLabels.discussionPoints, summary.discussionPoints, speakers: false)
             if !summary.actionItems.isEmpty {
-                TodoSection(title: Copy.presentationLabels.actionItems, rows: summary.actionItems, model: model)
+                TodoSection(title: Copy.presentationLabels.actionItems, rows: summary.actionItems, model: model, highlight: highlight).id("summary-actions")
             }
         } else {
             NotGenerated()

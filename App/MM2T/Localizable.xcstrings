@@ -1,6 +1,96 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "All": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        }
+      }
+    },
+    "My to-dos": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "我的待辦"
+          }
+        }
+      }
+    },
+    "No personal to-dos": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前沒有我的待辦"
+          }
+        }
+      }
+    },
+    "Pin": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置頂"
+          }
+        }
+      }
+    },
+    "Undo Delete": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復原刪除"
+          }
+        }
+      }
+    },
+    "Unpin": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消置頂"
+          }
+        }
+      }
+    },
+    "Delete to-do": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除待辦事項"
+          }
+        }
+      }
+    },
+    "Add to My to-dos": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入我的待辦"
+          }
+        }
+      }
+    },
+    "Remove from My to-dos": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從我的待辦移除"
+          }
+        }
+      }
+    },
     "Translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯模型" } } } },
     "Apple Translation requires macOS 26 or later.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Apple 翻譯需要 macOS 26 或以上版本。" } } } },
     "Unavailable": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法使用" } } } },

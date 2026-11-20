@@ -172,6 +172,19 @@ public final class MeetingDetailModel {
         return TodoStatus.id(meeting: id, index: index)
     }
 
+    public func markKey(_ row: SourcedRow) -> String? {
+        guard let index = Int(row.id.dropFirst("action-".count)), let items = meeting?.outputs.summary?.actionItems,
+              items.indices.contains(index) else { return nil }
+        guard let meeting else { return nil }
+        return AssistantTaskRef.markKey(in: meeting, at: index, fingerprint: AssistantTaskRef.fingerprint(items[index]))
+    }
+
+    public func isPersonal(_ row: SourcedRow) -> Bool {
+        guard let meeting, let index = Int(row.id.dropFirst("action-".count)), let items = meeting.outputs.summary?.actionItems,
+              items.indices.contains(index) else { return false }
+        return AssistantTaskRef.isPersonal(owner: items[index].owner, in: meeting, user: people.first { $0.isUser == true }?.id)
+    }
+
     public func isDone(_ row: SourcedRow) -> Bool {
         todoID(row).map { todos?.isDone($0) ?? false } ?? false
     }
@@ -199,7 +212,7 @@ public final class MeetingDetailModel {
         guard let meeting, let all = presentation?.summary?.actionItems else { return [] }
         let date = meeting.metadata.startedAt.formatted(date: .abbreviated, time: .shortened)
         return (rows ?? all).compactMap { row -> ReminderDraft? in
-            guard let id = todoID(row) else { return nil }
+            guard let id = todoID(row), let key = markKey(row), todos?.marks[key]?.contains(.deleted) != true else { return nil }
             let owner = row.speakerName.map { "\($0)\n" } ?? ""
             return ReminderDraft(todoID: id, title: row.text, notes: "\(owner)\(meeting.metadata.title), \(date)", due: row.due)
         }
