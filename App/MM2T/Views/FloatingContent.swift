@@ -72,7 +72,9 @@ struct FloatingContent: View {
     /// States that ask for an answer or report something open by themselves; the rest wait for
     /// the pointer.
     private var staysOpen: Bool {
-        switch app.capture.state {
+        if let session = app.capture.collaboration,
+           session.suggestion != nil || session.commandStatus != .hidden || session.state == .confirmingStart || session.state == .needsSignIn { return true }
+        return switch app.capture.state {
         case .prompting, .awaitingMicrophone, .endingSoon, .failed: true
         case .idle: app.queue.activeJob == nil && banner.outcome != nil
         case .starting, .recording, .paused, .stopping: false
@@ -513,16 +515,26 @@ struct RecordingCapsule: View {
     @State private var hovering = false
 
     var body: some View {
+        VStack(spacing: 10) {
+            recordingBar
+            if let session = capture.collaboration {
+                CollabCapsuleRows(session: session)
+            }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    private var recordingBar: some View {
         CapsuleBar(
             isPaused: isPaused, level: level, elapsed: capture.meters.elapsed,
             remoteSilent: capture.meters.remoteSilentWhilePlaying, showsHighlight: hovering || isPaused,
             hasHighlights: capture.meters.highlightCount > 0,
             captionsShown: capture.captions.isActive ? !capture.captions.isBarHidden : nil,
             toggleCaptions: { capture.captions.isBarHidden.toggle() },
+            collaboration: capture.collaboration,
             toggle: { Task { if isPaused { await capture.resume() } else { await capture.pause() } } },
             highlight: { Task { await capture.markHighlight() } },
             finish: { Task { await capture.stop() } })
-            .onHover { hovering = $0 }
     }
 
     private var isPaused: Bool {
@@ -546,6 +558,7 @@ struct CapsuleBar: View {
     /// Whether the caption bar shows; nil when captions are off, which hides its button.
     var captionsShown: Bool?
     var toggleCaptions: () -> Void = {}
+    var collaboration: CollabSession?
     let toggle: () -> Void
     let highlight: () -> Void
     let finish: () -> Void
@@ -581,6 +594,10 @@ struct CapsuleBar: View {
             if let captionsShown {
                 CircleButton(captionsShown ? "Hide Captions" : "Show Captions", icon: "badge-cc", action: toggleCaptions)
                     .transition(.opacity)
+            }
+            if let collaboration {
+                if let url = collaboration.room?.shareUrl { CollabCopyLink(url: url) }
+                CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
             }
             CircleButton("Finish", icon: "check", kind: .primary, action: finish)
         }

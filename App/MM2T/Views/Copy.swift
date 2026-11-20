@@ -88,6 +88,7 @@ enum Copy {
         case .selfHostedToken: String(localized: "self-hosted server token")
         case .openAICompatibleAPIKey: String(localized: "large language model API key")
         case .googleCalendarRefreshToken: String(localized: "Google Calendar sign-in")
+        case .collabAccount: String(localized: "Collaboration")
         case .microsoftCalendarRefreshToken: String(localized: "Outlook sign-in")
         }
     }

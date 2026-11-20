@@ -68,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         floating = FloatingPanelController(app: app)
         captionBar = CaptionBarController(app: app)
+        if app.collabAccount != nil {
+            observeChanges { [weak app] in
+                CollabHostPage.shared.prepare(for: app?.capture.collaboration?.room?.hostUrl)
+            }
+        }
         var fixture = false
         #if DEBUG
         fixture = AssistantScenarioRunner.fixtureRoot != nil

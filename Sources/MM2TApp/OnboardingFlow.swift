@@ -241,7 +241,7 @@ public final class OnboardingFlow {
         case .missingCredential(.selfHostedToken): .transcriptionServer
         case .missingCredential(.openAICompatibleAPIKey): .llmServer
         // Calendar sign-ins are never required for processing; should one be, Settings has it.
-        case .missingCredential(.googleCalendarRefreshToken), .missingCredential(.microsoftCalendarRefreshToken): .settings(issue)
+        case .missingCredential(.googleCalendarRefreshToken), .missingCredential(.microsoftCalendarRefreshToken), .missingCredential(.collabAccount): .settings(issue)
         case .missingSelfHostedURL: .transcriptionServer
         case .missingLLMEndpoint: .llmServer
         case .speechModelNotSelected: .speechModelPicker

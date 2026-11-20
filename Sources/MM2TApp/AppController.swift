@@ -88,6 +88,8 @@ public final class AppController {
         set { hotkey?.isSuspended = newValue }
     }
 
+    public let collabAccount: CollabAccount?
+
     public func makeAssistant() -> AssistantModel {
         AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints,
                                                todos: { [todoStatus] in await todoStatus.snapshot }),
@@ -114,7 +116,7 @@ public final class AppController {
         widgetFile: URL? = nil,
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
-        recordingTitle: String = "Recording"
+        recordingTitle: String = "Recording", collabConfiguration: CollabConfiguration? = nil
     ) throws {
         self.paths = paths
         assistantConversations = AssistantConversations(directory: paths.assistantConversations)
@@ -148,6 +150,8 @@ public final class AppController {
         self.voiceprints = voiceprints
         self.pipelineSetup = pipelineSetup
         self.queue = queue
+        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials) }
+        collabAccount = account
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
@@ -198,6 +202,9 @@ public final class AppController {
                     mic: mic, remote: remote,
                     chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
+            },
+            makeCollaboration: { title in
+                account.map { CollabSession(account: $0, title: title, now: now, makeLLM: { try pipelineSetup.buildLLM(settings.settings) }) }
             },
             makeCaptions: { captions in
                 // Opt-in, from the transcription sources in their order; with none set up nothing runs.
@@ -273,6 +280,8 @@ public final class AppController {
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
         onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
+        account?.onUserChanged = { [weak capture] in capture?.collaboration?.accountChanged() }
+        account?.beforeSignOut = { [weak capture] in await capture?.endCollaboration()?.value }
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;
@@ -317,7 +326,7 @@ public final class AppController {
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
             },
             widgetFile: shareWidget ? WidgetLink.snapshotFile() : nil,
-            recordingTitle: recordingTitle)
+            recordingTitle: recordingTitle, collabConfiguration: CollabConfiguration.live())
     }
 
     public var shouldPrepareBreeze: Bool {
@@ -335,6 +344,7 @@ public final class AppController {
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
+        collabAccount?.observeSignIn()
         Task(priority: .utility) {
             if settings.settings.localSpeechModel == .breezeCoreML, settings.settings.transcriptionOrder.contains(.local),
                setup.offlineModels[.breezeCoreML] == .downloaded { await setup.prepareInstalledCoreML() }

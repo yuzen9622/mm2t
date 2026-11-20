@@ -8,6 +8,7 @@ public enum Credential: String, Sendable, CaseIterable {
     /// Optional bearer token for the OpenAI-compatible large language model server.
     case openAICompatibleAPIKey = "openai-compatible-api-key"
     /// OAuth refresh tokens for the dashboard's calendar sources.
+    case collabAccount = "collab-account"
     case googleCalendarRefreshToken = "google-calendar-refresh-token"
     case microsoftCalendarRefreshToken = "microsoft-calendar-refresh-token"
 }

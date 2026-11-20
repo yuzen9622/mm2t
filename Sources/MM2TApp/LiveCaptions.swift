@@ -51,6 +51,7 @@ public final class LiveCaptions {
     /// it while it was still a partial. Kept after a failure, so a shown translation never goes away.
     public private(set) var provisionalTranslations: [Int: String] = [:]
 
+    @ObservationIgnored var onFinalized: ((Segment) -> Void)?
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var partialStarted: Date?
@@ -101,6 +102,7 @@ public final class LiveCaptions {
             provisionalTranslations = provisionalTranslations.filter { kept.contains($0.key) }
         }
         translation?.finished(segment)
+        onFinalized?(segment)
     }
 
     /// A session ended mid-segment: its unfinished words stay as they were last heard, since the
