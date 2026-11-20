@@ -70,7 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captionBar = CaptionBarController(app: app)
         if app.collabAccount != nil {
             observeChanges { [weak app] in
-                CollabHostPage.shared.prepare(for: app?.capture.collaboration?.room?.hostUrl)
+                let collaboration = app?.capture.collaboration
+                CollabHostPage.shared.prepare(for: collaboration?.room?.hostUrl, retaining: collaboration?.retainedHostURL)
             }
         }
         var fixture = false

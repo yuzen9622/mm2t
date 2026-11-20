@@ -150,7 +150,7 @@ public final class AppController {
         self.voiceprints = voiceprints
         self.pipelineSetup = pipelineSetup
         self.queue = queue
-        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials) }
+        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials, pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json")) }
         collabAccount = account
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
@@ -204,7 +204,10 @@ public final class AppController {
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
             makeCollaboration: { title in
-                account.map { CollabSession(account: $0, title: title, now: now, makeLLM: { try pipelineSetup.buildLLM(settings.settings) }) }
+                account.map { CollabSession(account: $0, title: title, now: now, llmSnapshot: {
+                    let snapshot = settings.settings
+                    return { try pipelineSetup.buildLLM(snapshot) }
+                }) }
             },
             makeCaptions: { captions in
                 // Opt-in, from the transcription sources in their order; with none set up nothing runs.
@@ -281,7 +284,7 @@ public final class AppController {
             })
         onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
         account?.onUserChanged = { [weak capture] in capture?.collaboration?.accountChanged() }
-        account?.beforeSignOut = { [weak capture] in await capture?.endCollaboration()?.value }
+        account?.beforeSignOut = { [weak capture] in await capture?.signOutOfCollaboration() }
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;

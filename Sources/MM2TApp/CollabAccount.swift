@@ -35,27 +35,36 @@ public final class CollabAccount {
     public private(set) var user: CollabUser? { didSet { if user != oldValue { onUserChanged?() } } }
     public private(set) var busy = false
     public private(set) var error: CollabError?
+    private(set) var signingOut = false
     let service: CollabService
+    private let pendingEnds: CollabPendingEnds
     let configuration: CollabConfiguration
     @ObservationIgnored var onUserChanged: (() -> Void)?
     @ObservationIgnored var beforeSignOut: (() async -> Void)?
     @ObservationIgnored private var monitoring: Task<Void, Never>?
+    @ObservationIgnored private var replaying: Task<Void, Never>?
 
-    init(configuration: CollabConfiguration, credentials: any CredentialStoring, session: URLSession = .shared) {
+    init(configuration: CollabConfiguration, credentials: any CredentialStoring, pendingEndsFile: URL,
+         session: URLSession = .shared, endRetrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.configuration = configuration
+        self.pendingEnds = CollabPendingEnds(file: pendingEndsFile, sleep: endRetrySleep)
         self.service = CollabService(baseURL: configuration.apiURL, session: session,
             load: { try credentials.read(.collabAccount) }, save: { try credentials.save($0, for: .collabAccount) })
     }
 
-    deinit { monitoring?.cancel() }
+    deinit { monitoring?.cancel(); replaying?.cancel() }
 
     func observeSignIn() {
         guard monitoring == nil else { return }
         monitoring = Task { [weak self, service] in
             for await signedIn in await service.signInChanges() {
                 guard let self else { return }
-                if !signedIn { user = nil }
-                else if user == nil, !busy { await restore() }
+                if !signedIn, !(await service.isAuthenticated) {
+                    replaying?.cancel()
+                    user = nil
+                } else if user == nil, !busy {
+                    await restore()
+                }
             }
         }
     }
@@ -64,7 +73,7 @@ public final class CollabAccount {
         busy = true
         error = nil
         defer { busy = false }
-        do { user = try await service.me().user }
+        do { didSignIn(try await service.me().user) }
         catch CollabError.notSignedIn { user = nil }
         catch { self.error = error as? CollabError ?? .unreachable }
     }
@@ -80,7 +89,7 @@ public final class CollabAccount {
             guard callback.scheme == "mm2t", callback.host == "auth", codes?.count == 1, let code = codes?.first?.value, !code.isEmpty else {
                 throw CollabError.notSignedIn
             }
-            user = try await service.exchange(code: code)
+            try await completeSignIn(code: code)
         } catch CalendarError.cancelled {
         } catch is CancellationError {
         } catch {
@@ -88,11 +97,34 @@ public final class CollabAccount {
         }
     }
 
+    func completeSignIn(code: String) async throws {
+        didSignIn(try await service.exchange(code: code))
+    }
+
+    private func didSignIn(_ verified: CollabUser) {
+        user = verified
+        let previous = replaying
+        previous?.cancel()
+        replaying = Task { [pendingEnds, configuration, service] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await pendingEnds.replay(apiURL: configuration.apiURL, owner: verified.id, service: service)
+        }
+    }
+
+    func waitForPendingEnds() async { await replaying?.value }
+
+    func closeRoom(_ room: CollabRoom, owner: String) async {
+        await pendingEnds.close(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId), service: service)
+    }
+
     public func signOut() async {
         guard !busy else { return }
         busy = true
         error = nil
-        defer { busy = false; user = nil }
+        signingOut = true
+        replaying?.cancel()
+        defer { user = nil; signingOut = false; busy = false }
         await beforeSignOut?()
         do { try await service.logout() }
         catch CollabError.notSignedIn {}

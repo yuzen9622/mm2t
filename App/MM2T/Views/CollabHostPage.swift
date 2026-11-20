@@ -24,8 +24,9 @@ final class CollabHostPage {
         return view
     }
 
-    func prepare(for url: URL?) {
-        if let url { _ = webView(for: url) } else { clear() }
+    func prepare(for url: URL?, retaining hiddenURL: URL?) {
+        if let url { _ = webView(for: url) }
+        else if hiddenURL == nil || hiddenURL != self.url { clear() }
     }
 
     private func clear() {

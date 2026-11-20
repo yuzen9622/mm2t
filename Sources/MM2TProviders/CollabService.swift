@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import OSLog
 
 public enum CollabError: Error, Equatable, Sendable {
     case notSignedIn
@@ -7,6 +8,8 @@ public enum CollabError: Error, Equatable, Sendable {
     case roomEnded
     case unreachable
     case server(status: Int)
+    case invalidBatch
+    case credentialCleanup
 }
 
 public enum CollabLoginProvider: String, Sendable { case google, apple }
@@ -39,7 +42,24 @@ public struct CollabRoomComponents: Decodable, Sendable {
     public let components: [CollabComponent]
 }
 
+public struct CollabOpBatch: Encodable, Sendable {
+    static let byteLimit = 256_000
+    public let batchId: UUID
+    public let ops: [CollabOp]
+
+    public init(_ ops: [CollabOp], batchId: UUID = UUID()) {
+        self.batchId = batchId
+        self.ops = ops
+    }
+}
+
+public struct CollabOpsResult: Decodable, Sendable {
+    public let applied: Int
+    public let duplicate: Bool
+}
+
 public actor CollabService {
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     private struct Tokens: Codable, Equatable, Sendable {
         let accessToken: String
         let refreshToken: String
@@ -71,7 +91,9 @@ public actor CollabService {
         init(_ path: String...) { self.init(path: path, method: "GET", body: nil) }
         init(post path: [String]) { self.init(path: path, method: "POST", body: nil) }
         init(post path: [String], body: some Encodable) throws {
-            self.init(path: path, method: "POST", body: try JSONEncoder().encode(body))
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            self.init(path: path, method: "POST", body: try encoder.encode(body))
         }
         private init(path: [String], method: String, body: Data?) {
             self.path = path
@@ -86,6 +108,7 @@ public actor CollabService {
     private let save: @Sendable (Secret) throws -> Void
     private var didLoad = false
     private var tokens: Tokens?
+    private var ownerID: String?
     private var generation = 0
     private var refreshing: Task<Tokens, any Error>?
     private var observers: [UUID: AsyncStream<Bool>.Continuation] = [:]
@@ -102,9 +125,11 @@ public actor CollabService {
         url(["auth", provider.rawValue, "start"]).appending(queryItems: [URLQueryItem(name: "redirect", value: "mm2t://auth")])
     }
 
+    public var isAuthenticated: Bool { (try? currentTokens()) != nil }
+
     public func signInChanges() -> AsyncStream<Bool> {
         let id = UUID()
-        let (stream, continuation) = AsyncStream.makeStream(of: Bool.self, bufferingPolicy: .bufferingNewest(1))
+        let (stream, continuation) = AsyncStream.makeStream(of: Bool.self, bufferingPolicy: .unbounded)
         observers[id] = continuation
         continuation.yield((try? currentTokens()) != nil)
         continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
@@ -120,6 +145,7 @@ public actor CollabService {
         try Task.checkCancellation()
         guard version == generation else { throw CollabError.notSignedIn }
         try store(login.tokens)
+        ownerID = login.user.id
         generation += 1
         refreshing?.cancel()
         refreshing = nil
@@ -142,26 +168,31 @@ public actor CollabService {
     }
 
     public func me() async throws -> CollabProfile {
-        try parse(CollabProfile.self, from: await authorized(Request("me")))
+        let version = generation
+        let profile = try parse(CollabProfile.self, from: await authorized(Request("me")))
+        guard version == generation else { throw CollabError.notSignedIn }
+        ownerID = profile.user.id
+        return profile
     }
 
-    public func createRoom(title: String) async throws -> CollabRoom {
+    public func createRoom(title: String, owner: String) async throws -> CollabRoom {
         let request = try Request(post: ["rooms"], body: ["title": title, "aiSource": "own"])
-        return try parse(CollabRoom.self, from: await authorized(request))
+        return try parse(CollabRoom.self, from: await authorized(request, owner: owner))
     }
 
-    public func endRoom(_ id: String) async throws {
-        _ = try await authorized(Request(post: ["rooms", id, "end"]))
+    public func endRoom(_ id: String, owner: String) async throws {
+        _ = try await authorized(Request(post: ["rooms", id, "end"]), owner: owner)
     }
 
-    public func components(in id: String) async throws -> CollabRoomComponents {
-        try parse(CollabRoomComponents.self, from: await authorized(Request("rooms", id, "components")))
+    public func components(in id: String, owner: String) async throws -> CollabRoomComponents {
+        try parse(CollabRoomComponents.self, from: await authorized(Request("rooms", id, "components"), owner: owner))
     }
 
-    public func sendOps(_ ops: [CollabOp], to id: String) async throws {
-        let request = try Request(post: ["rooms", id, "ops"], body: ["ops": ops])
-        guard ops.count <= 200, (request.body?.count ?? 0) <= 256_000 else { throw CollabError.server(status: 400) }
-        _ = try await authorized(request)
+    @discardableResult
+    public func sendOps(_ batch: CollabOpBatch, to id: String, owner: String) async throws -> CollabOpsResult {
+        let request = try Request(post: ["rooms", id, "ops"], body: batch)
+        guard batch.ops.count <= 200, (request.body?.count ?? 0) <= CollabOpBatch.byteLimit else { throw CollabError.invalidBatch }
+        return try parse(CollabOpsResult.self, from: await authorized(request, owner: owner))
     }
 
     private func currentTokens() throws -> Tokens {
@@ -189,9 +220,14 @@ public actor CollabService {
         refreshing?.cancel()
         refreshing = nil
         tokens = nil
+        ownerID = nil
         didLoad = true
         for observer in observers.values { observer.yield(false) }
-        try save(Secret(""))
+        do { try save(Secret("")) }
+        catch {
+            Self.logger.error("Could not delete collaboration credentials: \(String(describing: error), privacy: .private)")
+            throw CollabError.credentialCleanup
+        }
     }
 
     private func renew(after previous: Tokens, generation version: Int) async throws -> Tokens {
@@ -208,7 +244,7 @@ public actor CollabService {
                 try store(replacement)
                 return replacement
             } catch {
-                if version == generation { try? invalidate() }
+                if version == generation { try invalidate() }
                 throw CollabError.notSignedIn
             }
         }
@@ -216,7 +252,8 @@ public actor CollabService {
         return try await task.value
     }
 
-    private func authorized(_ request: Request) async throws -> (Data, Int) {
+    private func authorized(_ request: Request, owner: String? = nil) async throws -> (Data, Int) {
+        if let owner, owner != ownerID { throw CollabError.notSignedIn }
         let original = try currentTokens()
         let version = generation
         do { return try await send(request, bearer: original.accessToken) }
@@ -226,7 +263,7 @@ public actor CollabService {
             try Task.checkCancellation()
             do { return try await send(request, bearer: replacement.accessToken) }
             catch CollabError.notSignedIn {
-                if version == generation, tokens == replacement { try? invalidate() }
+                if version == generation, tokens == replacement { try invalidate() }
                 throw CollabError.notSignedIn
             }
         }

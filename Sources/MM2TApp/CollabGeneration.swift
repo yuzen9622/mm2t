@@ -1,18 +1,23 @@
+import Foundation
 import MM2TCore
+import MM2TProviders
+import OSLog
 
-struct CollabGeneration {
-    private enum Mode { case command(newID: String, source: CollabSource), update }
+struct CollabGeneration: Sendable {
+    private enum Mode: Sendable { case command(newID: String, source: CollabSource), update }
     private let mode: Mode
     private let components: [CollabComponent]
     private var kind: CollabComponentKind?
     private var modelID: String?
+    private var items: [CollabOp.Collection: Set<String>] = [:]
     private var changed = false
-    private var removed = false
+    private(set) var removed = false
     private(set) var target: String?
     private(set) var title: String?
     private(set) var created = false
     private(set) var finished = false
     private(set) var rejected = 0
+    var needsCleanup: Bool { changed }
 
     init(components: [CollabComponent], newID: String, source: CollabSource, retrying: CollabComponent? = nil) {
         self.components = components
@@ -26,7 +31,19 @@ struct CollabGeneration {
         select(component)
     }
 
-    mutating func accept(_ op: CollabOp) -> CollabOp? {
+    mutating func accept(_ op: CollabOp) throws -> CollabOp? {
+        let destination: String
+        if case .create = op, case .command(let newID, _) = mode { destination = newID }
+        else { destination = target ?? op.id }
+        if case .appendText = op { return route(op) }
+        guard try CollabOpSender.fits(op.targeting(destination)) else {
+            rejected += 1
+            return nil
+        }
+        return route(op)
+    }
+
+    private mutating func route(_ op: CollabOp) -> CollabOp? {
         if finished { rejected += 1; return nil }
         if case .create(let id, let kind, let title, _) = op {
             guard target == nil, case .command(let newID, let source) = mode, !title.isEmpty else { rejected += 1; return nil }
@@ -40,13 +57,27 @@ struct CollabGeneration {
         }
         if target == nil, case .command(_, .command) = mode, let existing = components.first(where: { $0.id == op.id }),
            allowed(op, for: existing.kind) {
-            select(existing)
+            var candidate = self
+            candidate.select(existing)
+            let approved = candidate.route(op)
+            guard candidate.rejected == rejected else { rejected += 1; return nil }
+            self = candidate
+            return approved
         }
         guard let target, let kind, op.id == modelID, allowed(op, for: kind) else { rejected += 1; return nil }
         switch op {
         case .done:
             finished = true
             return changed && !removed ? op.targeting(target) : nil
+        case .upsertItem(_, let collection, let fields):
+            guard case .string(let itemID) = fields["id"],
+                  items[collection]?.contains(itemID) == true || collection.requiredFields.allSatisfy({ fields[$0] != nil }) else {
+                rejected += 1
+                return nil
+            }
+            items[collection, default: []].insert(itemID)
+        case .removeItem(_, let collection, let itemID):
+            items[collection]?.remove(itemID)
         case .remove:
             removed = true
         case .set(_, .title, .string(let title)):
@@ -62,6 +93,18 @@ struct CollabGeneration {
         target = component.id
         kind = component.kind
         title = component.title
+        for key in component.fields.keys {
+            guard let collection = CollabOp.Collection(rawValue: key) else { continue }
+            switch component.fields[key] {
+            case .object(let values): items[collection] = Set(values.keys)
+            case .array(let values):
+                items[collection] = Set(values.compactMap { value in
+                    guard case .object(let fields) = value, case .string(let id) = fields["id"] else { return nil }
+                    return id
+                })
+            default: break
+            }
+        }
     }
 
     private func allowed(_ op: CollabOp, for kind: CollabComponentKind) -> Bool {
@@ -87,5 +130,85 @@ struct CollabGeneration {
 
     private static func allows(_ field: CollabOp.TextField, for kind: CollabComponentKind) -> Bool {
         (kind == .document && field == .markdown) || (kind == .experimental && field == .html)
+    }
+}
+
+actor CollabModelWork {
+    enum Failure: Error { case modelNotConfigured, invalidOutput }
+
+    private struct SuggestionResponse: Decodable {
+        let suggestion: CollabSuggestion?
+        private enum Key: String, CodingKey { case suggest }
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            suggestion = try c.decode(Bool.self, forKey: .suggest) ? CollabSuggestion(from: decoder) : nil
+        }
+    }
+
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
+    private let makeLLM: @Sendable () throws -> LLMBuild
+    private(set) var generation: CollabGeneration?
+
+    init(makeLLM: @escaping @Sendable () throws -> LLMBuild, route: CollabGeneration? = nil) {
+        self.makeLLM = makeLLM
+        generation = route
+    }
+
+    static func promptFields(_ component: CollabComponent) -> [String: CollabJSON] {
+        component.fields.filter { !["votes", "elements", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
+    }
+
+    private func provider() async throws -> any LLMProvider {
+        try Task.checkCancellation()
+        guard case .ready(let provider) = try makeLLM() else { throw Failure.modelNotConfigured }
+        return await provider.forGeneration()
+    }
+
+    func suggestion(input: @Sendable () -> [String: CollabJSON]) async throws -> CollabSuggestion? {
+        let provider = try await provider()
+        let payload = try CollabPrompts.input(input())
+        try Task.checkCancellation()
+        var answer = ""
+        for try await fragment in provider.streamText(system: CollabPrompts.suggestion, input: payload) {
+            try Task.checkCancellation()
+            answer += fragment
+        }
+        return try JSONDecoder().decode(SuggestionResponse.self, from: Data(answer.utf8)).suggestion
+    }
+
+    func stream(system: String, input: @Sendable () -> [String: CollabJSON], sender: CollabOpSender,
+                onTitle: @MainActor @Sendable (String?) -> Void) async throws -> CollabGeneration {
+        guard var route = generation else { throw Failure.invalidOutput }
+        var parser = CollabOpStreamParser()
+        var oversized = 0
+        defer {
+            generation = route
+            let discarded = parser.rejectedLines + route.rejected + oversized
+            if discarded > 0 { Self.logger.notice("Discarded collaboration op lines: \(discarded, privacy: .public)") }
+        }
+        let provider = try await provider()
+        let payload = try CollabPrompts.input(input())
+        try Task.checkCancellation()
+        var previousTitle: String?
+        var fragments = provider.streamText(system: system, input: payload).makeAsyncIterator()
+        while true {
+            try Task.checkCancellation()
+            let fragment = try await fragments.next()
+            let ops = fragment.map { parser.feed($0) } ?? parser.finish()
+            for op in ops {
+                try Task.checkCancellation()
+                if let approved = try route.accept(op), try await !sender.append(approved) { oversized += 1 }
+                if route.title != previousTitle {
+                    previousTitle = route.title
+                    await onTitle(route.title)
+                }
+            }
+            if fragment == nil { break }
+        }
+        guard route.finished else { throw Failure.invalidOutput }
+        try Task.checkCancellation()
+        try await sender.finish()
+        try Task.checkCancellation()
+        return route
     }
 }

@@ -180,8 +180,9 @@ private extension CollabError {
         case .notSignedIn: String(localized: "Sign in to share")
         case .quotaExceeded(let used, let limit): String(localized: "Room limit reached (\(used)/\(limit)).")
         case .roomEnded: String(localized: "This room has ended.")
+        case .credentialCleanup: String(localized: "Couldn’t remove the saved collaboration sign-in.")
         case .unreachable: String(localized: "Can’t connect to the collaboration service.")
-        case .server: String(localized: "The collaboration service couldn’t complete the request.")
+        case .invalidBatch, .server: String(localized: "The collaboration service couldn’t complete the request.")
         }
     }
 }

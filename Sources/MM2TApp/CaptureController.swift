@@ -324,10 +324,8 @@ public final class CaptureController {
             meters.reset()
             collaboration = makeCollaboration(target.name)
             if let collaboration {
-                captions.onFinalized = { [weak captions, weak collaboration] segment in
-                    guard let captions else { return }
-                    collaboration?.finalized(segment, captionsOn: captions.isActive)
-                }
+                collaboration.captionsActive = { [weak captions] in captions?.isActive == true }
+                captions.onFinalized = { [weak collaboration] segment in collaboration?.finalized(segment) }
             }
             state = .recording(target)
             liveTask = Task { [weak self] in
@@ -428,6 +426,11 @@ public final class CaptureController {
     }
 
     public private(set) var lastSavedMeeting: MeetingID?
+
+    func signOutOfCollaboration() async {
+        await collaboration?.signOut()
+        await closingCollaboration?.value
+    }
 
     func endCollaboration() -> Task<Void, Never>? {
         captions.onFinalized = nil

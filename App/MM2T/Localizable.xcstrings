@@ -20,6 +20,7 @@
     "Couldn’t finish building the component.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法完成元件。" } } } },
     "Room limit reached (%lld/%lld).": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已達房間上限（%lld／%lld）。" } } } },
     "This room has ended.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "這個房間已結束。" } } } },
+    "Couldn’t remove the saved collaboration sign-in.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法清除已儲存的協作登入資料。" } } } },
     "Can’t connect to the collaboration service.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法連線到協作服務。" } } } },
     "The collaboration service couldn’t complete the request.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "協作服務無法完成要求。" } } } },
     "Translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯模型" } } } },

@@ -12,7 +12,7 @@ struct CollabOpSenderTests {
             started.yield(duration)
             for await _ in timerTicks { return }
             throw CancellationError()
-        }, send: { await batches.record($0) })
+        }, send: { await batches.record($0.ops) })
         try await sender.append(.done(id: "first"))
         var times = timerStarted.makeAsyncIterator()
         #expect(await times.next() == .milliseconds(150))
@@ -28,7 +28,7 @@ struct CollabOpSenderTests {
 
     @Test func sizeFlushesImmediatelyAndRequestsAreSequentialDespiteRetry() async throws {
         let recorder = Batches(failures: 2)
-        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { try await recorder.send($0) })
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { try await recorder.send($0.ops) })
         let ids = (0..<45).map { "row-\($0)" }
         for id in ids { try await sender.append(.done(id: id)) }
         for _ in 0..<200 where await recorder.calls.isEmpty { try await Task.sleep(for: .milliseconds(1)) }
@@ -40,7 +40,7 @@ struct CollabOpSenderTests {
 
     @Test func thirdFailureIsReportedAndDependentBatchIsNotSent() async throws {
         let recorder = Batches(failures: 3)
-        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { try await recorder.send($0) })
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { try await recorder.send($0.ops) })
         let ids = (0..<21).map { "row-\($0)" }
         for id in ids { try await sender.append(.done(id: id)) }
         await #expect(throws: CollabError.unreachable) { try await sender.finish() }
@@ -49,12 +49,22 @@ struct CollabOpSenderTests {
 
     @Test func serverByteLimitAlsoSplitsBatches() async throws {
         let recorder = Batches()
-        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { await recorder.record($0) })
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { await recorder.record($0.ops) })
         for id in ["a", "b"] {
             try await sender.append(.appendText(id: id, field: .markdown, text: String(repeating: "頁", count: 50_000)))
         }
         try await sender.finish()
         #expect(await recorder.calls == [["a"], ["b"]])
+    }
+
+    @Test func aSealedSenderRejectsAppendingAndFinishing() async throws {
+        let batches = Batches()
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(30)) }, send: { await batches.record($0.ops) })
+        try await sender.append(.done(id: "discarded"))
+        await sender.close()
+        await #expect(throws: CancellationError.self) { try await sender.finish() }
+        await #expect(throws: CancellationError.self) { try await sender.append(.done(id: "late")) }
+        #expect(await batches.calls.isEmpty)
     }
 
     private actor Batches {

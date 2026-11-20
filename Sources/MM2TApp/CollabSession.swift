@@ -18,7 +18,7 @@ public final class CollabSession {
         case service(CollabError), modelNotConfigured, generation
     }
 
-    private struct Command {
+    private struct Command: Sendable {
         let text: String
         let source: CollabSource
         let retryTarget: String?
@@ -29,16 +29,16 @@ public final class CollabSession {
         let captionCount: Int
     }
 
-    private struct SuggestionResponse: Decodable {
-        let suggestion: CollabSuggestion?
-        private enum Key: String, CodingKey { case suggest }
-        init(from decoder: any Decoder) throws {
-            let c = try decoder.container(keyedBy: Key.self)
-            suggestion = try c.decode(Bool.self, forKey: .suggest) ? CollabSuggestion(from: decoder) : nil
-        }
+    private struct OwnedRoom {
+        let room: CollabRoom
+        let owner: String
     }
 
-    private enum GenerationError: Error { case modelNotConfigured, invalidOutput }
+    private struct Caption {
+        let segment: LiveCaptions.Segment
+        let position: Int
+    }
+
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
 
     public private(set) var state: State = .idle
@@ -46,15 +46,20 @@ public final class CollabSession {
     public private(set) var suggestion: CollabSuggestion?
     public private(set) var card: SuggestionPolicy.Card?
     public var wantsKeyboard: Bool { commandStatus == .input || state == .confirmingStart }
-    public var room: CollabRoom? { if case .live(let room) = state { room } else { heldRoom } }
-    private var heldRoom: CollabRoom?
+    public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
+    public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
+    private var ownedRoom: OwnedRoom?
+    @ObservationIgnored private(set) var sender: CollabOpSender?
+    @ObservationIgnored private var draining: Task<Void, Never>?
+    @ObservationIgnored private var closingRoom: Task<Void, Never>?
+    @ObservationIgnored var captionsActive: () -> Bool = { false }
 
     @ObservationIgnored private let account: CollabAccount
     @ObservationIgnored private let title: String
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let makeLLM: () throws -> LLMBuild
+    @ObservationIgnored private let llmSnapshot: () -> (@Sendable () throws -> LLMBuild)
     @ObservationIgnored private var policy: SuggestionPolicy
-    @ObservationIgnored private var transcript: [LiveCaptions.Segment] = []
+    @ObservationIgnored private var transcript: [Caption] = []
     @ObservationIgnored private var totalCharacters = 0
     @ObservationIgnored private var marks: [String: UpdateMark] = [:]
     @ObservationIgnored private var failedUpdates: [String: Date] = [:]
@@ -64,15 +69,16 @@ public final class CollabSession {
     @ObservationIgnored private var needsCaptions = false
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var isBackgroundWork = false
-    @ObservationIgnored private var creation: Task<CollabRoom, any Error>?
+    @ObservationIgnored private var creationOwner: String?
+    @ObservationIgnored private var creation: Task<OwnedRoom, any Error>?
     @ObservationIgnored private var expiry: Task<Void, Never>?
     @ObservationIgnored private var completion: Task<Void, Never>?
 
-    init(account: CollabAccount, title: String, now: @escaping () -> Date, makeLLM: @escaping () throws -> LLMBuild) {
+    init(account: CollabAccount, title: String, now: @escaping () -> Date, llmSnapshot: @escaping () -> (@Sendable () throws -> LLMBuild)) {
         self.account = account
         self.title = title
         self.now = now
-        self.makeLLM = makeLLM
+        self.llmSnapshot = llmSnapshot
         self.policy = SuggestionPolicy(now: now())
     }
 
@@ -91,8 +97,7 @@ public final class CollabSession {
         }
         if state == .starting { return }
         if state == .confirmingStart || state == .needsSignIn {
-            state = heldRoom.map(State.live) ?? .idle
-            heldRoom = nil
+            state = .idle
         }
         pendingCommand = nil
         retryCommand = nil
@@ -125,39 +130,108 @@ public final class CollabSession {
     }
 
     func accountChanged() {
-        guard state == .needsSignIn, account.user != nil, pendingCommand != nil else { return }
-        if let heldRoom {
-            self.heldRoom = nil
-            state = .live(heldRoom)
-            commandStatus = .building(nil)
-            pump()
-        } else {
-            state = .confirmingStart
+        guard state != .ended else { return }
+        guard let user = account.user else {
+            if ownedRoom != nil || creation != nil {
+                resetSharing()
+            } else if state == .confirmingStart {
+                state = .needsSignIn
+            }
+            return
+        }
+        if let ownedRoom {
+            if ownedRoom.owner == user.id {
+                state = .live(ownedRoom.room)
+                if pendingCommand != nil { commandStatus = .building(nil) }
+                pump()
+                return
+            }
+            if state != .needsSignIn { resetSharing() }
+            closeSharing()
+        } else if let creationOwner, creationOwner != user.id {
+            resetSharing()
+            closeSharing()
+        }
+        if state == .needsSignIn, pendingCommand != nil {
+            if creation == nil { state = .confirmingStart }
+            else { state = .starting; commandStatus = .building(nil) }
+        }
+    }
+
+    func signOut() async {
+        resetSharing()
+        closeSharing()
+        await closingRoom?.value
+    }
+
+    private func resetSharing() {
+        if state != .ended { state = .idle }
+        work?.cancel()
+        completion?.cancel()
+        clearSuggestion()
+        pendingCommand = nil
+        retryCommand = nil
+        commandStatus = .hidden
+        if draining == nil, let sender {
+            draining = Task {
+                await sender.close()
+                draining = nil
+                pump()
+            }
+        }
+    }
+
+    private func closeSharing() {
+        let room = ownedRoom
+        let creation = creation
+        ownedRoom = nil
+        self.creation = nil
+        creationOwner = nil
+        knownComponents.removeAll()
+        marks.removeAll()
+        failedUpdates.removeAll()
+        let previous = closingRoom
+        let draining = draining
+        guard room != nil || creation != nil else { return }
+        closingRoom = Task { [account] in
+            await previous?.value
+            await draining?.value
+            let ending = if let room { room } else { try? await creation?.value }
+            if let ending { await account.closeRoom(ending.room, owner: ending.owner) }
         }
     }
 
     public func startSharing() {
-        guard state == .confirmingStart, pendingCommand != nil else { return }
-        guard account.user != nil else { state = .needsSignIn; return }
+        guard state == .confirmingStart, creation == nil, pendingCommand != nil else { return }
+        guard let owner = account.user?.id, !account.signingOut else { state = .needsSignIn; return }
         state = .starting
         commandStatus = .building(nil)
-        let creation = Task { [service = account.service, title] in try await service.createRoom(title: title) }
+        let creation = Task { [service = account.service, title] in
+            OwnedRoom(room: try await service.createRoom(title: title, owner: owner), owner: owner)
+        }
         self.creation = creation
+        creationOwner = owner
         Task { [weak self] in
             let result = await creation.result
-            guard let self, state == .starting else { return }
+            guard let self, self.creation == creation else { return }
             self.creation = nil
+            creationOwner = nil
             switch result {
-            case .success(let room):
+            case .success(let binding):
+                let room = binding.room
+                ownedRoom = binding
                 guard account.configuration.accepts(room.shareUrl), account.configuration.accepts(room.hostUrl) else {
-                    Task { try? await account.service.endRoom(room.roomId) }
+                    closeSharing()
                     fail(CollabError.server(status: 200))
                     state = .idle
                     return
                 }
+                guard account.user?.id == binding.owner, !account.signingOut else { return }
                 state = .live(room)
+                if pendingCommand != nil { commandStatus = .building(nil) }
                 pump()
             case .failure(let error):
+                guard state == .starting else { return }
                 if error as? CollabError == .notSignedIn {
                     state = .needsSignIn
                     commandStatus = .hidden
@@ -169,41 +243,42 @@ public final class CollabSession {
         }
     }
 
-    func finalized(_ segment: LiveCaptions.Segment, captionsOn: Bool) {
-        guard state != .ended, captionsOn else { return }
-        transcript.append(segment)
+    func finalized(_ segment: LiveCaptions.Segment) {
+        guard state != .ended, captionsActive() else { return }
         totalCharacters += segment.text.count
+        transcript.append(Caption(segment: segment, position: totalCharacters))
         policy.record(segment.text.count)
+        pruneCaptions()
         needsCaptions = true
         pump()
     }
 
-    func end() -> Task<Void, Never>? {
-        guard state != .ended else { return nil }
-        let room = room
-        let creation = creation
-        let service = account.service
-        state = .ended
-        heldRoom = nil
-        work?.cancel()
-        work = nil
-        completion?.cancel()
-        clearSuggestion()
-        pendingCommand = nil
-        retryCommand = nil
-        transcript.removeAll()
-        commandStatus = .hidden
-        if room != nil || creation != nil {
-            return Task {
-                var ending = room
-                if ending == nil, let creation { ending = try? await creation.value }
-                if let ending {
-                    do { try await service.endRoom(ending.roomId) }
-                    catch { Self.logger.error("Could not end the collaboration room") }
-                }
-            }
+    private func pruneCaptions() {
+        let cutoff = now().addingTimeInterval(-300)
+        let oldestPosition = knownComponents.lazy.filter { $0.kind.updatesLive }
+            .map { self.updateMark($0).captionCount }.min() ?? totalCharacters
+        if let keep = transcript.firstIndex(where: { $0.segment.ended >= cutoff || $0.position > oldestPosition }) {
+            transcript.removeFirst(keep)
+        } else {
+            transcript.removeAll(keepingCapacity: true)
         }
-        return nil
+    }
+
+    var retainedCaptionCount: Int { transcript.count }
+
+    func waitForRoomClosure() async { await closingRoom?.value }
+
+    func waitForWork() async {
+        while let work { await work.value }
+    }
+
+    func end() -> Task<Void, Never>? {
+        guard state != .ended else { return closingRoom }
+        state = .ended
+        resetSharing()
+        closeSharing()
+        transcript.removeAll()
+        return closingRoom
     }
 
     private func submit(_ text: String, source: CollabSource, retryTarget: String? = nil) {
@@ -215,20 +290,18 @@ public final class CollabSession {
         pendingCommand = Command(text: text, source: source, retryTarget: retryTarget)
         retryCommand = pendingCommand
         if isBackgroundWork { work?.cancel() }
-        if let room, account.user != nil {
+        if let room, account.user != nil, !account.signingOut {
             state = .live(room)
-            heldRoom = nil
             commandStatus = .building(nil)
             pump()
         } else {
-            heldRoom = room
             commandStatus = .hidden
-            state = account.user == nil ? .needsSignIn : .confirmingStart
+            state = account.user == nil || account.signingOut ? .needsSignIn : .confirmingStart
         }
     }
 
     private func pump() {
-        guard work == nil, state != .ended else { return }
+        guard work == nil, draining == nil, state != .ended, !account.signingOut else { return }
         if let command = pendingCommand, case .live(let room) = state {
             pendingCommand = nil
             launch { session in
@@ -238,7 +311,7 @@ public final class CollabSession {
             }
         } else if pendingCommand == nil, needsCaptions, commandStatus != .input {
             needsCaptions = false
-            let suggest = commandStatus == .hidden && policy.canAsk(now: now(), captionsOn: true, cardVisible: suggestion != nil)
+            let suggest = commandStatus == .hidden && policy.canAsk(now: now(), captionsOn: captionsActive(), cardVisible: suggestion != nil)
             let update = account.user != nil && room != nil && nextUpdate() != nil
             guard suggest || update else { return }
             launch(background: true) { session in
@@ -265,7 +338,7 @@ public final class CollabSession {
         pendingCommand = nil
         let failure: Failure
         if let error = error as? CollabError { failure = .service(error) }
-        else if case GenerationError.modelNotConfigured = error { failure = .modelNotConfigured }
+        else if case CollabModelWork.Failure.modelNotConfigured = error { failure = .modelNotConfigured }
         else { failure = .generation }
         commandStatus = .failed(failure)
     }
@@ -287,42 +360,35 @@ public final class CollabSession {
         }
     }
 
-    private func provider() async throws -> any LLMProvider {
-        guard case .ready(let provider) = try makeLLM() else { throw GenerationError.modelNotConfigured }
-        return await provider.forGeneration()
-    }
-
     private func roomComponents(_ room: CollabRoom) async throws -> [CollabComponent] {
-        let response = try await account.service.components(in: room.roomId)
+        guard let binding = ownedRoom, binding.room == room else { throw CollabError.notSignedIn }
+        let response = try await account.service.components(in: room.roomId, owner: binding.owner)
         try Task.checkCancellation()
         guard response.status == .live else { throw CollabError.roomEnded }
         knownComponents = response.components
+        pruneCaptions()
         return response.components
     }
 
-    private func recent(_ seconds: TimeInterval, at time: Date) -> String {
-        transcript.lazy.filter { time.timeIntervalSince($0.ended) <= seconds }.map(\.text).joined(separator: "\n")
+    private func recent(_ seconds: TimeInterval, at time: Date) -> [String] {
+        transcript.filter { time.timeIntervalSince($0.segment.ended) <= seconds }.map(\.segment.text)
     }
 
     private func askForSuggestion() async {
-        guard policy.shouldAsk(now: now(), captionsOn: true, cardVisible: suggestion != nil) else { return }
+        guard policy.shouldAsk(now: now(), captionsOn: captionsActive(), cardVisible: suggestion != nil) else { return }
         do {
             let components = if let room { try await roomComponents(room) } else { [] as [CollabComponent] }
+            guard !Task.isCancelled, captionsActive() else { return }
             let titles = components.map(\.title)
-            let input = try CollabPrompts.input([
-                "captions": .string(recent(180, at: now())), "existingTitles": .array(titles.map(CollabJSON.string)),
-                "previousTitles": .array(policy.titles.sorted().map(CollabJSON.string)),
-            ])
-            let provider = try await provider()
-            try Task.checkCancellation()
-            var answer = ""
-            for try await fragment in provider.streamText(system: CollabPrompts.suggestion, input: input) {
-                try Task.checkCancellation()
-                answer += fragment
+            let captions = recent(180, at: now())
+            let previousTitles = policy.titles
+            let model = CollabModelWork(makeLLM: llmSnapshot())
+            let offer = try await model.suggestion {
+                ["captions": .string(captions.joined(separator: "\n")), "existingTitles": .array(titles.map(CollabJSON.string)),
+                 "previousTitles": .array(previousTitles.sorted().map(CollabJSON.string))]
             }
-            guard !Task.isCancelled, pendingCommand == nil, commandStatus == .hidden, suggestion == nil,
-                  let offer = try JSONDecoder().decode(SuggestionResponse.self, from: Data(answer.utf8)).suggestion,
-                  offer.kind != .experimental, policy.offer(title: offer.title, existing: titles) else { return }
+            guard !Task.isCancelled, captionsActive(), pendingCommand == nil, commandStatus == .hidden, suggestion == nil,
+                  let offer, offer.kind != .experimental, policy.offer(title: offer.title, existing: titles) else { return }
             suggestion = offer
             card = SuggestionPolicy.Card(now: now())
             scheduleExpiry()
@@ -336,14 +402,15 @@ public final class CollabSession {
         let newID = UUID().uuidString.lowercased()
         let retrying = components.first { $0.id == command.retryTarget }
         let time = now()
-        let input = try CollabPrompts.input([
-            "instruction": .string(command.text), "captions": .string(recent(300, at: time)),
-            "components": .array(components.map { .object(Self.promptFields($0)) }),
-            "date": .string(time.formatted(Date.ISO8601FormatStyle(timeZone: .current).timeZone(separator: .colon))), "timeZone": .string(TimeZone.current.identifier),
-        ])
+        let captions = recent(300, at: time)
         let snapshot = totalCharacters
-        let result = try await stream(room: room, system: CollabPrompts.command(source: command.source, newID: newID, retryTarget: retrying?.id), input: input,
-                                      route: .init(components: components, newID: newID, source: command.source, retrying: retrying), showTitle: true)
+        let result = try await stream(room: room, system: CollabPrompts.command(source: command.source, newID: newID, retryTarget: retrying?.id),
+                                      route: .init(components: components, newID: newID, source: command.source, retrying: retrying), showTitle: true) {
+            ["instruction": .string(command.text), "captions": .string(captions.joined(separator: "\n")),
+             "components": .array(components.map { .object(CollabModelWork.promptFields($0)) }),
+             "date": .string(time.formatted(Date.ISO8601FormatStyle(timeZone: .current).timeZone(separator: .colon))), "timeZone": .string(TimeZone.current.identifier)]
+        }
+        try Task.checkCancellation()
         if let id = result.target { marks[id] = UpdateMark(time: now(), captionCount: snapshot) }
         do { _ = try await roomComponents(room) }
         catch where !Task.isCancelled { Self.logger.debug("Could not refresh the collaboration components") }
@@ -355,16 +422,12 @@ public final class CollabSession {
         }
     }
 
-    private static func promptFields(_ component: CollabComponent) -> [String: CollabJSON] {
-        component.fields.filter { !["votes", "elements", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
-    }
-
     private func updateMark(_ component: CollabComponent) -> UpdateMark {
         if let mark = marks[component.id] { return mark }
         let format = ISO8601DateFormatter()
         format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let time = format.date(from: component.updatedAt) ?? ISO8601DateFormatter().date(from: component.updatedAt) ?? now()
-        return UpdateMark(time: time, captionCount: transcript.lazy.filter { $0.ended <= time }.reduce(0) { $0 + $1.text.count })
+        return UpdateMark(time: time, captionCount: transcript.last { $0.segment.ended <= time }?.position ?? transcript.first.map { $0.position - $0.segment.text.count } ?? totalCharacters)
     }
 
     private func nextUpdate() -> String? {
@@ -393,14 +456,14 @@ public final class CollabSession {
                 updating = id
                 let mark = updateMark(component)
                 let snapshot = totalCharacters
-                var seen = 0
-                let text = transcript.filter { segment in
-                    seen += segment.text.count
-                    return seen > mark.captionCount
-                }.map(\.text).joined(separator: "\n")
-                let input = try CollabPrompts.input(["component": .object(Self.promptFields(component)), "captions": .string(text)])
-                _ = try await stream(room: room, system: CollabPrompts.update, input: input, route: .init(updating: component))
+                let captions = transcript.lazy.filter { $0.position > mark.captionCount }.map(\.segment.text)
+                let texts = Array(captions)
+                _ = try await stream(room: room, system: CollabPrompts.update, route: .init(updating: component)) {
+                    ["component": .object(CollabModelWork.promptFields(component)), "captions": .string(texts.joined(separator: "\n"))]
+                }
+                try Task.checkCancellation()
                 marks[id] = UpdateMark(time: now(), captionCount: snapshot)
+                pruneCaptions()
             } catch where !Task.isCancelled {
                 if let updating { failedUpdates[updating] = now() }
                 Self.logger.debug("Could not update a collaboration component")
@@ -409,47 +472,52 @@ public final class CollabSession {
         }
     }
 
-    private func stream(room: CollabRoom, system: String, input: String, route: CollabGeneration,
-                        showTitle: Bool = false) async throws -> CollabGeneration {
-        let provider = try await provider()
+    private func stream(room: CollabRoom, system: String, route: CollabGeneration, showTitle: Bool = false,
+                        input: @escaping @Sendable () -> [String: CollabJSON]) async throws -> CollabGeneration {
+        guard let binding = ownedRoom, binding.room == room else { throw CollabError.notSignedIn }
         try Task.checkCancellation()
-        let sender = CollabOpSender { [service = account.service] ops in try await service.sendOps(ops, to: room.roomId) }
-        var route = route
-        var parser = CollabOpStreamParser()
-        defer {
-            let discarded = parser.rejectedLines + route.rejected
-            if discarded > 0 { Self.logger.notice("Discarded collaboration op lines: \(discarded, privacy: .public)") }
-        }
+        let sender = makeSender(room, owner: binding.owner)
+        self.sender = sender
+        defer { self.sender = nil }
+        let model = CollabModelWork(makeLLM: llmSnapshot(), route: route)
         do {
-            try await withTaskCancellationHandler {
-                for try await fragment in provider.streamText(system: system, input: input) {
-                    for op in parser.feed(fragment) {
-                        try Task.checkCancellation()
-                        if let approved = route.accept(op) { try await sender.append(approved) }
-                        if showTitle { commandStatus = .building(route.title) }
-                    }
-                }
-                try Task.checkCancellation()
-                for op in parser.finish() {
-                    if let approved = route.accept(op) { try await sender.append(approved) }
-                    if showTitle { commandStatus = .building(route.title) }
-                }
-                guard route.finished else { throw GenerationError.invalidOutput }
-                try await sender.finish()
-            } onCancel: {
-                Task { await sender.cancel() }
+            return try await model.stream(system: system, input: input, sender: sender) { [weak self] title in
+                if showTitle, !Task.isCancelled { self?.commandStatus = .building(title) }
             }
         } catch {
-            await sender.cancel()
-            if !Task.isCancelled, showTitle, let command = retryCommand, let target = route.target {
-                retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
-                if route.created, let components = try? await roomComponents(room),
-                   components.contains(where: { $0.id == target && $0.building }) {
-                    try? await account.service.sendOps([.done(id: target)], to: room.roomId)
+            await sender.close()
+            let route = await model.generation
+            if !Task.isCancelled, showTitle, let command = retryCommand, let route, let target = route.target {
+                if !route.created { retryCommand = Command(text: command.text, source: command.source, retryTarget: target) }
+                if route.needsCleanup {
+                    do { try await cleanUpCommand(route, target: target, binding: binding) }
+                    catch {
+                        if !Task.isCancelled {
+                            Self.logger.error("Could not clean up a failed collaboration command: \(String(describing: error), privacy: .private)")
+                        }
+                        throw error
+                    }
                 }
             }
             throw error
         }
-        return route
+    }
+
+    private func cleanUpCommand(_ route: CollabGeneration, target: String, binding: OwnedRoom) async throws {
+        if route.created || route.removed {
+            let components = try await roomComponents(binding.room)
+            guard components.contains(where: { $0.id == target }) else { return }
+        }
+        try Task.checkCancellation()
+        let cleanup = makeSender(binding.room, owner: binding.owner)
+        sender = cleanup
+        try await cleanup.append(route.created ? .remove(id: target) : .done(id: target))
+        try await cleanup.finish()
+    }
+
+    private func makeSender(_ room: CollabRoom, owner: String) -> CollabOpSender {
+        CollabOpSender { [service = account.service] batch in
+            try await service.sendOps(batch, to: room.roomId, owner: owner)
+        }
     }
 }
