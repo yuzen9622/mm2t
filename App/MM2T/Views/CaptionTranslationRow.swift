@@ -9,6 +9,7 @@ struct CaptionTranslationRow: View {
     let app: AppController
     @State private var appleLanguages: [AppleCaptionLanguage]?
     @State private var refresh = 0
+    @State private var appleRequest: UUID?
 
     private struct CatalogRequest: Equatable {
         let engine: CaptionEngine
@@ -25,7 +26,10 @@ struct CaptionTranslationRow: View {
                 Text("Translation model")
                 Spacer()
                 Dropdown(label: "Translation model", options: engineOptions,
-                         selection: Binding(get: { engine }, set: { new in Task { await app.setCaptionEngine(new) } }),
+                         selection: Binding(get: { engine }, set: { new in
+                             appleRequest = new == .apple ? UUID() : nil
+                             Task { await app.setCaptionEngine(new) }
+                         }),
                          placeholder: String(localized: "Unavailable"))
             }
             if !AppleCaptionTranslator.isAvailable {
@@ -36,19 +40,24 @@ struct CaptionTranslationRow: View {
                 Text("Translate captions")
                 Spacer()
                 Dropdown(label: "Translate captions", options: targetOptions,
-                         selection: Binding(get: { choice }, set: { new in Task { await app.setCaptionTranslation(new) } }),
+                         selection: Binding(get: { choice }, set: { new in
+                             Task {
+                                 await app.setCaptionTranslation(new)
+                                 if engine == .apple { appleRequest = new == .off ? nil : UUID() }
+                             }
+                         }),
                          placeholder: engine == .apple && appleLanguages == nil ? String(localized: "Checking…") : String(localized: "Unavailable"),
                          showsSelectedLeading: false)
                     .disabled(engine == .apple && (appleLanguages == nil || !AppleCaptionTranslator.isAvailable))
             }
             if engine == .apple {
                 if let language = appleLanguages?.first(where: { $0.target == choice.target }),
-                   !language.missingSources.isEmpty, #available(macOS 26, *) {
-                    AppleModelDownload(language: language) { refresh += 1 }.id(language.target.id)
+                   !language.missingSources.isEmpty, let appleRequest, #available(macOS 26, *) {
+                    AppleModelDownload(language: language) { refresh += 1 }.id(appleRequest)
                 } else if appleLanguages?.isEmpty == true, AppleCaptionTranslator.isAvailable {
                     Text("No system translation languages available.").font(Typo.caption).foregroundStyle(Palette.secondary)
                 }
-            } else if choice.target != nil {
+            } else {
                 modelDownload
             }
         }
@@ -62,10 +71,11 @@ struct CaptionTranslationRow: View {
 
     private var engineOptions: [DropdownOption<CaptionEngine>] {
         CaptionEngine.allCases.compactMap { engine in
-            switch engine {
+            let detail = app.setup.missingTranslationBytes(for: engine).map { "\(Int((Double($0) / 1_000_000).rounded())) MB" }
+            return switch engine {
             case .apple: AppleCaptionTranslator.isAvailable ? DropdownOption(id: engine, title: "Apple Translation") : nil
-            case .firefox: DropdownOption(id: engine, title: "Mozilla Firefox Translations")
-            case .hyMT2: DropdownOption(id: engine, title: "Tencent Hy-MT2")
+            case .firefox: DropdownOption(id: engine, title: "Mozilla Firefox Translations", detail: detail)
+            case .hyMT2: DropdownOption(id: engine, title: "Tencent Hy-MT2", detail: detail)
             }
         }
     }
@@ -99,17 +109,8 @@ struct CaptionTranslationRow: View {
             Text("Downloading translation model… \(Int(fraction * 100))%")
                 .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
         case .failed:
-            HStack {
-                Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.muted)
-                Spacer()
-                PillButton("Retry", icon: "refresh") { Task { await app.setup.downloadTranslationModels() } }
-            }
-        case .notDownloaded:
-            HStack {
-                Spacer()
-                PillButton("Download", icon: "download") { Task { await app.setup.downloadTranslationModels() } }
-            }
-        case .downloaded: EmptyView()
+            Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.muted)
+        case .notDownloaded, .downloaded: EmptyView()
         }
     }
 }
@@ -147,12 +148,8 @@ private struct AppleModelDownload: View {
                         }
                     }
                     .id(source)
-            } else {
-                PillButton(failed ? "Retry" : "Download", icon: "download") {
-                    failed = false
-                    pending = language.missingSources
-                }
             }
         }
+        .onAppear { pending = language.missingSources }
     }
 }

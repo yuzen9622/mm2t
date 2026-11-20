@@ -141,7 +141,21 @@ public final class SetupModel {
     }
 
     private var selectedInstaller: (any ModelInstalling)? {
-        translationTarget.flatMap { translationInstaller(settings.settings.captionEngine, $0) }
+        installerTarget(for: settings.settings.captionEngine).flatMap { translationInstaller(settings.settings.captionEngine, $0) }
+    }
+
+    private func installerTarget(for engine: CaptionEngine) -> CaptionTarget? {
+        switch engine {
+        case .apple: nil
+        case .hyMT2: .english // One shared model, even when translated captions are off.
+        case .firefox: settings.settings.captionTranslation.target.flatMap { CaptionTarget.all.contains($0) ? $0 : nil }
+        }
+    }
+
+    public func missingTranslationBytes(for engine: CaptionEngine) -> Int64? {
+        guard let target = installerTarget(for: engine), let installer = translationInstaller(engine, target),
+              !installer.isDownloaded else { return nil }
+        return installer.downloadBytes
     }
 
     private struct DownloadKey: Hashable {
@@ -150,7 +164,7 @@ public final class SetupModel {
         let target: CaptionTarget?
     }
     private var downloadKey: DownloadKey? {
-        translationTarget.map { DownloadKey(engine: settings.settings.captionEngine,
+        installerTarget(for: settings.settings.captionEngine).map { DownloadKey(engine: settings.settings.captionEngine,
                                            target: settings.settings.captionEngine == .hyMT2 ? nil : $0) }
     }
     @ObservationIgnored private var downloadTasks: [DownloadKey: Task<Void, Never>] = [:]

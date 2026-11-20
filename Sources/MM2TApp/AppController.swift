@@ -371,7 +371,6 @@ public final class AppController {
     /// chosen; other languages' models stay on disk. It applies from the next recording.
     public func setCaptionEngine(_ engine: CaptionEngine) async {
         if engine == .apple, #unavailable(macOS 26) { return }
-        guard settings.settings.captionEngine != engine else { return }
         var current = settings.settings
         current.captionEngine = engine
         if let target = current.captionTranslation.target,
@@ -380,16 +379,13 @@ public final class AppController {
         }
         settings.settings = current
         setup.refreshTranslation()
+        await setup.downloadTranslationModels()
     }
 
     public func setCaptionTranslation(_ choice: CaptionTranslation) async {
         settings.settings.captionTranslation = choice
         setup.refreshTranslation()
-        guard choice != .off, settings.settings.captionEngine == .firefox else { return }
-        switch setup.translationModels {
-        case .notDownloaded, .failed: await setup.downloadTranslationModels()
-        case .downloading, .downloaded: break
-        }
+        if choice != .off { await setup.downloadTranslationModels() }
     }
 
     /// Marks setup finished and leaves it; from here the app watches for meetings.

@@ -21,16 +21,16 @@ import MM2TCore
         }
     }
 
-    @Test func engineSwitchDoesNotDownloadAndUnsupportedChoiceIsCleared() async throws {
+    @Test func selectingSharedModelDownloadsOnceAndUnsupportedChoiceIsCleared() async throws {
         let world = try World()
         let app = world.app
+        #expect(app.setup.missingTranslationBytes(for: .hyMT2) == world.translationInstaller.downloadBytes)
+        await app.setCaptionEngine(.hyMT2)
+        #expect(world.translationInstaller.downloads.get == 1)
+        #expect(app.setup.translationModels == .downloaded)
+        #expect(app.setup.missingTranslationBytes(for: .hyMT2) == nil)
         await app.setCaptionEngine(.hyMT2)
         await app.setCaptionTranslation(CaptionTranslation(try #require(CaptionTarget(languageCode: "vi"))))
-        #expect(world.translationInstaller.downloads.get == 0)
-        #expect(app.setup.translationModels == .notDownloaded)
-        await app.onboarding.startDownloads()
-        #expect(world.translationInstaller.downloads.get == 0, "Opening onboarding must not fetch the shared Hy-MT2 file")
-        await app.setup.downloadTranslationModels()
         #expect(world.translationInstaller.downloads.get == 1)
         await app.setCaptionEngine(.firefox)
         #expect(app.settings.settings.captionTranslation == .off)
