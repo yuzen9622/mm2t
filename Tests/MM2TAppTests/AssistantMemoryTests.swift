@@ -157,7 +157,7 @@ import Testing
         }
         #expect(tools == 1)
         #expect(llm.generationInputs.get.count == 2)
-        #expect(llm.generationInputs.get.last?.contains("SEARCH capped at 8") == true)
+        #expect(llm.generationInputs.get.last?.contains("SEARCH: 0 matching meetings") == true)
         #expect(llm.answerInputs.get.last?.contains("Duplicate tool call refused") == true)
     }
 }

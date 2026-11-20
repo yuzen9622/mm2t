@@ -84,7 +84,7 @@ public struct AssistantEngine: Sendable {
                     var context = AssistantContext(budget: budget)
                     var ledger = initialLedger
                     var observations: [String] = []
-                    var filed = false
+                    var filingChecked = false
                     for id in (scope ?? []).sorted(by: { $0.description < $1.description }) {
                         guard let meeting = try? await library.meeting(id) else { observations.append("Referenced meeting unavailable"); continue }
                         let hits = MeetingHits(id: id, title: meeting.metadata.title, startedAt: meeting.metadata.startedAt, hits: [], totalHits: 0)
@@ -92,6 +92,7 @@ public struct AssistantEngine: Sendable {
                         if !context.append(item) { observations.append("Referenced meeting exceeds evidence budget") }
                     }
                     var found: [MeetingHits] = []
+                    var searchSources: [AssistantSource] = []
                     var seen: Set<String> = []
                     var nextPages: [String: String] = [:]
                     var emptySteps = 0
@@ -126,7 +127,7 @@ public struct AssistantEngine: Sendable {
                         let elapsed = start.duration(to: .now).components
                         continuation.yield(.planFinished(reasoning: decision.reasoning,
                             duration: Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18))
-                        if decision.action == .answer { break }
+                        if decision.action == .answer || (decision.action == .organize_meetings && filingChecked) { break }
                         var filter = decision
                         filter.reasoning = ""; filter.cursor = nil
                         filter.chatLanguageChange = nil
@@ -146,7 +147,14 @@ public struct AssistantEngine: Sendable {
                             if emptySteps >= 2 { break }
                             continue
                         }
-                        let kind: AssistantTool = decision.action == .organize_meetings ? .filing : decision.action == .query_actions ? .tasks : decision.action == .search_meetings ? .search : .read
+                        let kind: AssistantTool
+                        switch decision.action {
+                        case .organize_meetings: kind = .filing
+                        case .query_actions: kind = .tasks
+                        case .list_meetings, .search_meetings: kind = .search
+                        case .read_meeting, .review_meetings, .quote_meetings: kind = .read
+                        case .answer: continue
+                        }
                         let id = UUID()
                         continuation.yield(.toolStarted(id: id, kind: kind, arguments: .init(query: decision.query,
                             people: decision.people, dateFrom: decision.dateFrom, dateTo: decision.dateTo,
@@ -178,21 +186,53 @@ public struct AssistantEngine: Sendable {
                                 }
                                 nextPages[filterKey] = page.cursor(after: included)
                                 result = .init(count: included, coverage: "TASKS: returned \(included) of page \(page.offset + 1)-\(page.offset + page.rows.count), total=\(page.total); nextCursor=\(page.cursor(after: included) ?? "none"); identityGap=\(page.identityGap); missingSummaries=\(page.missingSummaries); legacyMarks=\(page.legacyMarks); clipped=\(included < page.rows.count)", sources: context.sources)
-                            case .search_meetings:
+                            case .search_meetings, .list_meetings, .review_meetings, .quote_meetings:
                                 guard decision.people.allSatisfy({ names.values.contains($0) }) else { throw AssistantQueryError.invalid("Unknown person filter") }
                                 let range = try AssistantTasks.range(decision.dateFrom, decision.dateTo)
-                                found = try await assistantTimeout(seconds: Self.remaining(retrievalDeadline)) {
-                                    try await index.search(.init(text: decision.query, people: Set(names.filter { decision.people.contains($0.value) }.keys), dateRange: range, limit: 8, names: names, scope: scope))
+                                let inventory = decision.action != .search_meetings
+                                // In a per-record review the topic is a question to ask of each record.
+                                // An absent literal keyword is often the important finding.
+                                let query = [.review_meetings, .quote_meetings].contains(decision.action) ? "" : decision.query
+                                if inventory, query.isEmpty, decision.people.isEmpty {
+                                    found = try await library.list().filter {
+                                        (scope?.contains($0.id) ?? true) && (range?.contains($0.metadata.startedAt) ?? true)
+                                    }.map {
+                                        MeetingHits(id: $0.id, title: $0.metadata.title, startedAt: $0.metadata.startedAt, hits: [], totalHits: 0)
+                                    }
+                                } else {
+                                    found = try await assistantTimeout(seconds: Self.remaining(retrievalDeadline)) {
+                                        try await index.search(.init(text: query, people: Set(names.filter { decision.people.contains($0.value) }.keys), dateRange: range, limit: .max, names: names, scope: scope))
+                                    }
                                 }
-                                var descriptions: [String] = []
-                                for hit in found {
-                                    let source = ledger.register(.init(id: "", meeting: hit.id, utterance: nil, title: hit.title, date: hit.startedAt, quote: nil, speaker: nil, time: nil))
-                                    descriptions.append("\(source.id): \(hit.title) " + hit.hits.map(\.snippet).joined(separator: " | "))
+                                let matches = found.map { hit in
+                                    ledger.register(.init(id: "", meeting: hit.id, utterance: nil, title: hit.title,
+                                        date: hit.startedAt, quote: nil, speaker: nil, time: nil))
                                 }
-                                result = .init(count: found.count, coverage: "SEARCH capped at 8 meetings: " + descriptions.joined(separator: "\n"))
+                                var deliverRows = inventory
+                                if decision.action == .list_meetings {
+                                    let intent = try await assistantTimeout(seconds: min(limits.requestSeconds, Self.remaining(retrievalDeadline))) {
+                                        try await AssistantGeneration.userDirective(provider: provider, question: question,
+                                            rule: "Return inventory only when a list of titles, dates, sources and count completely answers the request. Requests for advice, naming folders, analysis, decisions, or a summary need evidence for a subsequent answer.",
+                                            choices: ["inventory", "evidence"])
+                                    }
+                                    deliverRows = intent == "inventory"
+                                }
+                                if deliverRows {
+                                    continuation.yield(.ledger(ledger))
+                                    try await AssistantArchiveReview.deliver(matches, toolID: id, action: decision.action, ledger: &ledger,
+                                        library: library, request: request, provider: provider, timeout: limits.requestSeconds,
+                                        names: names, user: user?.name, to: continuation)
+                                    continuation.finish()
+                                    return
+                                }
+                                searchSources += matches
+                                let descriptions = zip(matches, found).map { source, hit in
+                                    "\(source.id): \(hit.title) " + hit.hits.map(\.snippet).joined(separator: " | ")
+                                }
+                                let guidance = inventory ? "Inventory only. Read content as needed and answer the user's actual request. " : ""
+                                result = .init(count: found.count, coverage: "SEARCH: \(found.count) matching meetings. " + guidance + descriptions.joined(separator: "\n"), sources: matches)
                             case .read_meeting:
                                 let handles = decision.handles.isEmpty ? found.compactMap { hit in ledger.sources.first { $0.meeting == hit.id && $0.utterance == nil && $0.task == nil }?.id } : decision.handles
-                                guard handles.count <= 8 else { throw AssistantQueryError.invalid("Read at most 8 handles at a time") }
                                 var readSources: [AssistantSource] = []
                                 var clipped = false
                                 for handle in handles {
@@ -215,11 +255,22 @@ public struct AssistantEngine: Sendable {
                                 }
                                 result = .init(count: readSources.count, coverage: "READ: \(readSources.count) meeting(s); clipped=\(clipped)", sources: context.sources, meetings: readSources)
                             case .organize_meetings:
-                                guard !filed, let folders else { throw AssistantQueryError.invalid("Filing unavailable or already executed") }
-                                filed = true
-                                let outcome = try await FolderOrganizer.run(folders, library: library, provider: provider, question: question, scope: scope, automatic: false, explicitReferences: explicitReferences)
+                                guard let folders else { throw AssistantQueryError.invalid("Filing unavailable") }
+                                filingChecked = true
+                                guard let mode = try await FolderOrganizer.previewMode(provider: provider, question: question) else {
+                                    result = .init(count: 0, coverage: "No filing preview requested. Answer the read-only question, or ask whether the user wants meeting folder suggestions if the request is unclear.")
+                                    break
+                                }
+                                let outcome = try await FolderOrganizer.run(folders, library: library, provider: provider, question: question, scope: scope, mode: mode, explicitReferences: explicitReferences)
                                 continuation.yield(.filed(outcome.batch, outcome.proposals))
-                                result = .init(count: outcome.moved, coverage: "Moved \(outcome.moved) meetings. \(outcome.proposals.count) folder proposals await approval; no proposed folder has been created.")
+                                let proposed = outcome.proposals.reduce(0) { $0 + $1.meetings.count }
+                                let unresolved = outcome.checked - outcome.alreadyInPlace - proposed
+                                result = .init(count: proposed, coverage: """
+                                    Checked \(outcome.checked) eligible meetings. Already in the matching folder: \(outcome.alreadyInPlace).
+                                    Meetings without a clear destination or outside the requested topic: \(unresolved).
+                                    Prepared \(outcome.proposals.count) filing proposals covering \(proposed) meetings.
+                                    Each proposal awaits confirmation in the app. No folders created or meetings moved.
+                                    """)
                             case .answer: break
                             }
                             observations.append(result.coverage)
@@ -249,7 +300,7 @@ public struct AssistantEngine: Sendable {
                         return answer
                     }
                     try Task.checkCancellation()
-                    let eligible = Set((initialLedger.sources + context.sources).filter { scope?.contains($0.meeting) ?? true }.map(\.id))
+                    let eligible = Set((initialLedger.sources + searchSources + context.sources).filter { scope?.contains($0.meeting) ?? true }.map(\.id))
                     let ids = AssistantMarkdown.parse(answer, known: eligible).citationIDs
                     var cited: [AssistantSource] = []
                     var meetings: [MeetingID: Meeting] = [:]

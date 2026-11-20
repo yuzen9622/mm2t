@@ -147,7 +147,7 @@ public final class AppController {
             guard folders.claimRecording(meeting.id), !folders.folders.isEmpty, folders.revision(of: meeting.id) == nil else { return }
             Task {
                 guard case .ready(let provider) = try? pipelineSetup.buildLLM(settings.settings) else { return }
-                _ = try? await FolderOrganizer.run(folders, library: library, provider: provider, question: "", scope: [meeting.id], automatic: true)
+                _ = try? await FolderOrganizer.run(folders, library: library, provider: provider, question: "", scope: [meeting.id], mode: .automatic)
             }
         }
         self.settings = settings

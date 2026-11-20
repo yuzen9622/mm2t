@@ -78,18 +78,44 @@ import Observation
         if save(next), selected == id { selected = nil }
     }
     @discardableResult public func move(_ destinations: [MeetingID: UUID?], origin: Origin, joining batchID: UUID? = nil) -> Bool {
+        persistMoves(destinations, origin: origin, joining: batchID, startingFrom: state) != nil
+    }
+
+    func canApply(_ proposal: FolderProposal) -> Bool {
+        guard !proposal.meetings.isEmpty, Set(proposal.meetings).count == proposal.meetings.count,
+              proposal.meetings.allSatisfy({ revision(of: $0) == proposal.revisions[$0] }) else { return false }
+        if let destination = proposal.destination {
+            return folders.contains { $0.id == destination && $0.name == proposal.name }
+        }
+        return !proposal.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !folders.contains { $0.name.localizedCaseInsensitiveCompare(proposal.name) == .orderedSame }
+    }
+
+    func apply(_ proposal: FolderProposal, joining batchID: UUID?) -> UUID? {
+        guard canApply(proposal) else { return nil }
+        var next = state
+        let destination = proposal.destination ?? UUID()
+        if proposal.destination == nil { next.folders.append(Folder(id: destination, name: proposal.name)) }
+        let moves = Dictionary(uniqueKeysWithValues: proposal.meetings.map { ($0, Optional(destination)) })
+        return persistMoves(moves, origin: .assistant, joining: batchID, startingFrom: next)
+    }
+
+    private func persistMoves(_ destinations: [MeetingID: UUID?], origin: Origin, joining batchID: UUID?, startingFrom state: State) -> UUID? {
         var next = state, changes: [Change] = []
         for (id, destination) in destinations {
-            guard destination == nil || folders.contains(where: { $0.id == destination }) else { return false }
+            guard destination == nil || next.folders.contains(where: { $0.id == destination }) else { return nil }
             let prior = next.placements[id]
             guard prior?.folder != destination, origin != .automatic || prior == nil else { continue }
             let revision = UUID()
             changes.append(Change(id: id, previous: prior, revision: revision))
             next.placements[id] = Placement(folder: destination, origin: origin, revision: revision)
         }
-        guard !changes.isEmpty else { return false }
-        if let batchID, let index = next.batches.firstIndex(where: { $0.first?.revision == batchID }) { next.batches[index] += changes } else { next.batches.append(changes) }
-        return save(next)
+        guard var batch = changes.first?.revision else { return nil }
+        if let batchID, let index = next.batches.firstIndex(where: { $0.first?.revision == batchID }) {
+            next.batches[index] += changes
+            batch = batchID
+        } else { next.batches.append(changes) }
+        return save(next) ? batch : nil
     }
     public var latestBatchID: UUID? { state.batches.last?.first?.revision }
     public func undo(batchID: UUID? = nil) {

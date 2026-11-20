@@ -89,9 +89,9 @@ import Testing
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         var readCount = 0
         for await event in engine.events(question: "Budget", previous: [], provider: llm) {
-            if case .toolStarted(_, .read, let args) = event { readCount = args.meetings.count }
+            if case .toolFinished(_, let result) = event, result.coverage.hasPrefix("READ:") { readCount = result.meetings.count }
         }
-        #expect(readCount == 8)
+        #expect(readCount == 10)
         let tiny = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints, contextBudget: 1)
         for await _ in tiny.events(question: "Budget", previous: [], provider: llm) {}
         #expect(llm.answerInputs.get.last?.components(separatedBy: "material):\n").last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)

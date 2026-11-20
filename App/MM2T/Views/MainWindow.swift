@@ -424,10 +424,16 @@ struct MainWindow: View {
                 IconButton("New Folder", icon: "plus") { addingFolder = true }
             }
             if foldersExpanded {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        folderBranch(nil)
-                        ForEach(app.folders.folders) { folder in folderBranch(folder) }
+                GeometryReader { viewport in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            folderBranch(nil)
+                            ForEach(app.folders.folders) { folder in folderBranch(folder) }
+                        }
+                    }
+                    .transformPreference(FilingBounds.self) { bounds in
+                        let visible = viewport.frame(in: .named("meeting-filing"))
+                        bounds = bounds.mapValues { $0.intersection(visible) }
                     }
                 }.entrance(from: .top, distance: 6)
             }
@@ -441,29 +447,34 @@ struct MainWindow: View {
         let expanded = expandedFolderIDs.contains(id)
         let selected = section == .meetings && app.folders.selected == id
         let target = FilingTarget.folder(id)
-        FolderSidebarRow(name: folder?.name ?? String(localized: "Unfiled"), icon: "folder", expanded: expanded,
-            selected: selected, accepting: filingDrag.hovered == target, received: filingDrag.received == target) {
-                if expanded && selected && meeting == nil { expandedFolderIDs.remove(id) }
-                else { expandedFolderIDs.insert(id) }
-                selectFolder(id, expand: false)
-            }
-            .filingTarget(target)
-            .contextMenu {
-                if let folder {
-                    Button("Edit Folder") { editingFolder = folder }
-                    Divider()
-                    Button("Delete Folder", role: .destructive) { expandedFolderIDs.remove(id); app.folders.delete(folder.id) }
+        VStack(alignment: .leading, spacing: 2) {
+            FolderSidebarRow(name: folder?.name ?? String(localized: "Unfiled"), icon: "folder", expanded: expanded,
+                selected: selected, accepting: filingDrag.hovered == target, received: filingDrag.received == target) {
+                    if expanded && selected && meeting == nil { expandedFolderIDs.remove(id) }
+                    else { expandedFolderIDs.insert(id) }
+                    selectFolder(id, expand: false)
                 }
-            }
-        if expanded {
-            VStack(spacing: 1) {
-                ForEach(app.meetings.rows.filter { app.folders.folder(of: $0.id) == id }) { row in
-                    FolderSidebarRow(name: row.title, icon: "file-text", selected: meeting == row.id) {
-                        app.folders.selected = id; show(.meetings, meeting: row.id)
+                .contextMenu {
+                    if let folder {
+                        Button("Edit Folder") { editingFolder = folder }
+                        Divider()
+                        Button("Delete Folder", role: .destructive) { expandedFolderIDs.remove(id); app.folders.delete(folder.id) }
                     }
                 }
-            }.padding(.leading, 20).entrance(from: .top, distance: 5)
+            if expanded {
+                VStack(spacing: 1) {
+                    ForEach(app.meetings.rows.filter { app.folders.folder(of: $0.id) == id }) { row in
+                        FolderSidebarRow(name: row.title, icon: "file-text", selected: meeting == row.id) {
+                            app.folders.selected = id; show(.meetings, meeting: row.id)
+                        }
+                        .simultaneousGesture(filingDrag.gesture(for: row, folders: app.folders))
+                    }
+                }.padding(.leading, 20).entrance(from: .top, distance: 5)
+            }
         }
+        .background(expanded && filingDrag.hovered == target ? Palette.orangeSoft : .clear,
+                    in: RoundedRectangle(cornerRadius: Radius.control))
+        .filingTarget(target)
     }
 
     private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil) {

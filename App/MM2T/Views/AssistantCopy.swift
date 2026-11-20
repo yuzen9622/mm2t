@@ -9,7 +9,7 @@ extension Copy {
         case .search: String(localized: "Searched")
         case .read: String(localized: "Read")
         case .tasks: String(localized: "Checked assignments")
-        case .filing: String(localized: "Filed meetings")
+        case .filing: String(localized: "Reviewed meeting folders")
         case .answer: String(localized: "Answer")
         }
     }

@@ -84,8 +84,18 @@ private struct AssistantTurnView: View {
                     AssistantAnswer(turn: turn, openSource: openSource)
                         .padding(.top, 16)
                 }
+                if let checked = turn.folderProposals?.first?.checkedCount {
+                    Text("Checked \(checked) meetings").font(Typo.caption).foregroundStyle(Palette.secondary)
+                        .padding(.top, 16)
+                }
                 ForEach(turn.folderProposals ?? [], id: \.name) { proposal in
-                    PillButton("Create folder: \(proposal.name)", icon: "plus") { model.createProposedFolder(proposal, turn: turn.id) }
+                    AssistantFilingCard(model: model, turn: turn.id, proposal: proposal).padding(.top, 10)
+                }
+                if turn.folderBatch != nil {
+                    HStack {
+                        Label("Meetings moved", systemImage: "checkmark").font(Typo.captionStrong)
+                        Button("Undo move") { model.undoFiling(turn.id) }.buttonStyle(.link)
+                    }.padding(.top, 12)
                 }
 
                 if turn.memoryProposal != nil {

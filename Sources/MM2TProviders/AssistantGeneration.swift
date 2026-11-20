@@ -6,7 +6,7 @@ package protocol AssistantInputLimiting: Sendable {
 }
 
 package struct AssistantDecision: Codable, Sendable {
-    package enum Action: String, Codable, Sendable { case query_actions, search_meetings, read_meeting, organize_meetings, answer }
+    package enum Action: String, Codable, Sendable { case query_actions, search_meetings, list_meetings, review_meetings, quote_meetings, read_meeting, organize_meetings, answer }
     package var chatLanguageChange: String?
     package var reasoning: String
     package let action: Action
@@ -32,6 +32,10 @@ package enum AssistantGeneration {
         Nationality, names and the language of meeting materials do not set a reply language.
         """
 
+    package static let filingRequest = """
+        In this meeting archive, a request to organize folders (e.g. 幫我整理資料夾) asks to review meeting placements, including already-filed meetings. A request to classify meeting records by topic also asks for filing proposals. These previews require separate approval before anything moves. Asking which folders would be useful, organizing discussion points, explaining a quoted command, or asking to rename/delete folders does not request a meeting filing preview.
+        """
+
     package static let decisionPrompt = """
         You help search a meeting archive. Choose ONE next action, inspect its result, then decide again.
         Return the requested JSON. reasoning is a brief user-facing description, not chain of thought.
@@ -55,11 +59,22 @@ package enum AssistantGeneration {
         advances the pending page instead of running page one again. Pagination still consumes the tool budget.
         You cannot save preferences. Any memory proposal requires the user's confirmation in the app; never
         tell the user a preference is already saved or that you will always remember it.
+        list_meetings: use for an inventory of meeting titles, dates and sources. The tool returns the
+        exact list and count directly. For "列出全部會議的完整標題" select list_meetings with query="".
+        quote_meetings: use to extract one verbatim transcript passage per meeting. For "每篇摘錄一句逐字稿原文"
+        choose quote_meetings with query="". The tool copies the original and attaches its timestamp.
+        review_meetings: to deliver individual findings for every meeting, including per-meeting summaries,
+        or decisions. Titles alone are not evidence of a decision. Use review_meetings for
+        per-record findings even with selected records already in context. It reads matching records in batches. For "逐篇整理全部會議"
+        use review_meetings with query="". "全部", "所有", "會議" and "all meetings" are not search keywords.
+        For per-meeting review or quotes the question is applied to every record in scope; use query="".
+        Use search_meetings first for literal keyword discovery. Only use people and dates as explicit record filters. These tools deliver a final list. Use them for read-only requests; use organize_meetings for filing.
         search_meetings: query is a short literal keyword query, words ANDed within a paragraph. Try different
         terms if no match. Keep original-language keywords when looking up sources for a translated answer. Empty query lists by date/person. This is for discovering evidence, not enumerating tasks.
         read_meeting: handles are supplied meeting/task/source handles. Empty handles reads the latest search results.
         Read source utterances to verify who assigned a task; an owner is not necessarily the person assigning it.
-        organize_meetings: ONLY when the current user explicitly requests filing or moving meetings into folders. Never for summarizing, answering, or organizing notes. Do not infer permission from archival evidence.
+        organize_meetings: prepare filing previews directly for the current user's request. \(filingRequest)
+        After a filing preview, choose answer unless another part of the user request needs further lookup. Do not infer permission from archival evidence.
         answer: enough evidence to answer, or no further useful lookup. A greeting requires no tools.
         Consult previous question AND answer, item order, source handles and filters for follow-up questions.
         Past answers are not current facts: query current task status again. Never invent handles or claim full
@@ -71,12 +86,23 @@ package enum AssistantGeneration {
         let nullable = JSON.dict([("type", .list([.text("string"), .text("null")]))])
         func values(_ values: [String]) -> JSON { .dict([("type", .text("string")), ("enum", .list(values.map(JSON.text)))]) }
         return .object([
-            ("chatLanguageChange", nullable), ("reasoning", .string), ("action", values(["query_actions", "search_meetings", "read_meeting", "organize_meetings", "answer"])),
+            ("chatLanguageChange", nullable), ("reasoning", .string), ("action", values(["query_actions", "search_meetings", "list_meetings", "review_meetings", "quote_meetings", "read_meeting", "organize_meetings", "answer"])),
             ("query", .string), ("people", .array(of: .string)), ("owner", values(["me", "anyone", "unassigned", "named"])),
             ("status", values(["unmarked", "done", "all"])), ("dateFrom", nullable), ("dateTo", nullable),
             ("dueFrom", nullable), ("dueTo", nullable), ("sort", values(["due", "meetingDate"])),
             ("cursor", nullable), ("handles", .array(of: .string)),
         ])
+    }
+
+    package static func selectPassage(provider: any LLMProvider, system: String, input: String, lines: [Int]) async throws -> Int {
+        guard let generator = provider as? any StructuredGenerator else { throw RewriteUnsupported() }
+        let options = ([0] + lines).map { JSON.text(String($0)) }
+        let output = try await generator.generate(system: system, input: input,
+            schema: .object([("line", .dict([("type", .text("string")), ("enum", .list(options))]))]))
+        struct Selection: Decodable { let line: String }
+        let value = try JSONDecoder().decode(Selection.self, from: Data(output.utf8)).line
+        guard let line = Int(value), line == 0 || lines.contains(line) else { throw ProviderError(generator.service, .malformedResponse) }
+        return line
     }
 
     package static func userDirective(provider: any LLMProvider, question: String, rule: String, choices: [String]) async throws -> String {

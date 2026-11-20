@@ -127,11 +127,29 @@ public final class AssistantModel {
         guard let i = turns.firstIndex(where: { $0.id == turn }), let batch = turns[i].folderBatch else { return }
         engine.folders?.undo(batchID: batch); turns[i].folderBatch = nil; save()
     }
-    public func createProposedFolder(_ proposal: FolderProposal, turn: UUID) {
-        guard let folders = engine.folders, let i = turns.firstIndex(where: { $0.id == turn }), turns[i].folderProposals?.contains(where: { $0.name == proposal.name }) == true else { return }
-        let eligible = proposal.meetings.filter { folders.revision(of: $0) == proposal.revisions[$0] }
-        if !eligible.isEmpty, let id = folders.create(proposal.name), folders.move(Dictionary(uniqueKeysWithValues: eligible.map { ($0, Optional(id)) }), origin: .assistant, joining: turns[i].folderBatch) { turns[i].folderBatch = turns[i].folderBatch ?? folders.latestBatchID }
-        turns[i].folderProposals?.removeAll { $0.name == proposal.name }; save()
+    public enum FilingApproval: Error { case changed, saveFailed }
+
+    public func filingPreview(_ name: String, turn: UUID) async throws -> [FolderProposal.Row] {
+        guard let proposal = turns.first(where: { $0.id == turn })?.folderProposals?.first(where: { $0.name == name }),
+              engine.folders?.canApply(proposal) == true else { throw FilingApproval.changed }
+        return try await engine.library.filingRows(for: proposal.meetings)
+    }
+
+    public func approveFiling(_ name: String, turn: UUID, preview: [FolderProposal.Row]) async throws {
+        let current = try await filingPreview(name, turn: turn)
+        guard preview == current, !Task.isCancelled, let folders = engine.folders,
+              let i = turns.firstIndex(where: { $0.id == turn }),
+              let proposal = turns[i].folderProposals?.first(where: { $0.name == name }),
+              proposal.meetings == current.map(\.id), folders.canApply(proposal) else { throw FilingApproval.changed }
+        guard let batch = folders.apply(proposal, joining: turns[i].folderBatch) else { throw FilingApproval.saveFailed }
+        turns[i].folderBatch = batch
+        dismissFiling(name, turn: turn)
+    }
+
+    public func dismissFiling(_ name: String, turn: UUID) {
+        guard let i = turns.firstIndex(where: { $0.id == turn }) else { return }
+        turns[i].folderProposals?.removeAll { $0.name == name }
+        save()
     }
 
     public func confirmPreference(turn id: UUID, text: String) {

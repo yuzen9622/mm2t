@@ -25,6 +25,30 @@ extension View {
     var location = CGPoint.zero
     var bounds: [FilingTarget: CGRect] = [:]
     var insertReference: ((MeetingDrag) -> Void)?
+
+    func gesture(for row: MeetingRow, folders: MeetingFolders) -> some Gesture {
+        func destination(at point: CGPoint) -> FilingTarget? {
+            let target = bounds.first { $0.value.contains(point) }?.key
+            return target == .folder(folders.folder(of: row.id)) ? nil : target
+        }
+
+        return DragGesture(minimumDistance: 6, coordinateSpace: .named("meeting-filing"))
+            .onChanged { [self] value in
+                item = MeetingDrag(id: row.id, title: row.title)
+                location = value.location
+                hovered = destination(at: value.location)
+            }
+            .onEnded { [self] value in
+                defer { item = nil; hovered = nil }
+                guard let item, let target = destination(at: value.location) else { return }
+                switch target {
+                case .composer:
+                    insertReference?(item)
+                case .folder(let folder):
+                    if folders.move([item.id: folder], origin: .manual) { acknowledge(target) }
+                }
+            }
+    }
 }
 
 struct MeetingListView: View {
@@ -122,19 +146,7 @@ struct MeetingListView: View {
                                 cited: assistant.citedMeetings.contains(row.id),
                                 process: { Task { await process(row) } }, setUp: { MainNavigation.shared.openSetup() })
                         .contentShape(Rectangle())
-                        .simultaneousGesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("meeting-filing"))
-                            .onChanged { value in
-                                drag.item = MeetingDrag(id: row.id, title: row.title); drag.location = value.location
-                                let target = drag.bounds.first { $0.value.contains(value.location) }?.key
-                                drag.hovered = target == .folder(app.folders.folder(of: row.id)) ? nil : target
-                            }.onEnded { value in
-                                defer { drag.item = nil; drag.hovered = nil }
-                                guard let item = drag.item, let target = drag.bounds.first(where: { $0.value.contains(value.location) })?.key else { return }
-                                switch target {
-                                case .composer: drag.insertReference?(item)
-                                case .folder(let folder): if app.folders.move([row.id: folder], origin: .manual) { drag.acknowledge(target) }
-                                }
-                            })
+                        .simultaneousGesture(drag.gesture(for: row, folders: app.folders))
                         .onTapGesture { if compact || row.status == .completed { open(row.id) } }
                         .accessibilityAction { open(row.id) }
                         .focusable().focusEffectDisabled()
