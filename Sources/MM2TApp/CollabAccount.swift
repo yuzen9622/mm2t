@@ -1,4 +1,5 @@
 import Foundation
+import MM2TCore
 import MM2TProviders
 import Observation
 
@@ -64,6 +65,8 @@ public final class CollabAccount {
                     user = nil
                 } else if user == nil, !busy {
                     await restore()
+                } else if !signingOut, let current = await service.signedInUser, current.id == user?.id {
+                    user = current
                 }
             }
         }
@@ -79,17 +82,24 @@ public final class CollabAccount {
     }
 
     public func signIn(_ provider: CollabLoginProvider) async {
+        await signIn(provider) { try await WebAuthentication.authorize($0, callbackScheme: "mm2t") }
+    }
+
+    func signIn(_ provider: CollabLoginProvider, authorize: (URL) async throws -> URL) async {
         guard !busy else { return }
         busy = true
         error = nil
         defer { busy = false }
         do {
-            let callback = try await WebAuthentication.authorize(service.authStartURL(provider), callbackScheme: "mm2t")
+            let verifier = try CollabPKCE.generateVerifier()
+            let url = service.authStartURL(provider, codeChallenge: CollabPKCE.challenge(for: verifier))
+            let callback = try await authorize(url)
+            try Task.checkCancellation()
             let codes = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?.filter { $0.name == "code" }
             guard callback.scheme == "mm2t", callback.host == "auth", codes?.count == 1, let code = codes?.first?.value, !code.isEmpty else {
                 throw CollabError.notSignedIn
             }
-            try await completeSignIn(code: code)
+            try await completeSignIn(code: code, verifier: verifier)
         } catch CalendarError.cancelled {
         } catch is CancellationError {
         } catch {
@@ -97,8 +107,8 @@ public final class CollabAccount {
         }
     }
 
-    func completeSignIn(code: String) async throws {
-        didSignIn(try await service.exchange(code: code))
+    func completeSignIn(code: String, verifier: String) async throws {
+        didSignIn(try await service.exchange(code: code, codeVerifier: verifier))
     }
 
     private func didSignIn(_ verified: CollabUser) {

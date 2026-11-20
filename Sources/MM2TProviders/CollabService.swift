@@ -68,6 +68,7 @@ public actor CollabService {
     private struct StoredLogin: Codable {
         let apiURL: URL
         let tokens: Tokens
+        let user: CollabUser?
     }
 
     private struct Login: Decodable, Sendable {
@@ -76,6 +77,8 @@ public actor CollabService {
         let user: CollabUser
         var tokens: Tokens { Tokens(accessToken: accessToken, refreshToken: refreshToken) }
     }
+
+    private struct Logout: Decodable { let ok: Bool }
 
     private struct Failure: Decodable {
         let error: String
@@ -108,7 +111,7 @@ public actor CollabService {
     private let save: @Sendable (Secret) throws -> Void
     private var didLoad = false
     private var tokens: Tokens?
-    private var ownerID: String?
+    package private(set) var signedInUser: CollabUser?
     private var generation = 0
     private var refreshing: Task<Tokens, any Error>?
     private var observers: [UUID: AsyncStream<Bool>.Continuation] = [:]
@@ -121,8 +124,12 @@ public actor CollabService {
         self.save = save
     }
 
-    public nonisolated func authStartURL(_ provider: CollabLoginProvider) -> URL {
-        url(["auth", provider.rawValue, "start"]).appending(queryItems: [URLQueryItem(name: "redirect", value: "mm2t://auth")])
+    public nonisolated func authStartURL(_ provider: CollabLoginProvider, codeChallenge: String) -> URL {
+        url(["auth", provider.rawValue, "start"]).appending(queryItems: [
+            .init(name: "redirect", value: "mm2t://auth"),
+            .init(name: "code_challenge", value: codeChallenge),
+            .init(name: "code_challenge_method", value: "S256"),
+        ])
     }
 
     public var isAuthenticated: Bool { (try? currentTokens()) != nil }
@@ -138,14 +145,13 @@ public actor CollabService {
 
     private func removeObserver(_ id: UUID) { observers[id] = nil }
 
-    public func exchange(code: String) async throws -> CollabUser {
+    public func exchange(code: String, codeVerifier: String) async throws -> CollabUser {
         let version = generation
-        let request = try Request(post: ["auth", "exchange"], body: ["code": code])
+        let request = try Request(post: ["auth", "exchange"], body: ["code": code, "codeVerifier": codeVerifier])
         let login = try await decode(Login.self, from: request)
         try Task.checkCancellation()
         guard version == generation else { throw CollabError.notSignedIn }
-        try store(login.tokens)
-        ownerID = login.user.id
+        try store(login)
         generation += 1
         refreshing?.cancel()
         refreshing = nil
@@ -157,21 +163,27 @@ public actor CollabService {
     }
 
     public func logout() async throws {
-        _ = try currentTokens()
         let version = generation
-        do { _ = try await authorized(Request(post: ["auth", "logout"])) }
-        catch {
-            if version == generation { try invalidate() }
+        if let refreshing { _ = try await refreshing.value }
+        guard version == generation else { throw CollabError.notSignedIn }
+        let current = try currentTokens()
+        let cleanup = Result { try invalidate() }
+        let request = try Request(post: ["auth", "logout"], body: ["refreshToken": current.refreshToken])
+        do {
+            let response = try await send(request)
+            guard try parse(Logout.self, from: response).ok else { throw CollabError.server(status: response.1) }
+        } catch {
+            try cleanup.get()
             throw error
         }
-        if version == generation { try invalidate() }
+        try cleanup.get()
     }
 
     public func me() async throws -> CollabProfile {
         let version = generation
         let profile = try parse(CollabProfile.self, from: await authorized(Request("me")))
         guard version == generation else { throw CollabError.notSignedIn }
-        ownerID = profile.user.id
+        signedInUser = profile.user
         return profile
     }
 
@@ -199,7 +211,10 @@ public actor CollabService {
         if !didLoad {
             if let secret = try load() {
                 let stored = try? JSONDecoder().decode(StoredLogin.self, from: Data(secret.revealed.utf8))
-                if stored?.apiURL == baseURL { tokens = stored?.tokens }
+                if let stored, stored.apiURL == baseURL {
+                    tokens = stored.tokens
+                    signedInUser = stored.user
+                }
             }
             didLoad = true
         }
@@ -207,10 +222,11 @@ public actor CollabService {
         return tokens
     }
 
-    private func store(_ tokens: Tokens) throws {
-        let stored = StoredLogin(apiURL: baseURL, tokens: tokens)
+    private func store(_ login: Login) throws {
+        let stored = StoredLogin(apiURL: baseURL, tokens: login.tokens, user: login.user)
         try save(Secret(String(decoding: JSONEncoder().encode(stored), as: UTF8.self)))
-        self.tokens = tokens
+        tokens = login.tokens
+        signedInUser = login.user
         didLoad = true
         for observer in observers.values { observer.yield(true) }
     }
@@ -220,7 +236,7 @@ public actor CollabService {
         refreshing?.cancel()
         refreshing = nil
         tokens = nil
-        ownerID = nil
+        signedInUser = nil
         didLoad = true
         for observer in observers.values { observer.yield(false) }
         do { try save(Secret("")) }
@@ -239,10 +255,12 @@ public actor CollabService {
             defer { if version == generation { refreshing = nil } }
             do {
                 let request = try Request(post: ["auth", "refresh"], body: ["refreshToken": current.refreshToken])
-                let replacement = try await decode(Tokens.self, from: request)
-                guard version == generation else { throw CollabError.notSignedIn }
-                try store(replacement)
-                return replacement
+                let login = try await decode(Login.self, from: request)
+                guard version == generation, signedInUser == nil || signedInUser?.id == login.user.id else {
+                    throw CollabError.notSignedIn
+                }
+                try store(login)
+                return login.tokens
             } catch {
                 if version == generation { try invalidate() }
                 throw CollabError.notSignedIn
@@ -253,14 +271,15 @@ public actor CollabService {
     }
 
     private func authorized(_ request: Request, owner: String? = nil) async throws -> (Data, Int) {
-        if let owner, owner != ownerID { throw CollabError.notSignedIn }
         let original = try currentTokens()
+        if let owner, owner != signedInUser?.id { throw CollabError.notSignedIn }
         let version = generation
         do { return try await send(request, bearer: original.accessToken) }
         catch CollabError.notSignedIn {
             try Task.checkCancellation()
             let replacement = try await renew(after: original, generation: version)
             try Task.checkCancellation()
+            guard version == generation else { throw CollabError.notSignedIn }
             do { return try await send(request, bearer: replacement.accessToken) }
             catch CollabError.notSignedIn {
                 if version == generation, tokens == replacement { try invalidate() }

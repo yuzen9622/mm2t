@@ -5,6 +5,30 @@ import Testing
 @testable import MM2TApp
 
 @Suite(.serialized) @MainActor struct CollabSessionTests {
+    @Test func eachSignInUsesASeparateVerifierAndCancelledLoginDoesNotExchange() async throws {
+        let f = try await Fixture()
+        let account = f.newAccount()
+        var challenges: [String] = []
+        for code in [nil, "invalid", "fixture"] {
+            await account.signIn(.google) { start in
+                let query = try #require(URLComponents(url: start, resolvingAgainstBaseURL: false)?.queryItems)
+                let challenge = try #require(query.first { $0.name == "code_challenge" }?.value)
+                challenges.append(challenge)
+                guard let code else { throw CancellationError() }
+                return URL(string: "mm2t://auth?code=\(code)")!
+            }
+        }
+        let exchanges = Array(CollabBackend.exchanges.get.dropFirst())
+        #expect(exchanges.compactMap { $0["code"] } == ["invalid", "fixture"])
+        let verifiers = exchanges.compactMap { $0["codeVerifier"] }
+        #expect(verifiers.allSatisfy { $0.wholeMatch(of: /[A-Za-z0-9_-]{43}/) != nil })
+        #expect(verifiers.map(CollabPKCE.challenge) == Array(challenges.dropFirst()))
+        #expect(Set(challenges).count == 3)
+        #expect(account.user?.id == "test")
+        #expect(account.error == nil)
+        await account.waitForPendingEnds()
+    }
+
     @Test func confirmedSuggestionUsesOneRoomAndLaterCaptionsUpdateIt() async throws {
         let fixture = try await Fixture()
         let (session, captions, clock, llm) = (fixture.session, fixture.captions, fixture.clock, fixture.llm)
@@ -106,7 +130,7 @@ import Testing
         await restored.waitForPendingEnds()
         #expect(!restored.busy)
         CollabBackend.offlineEnd.set(false)
-        try await restored.completeSignIn(code: "fixture")
+        try await restored.completeSignIn(code: "fixture", verifier: Fixture.verifier)
         await restored.waitForPendingEnds()
         #expect(CollabBackend.events.get.filter { $0 == "end" }.count == 9)
         #expect(try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile)).isEmpty)
@@ -122,7 +146,7 @@ import Testing
         f.session.run(command: "原房間")
         #expect(f.session.state == .needsSignIn)
         f.llm.answerChunks.set([#"{"op":"done","id":"unrelated"}"#])
-        try await f.account.completeSignIn(code: "fixture")
+        try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
         #expect(f.session.room?.roomId == "room")
         await f.session.waitForWork()
 
@@ -130,14 +154,14 @@ import Testing
         await #expect(throws: CollabError.notSignedIn) { try await f.account.service.me() }
         try #require(await eventually { f.session.room == nil && f.account.user == nil })
         f.session.run(command: "新房間")
-        try await f.account.completeSignIn(code: "other")
+        try await f.account.completeSignIn(code: "other", verifier: Fixture.verifier)
         #expect(f.session.state == .confirmingStart)
         #expect(f.session.room == nil)
         await f.session.waitForRoomClosure()
         #expect(!CollabBackend.events.get.contains("end"))
         let queued = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
         #expect(queued.map(\.owner) == ["test"])
-        try await f.account.completeSignIn(code: "fixture")
+        try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
         await f.account.waitForPendingEnds()
         #expect(CollabBackend.endBearers.get == ["Bearer test-access"])
         #expect(f.session.room == nil)
@@ -155,7 +179,7 @@ import Testing
         #expect(f.session.commandStatus == .input)
         f.session.run(command: "再次共享")
         #expect(f.session.state == .needsSignIn)
-        try await f.account.completeSignIn(code: "fixture")
+        try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
         #expect(f.session.state == .confirmingStart)
     }
 
@@ -354,6 +378,7 @@ import Testing
     }
 
     @MainActor private struct Fixture {
+        static let verifier = String(repeating: "a", count: 43)
         static let create = [#"{"op":"create","id":"model-id","kind":"document","title":"會議決議","source":"command"}"# + "\n"]
         static let done = #"{"op":"done","id":"model-id"}"#
         let session: CollabSession
@@ -389,7 +414,7 @@ import Testing
             captions.onFinalized = { [weak session] in session?.finalized($0) }
             account.onUserChanged = { [weak session] in session?.accountChanged() }
             account.beforeSignOut = { [weak session] in await session?.signOut() }
-            try await account.completeSignIn(code: "fixture")
+            try await account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
             account.observeSignIn()
         }
 
@@ -428,6 +453,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let events = Box<[String]>([])
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
+    static let exchanges = Box<[[String: String]]>([])
     static let rejectDone = Box(false)
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
@@ -435,7 +461,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
-        requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
+        exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         offlineEnd.set(false); rejectDone.set(false); expired.set(false); holdOps.set(nil); deferredReply.set(nil)
     }
 
@@ -464,8 +490,13 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         }
         switch url.path {
         case "/v1/auth/exchange":
-            let code = (try? JSONDecoder().decode([String: String].self, from: body()))?["code"]
-            let id = code == "other" ? "other" : "test"
+            let exchange = (try? JSONDecoder().decode([String: String].self, from: body())) ?? [:]
+            Self.exchanges.update { $0.append(exchange) }
+            if exchange["code"] == "invalid" {
+                reply(status: 400, body: Data(#"{"error":"invalid_grant"}"#.utf8))
+                return
+            }
+            let id = exchange["code"] == "other" ? "other" : "test"
             Self.expired.set(false)
             response = (200, Data("{\"accessToken\":\"\(id)-access\",\"refreshToken\":\"\(id)-refresh\",\"user\":\(identity(id))}".utf8))
         case "/v1/me":
@@ -519,7 +550,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 return
             }
             response = (204, Data())
-        case "/v1/auth/logout": response = (204, Data())
+        case "/v1/auth/logout": response = (200, Data(#"{"ok":true}"#.utf8))
         default: response = (404, Data())
         }
         reply(status: response.0, body: response.1)
