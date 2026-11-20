@@ -11,16 +11,18 @@ struct TranscriptContent: View {
 
     var body: some View {
         let lines = lyricLines
+        let groups = presentation.translationGroups(model.selectedView)
+        let anchors = Dictionary(uniqueKeysWithValues: groups.flatMap { group in group.sources.map { ($0, group.sources[0]) } })
         let current = playhead.currentLine
         let currentID = current.flatMap { index in
-            lines.flatMap { $0.indices.contains(index) ? $0[index].id : nil }
+            lines.flatMap { $0.indices.contains(index) ? (anchors[$0[index].id] ?? $0[index].id) : nil }
         }
         ScrollViewReader { proxy in
             FadingScrollView(ground: Palette.window) {
                 LazyVStack(alignment: .leading, spacing: lines == nil ? 10 : 2) {
                     switch model.selectedView {
                     case .raw, .cleaned:
-                        if let lines { lyrics(lines, current: current) } else { NotGenerated() }
+                        if let lines { lyrics(lines, current: current, groups: groups, anchors: anchors) } else { NotGenerated() }
                     case .perPerson: perPerson
                     case .summary: summary
                     }
@@ -35,7 +37,7 @@ struct TranscriptContent: View {
                 playhead.follow(lines?.map(\.start) ?? [])
             }
             .onChange(of: model.focusedUtterance, initial: true) { _, id in
-                if let id { withAnimation(Motion.page) { proxy.scrollTo(id.rawValue, anchor: .center) } }
+                if let id { withAnimation(Motion.page) { proxy.scrollTo(anchors[id.rawValue] ?? id.rawValue, anchor: .center) } }
             }
             .onChange(of: currentID) { _, id in
                 guard let id, playhead.isPlaying, !followPaused else { return }
@@ -79,34 +81,55 @@ struct TranscriptContent: View {
         }
     }
 
-    @ViewBuilder private func lyrics(_ lines: [LyricLine], current: Int?) -> some View {
-        let raw = model.selectedView == .raw
-        ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-            let state = KaraokeTiming.state(of: index, current: current, isPlaying: playhead.isPlaying)
-            LyricRow(line: line,
-                     showsSpeaker: index == 0 || lines[index - 1].speakerName != line.speakerName,
-                     state: state,
-                     playhead: playhead,
-                     isFocused: raw && model.focusedUtterance?.rawValue == line.id,
-                     canEdit: model.canEditSpeakers && model.trackPreview.isEmpty,
-                     play: {
-                         followPaused = false
-                         if raw, let row = presentation.raw.first(where: { $0.id.rawValue == line.id }) {
-                             model.play(row)
-                         } else {
-                             model.play(at: line.start)
-                         }
-                     },
-                     save: { text in
-                         if raw {
-                             Task { await model.edit(UtteranceID(line.id), to: text) }
-                         } else if let row = presentation.cleaned?.first(where: { $0.id == line.id }) {
-                             Task { await model.editCleaned(row, to: text) }
-                         }
-                     },
-                     rewrite: raw ? nil : { text, instruction in try await model.rewrite(text, instruction: instruction) })
+    @ViewBuilder private func lyrics(_ lines: [LyricLine], current: Int?, groups: [MeetingPresentation.TranslationGroup], anchors: [String: String]) -> some View {
+        let indices = Dictionary(uniqueKeysWithValues: lines.indices.map { (lines[$0].id, $0) })
+        let blocks = Dictionary(uniqueKeysWithValues: groups.map { ($0.sources[0], $0) })
+        ForEach(lines.indices.filter { anchors[lines[$0].id] == nil || anchors[lines[$0].id] == lines[$0].id }, id: \.self) { index in
+            let line = lines[index]
+            if let group = blocks[line.id] {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(group.sources, id: \.self) { source in
+                        if let i = indices[source] {
+                            lyric(lines[i], index: i, current: current,
+                                  showsSpeaker: source == line.id && (index == 0 || lines[index - 1].speakerName != line.speakerName),
+                                  translation: source == line.id ? group.translation : "")
+                        }
+                    }
+                }
+                .padding(.vertical, 8)
                 .id(line.id)
+            } else {
+                lyric(line, index: index, current: current, showsSpeaker: index == 0 || lines[index - 1].speakerName != line.speakerName, translation: nil)
+                    .id(line.id)
+            }
         }
+    }
+
+    private func lyric(_ line: LyricLine, index: Int, current: Int?, showsSpeaker: Bool, translation: String?) -> some View {
+        let raw = model.selectedView == .raw
+        let state = KaraokeTiming.state(of: index, current: current, isPlaying: playhead.isPlaying)
+        return LyricRow(line: line, translation: translation,
+                 showsSpeaker: showsSpeaker,
+                 state: state,
+                 playhead: playhead,
+                 isFocused: raw && model.focusedUtterance?.rawValue == line.id,
+                 canEdit: model.canEditSpeakers && model.trackPreview.isEmpty,
+                 play: {
+                     followPaused = false
+                     if raw, let row = presentation.raw.first(where: { $0.id.rawValue == line.id }) {
+                         model.play(row)
+                     } else {
+                         model.play(at: line.start)
+                     }
+                 },
+                 save: { text in
+                     if raw {
+                         Task { await model.edit(UtteranceID(line.id), to: text) }
+                     } else if let row = presentation.cleaned?.first(where: { $0.id == line.id }) {
+                         Task { await model.editCleaned(row, to: text) }
+                     }
+                 },
+                 rewrite: raw ? nil : { text, instruction in try await model.rewrite(text, instruction: instruction) })
     }
 
     @ViewBuilder private var perPerson: some View {

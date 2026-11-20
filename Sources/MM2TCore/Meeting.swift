@@ -40,6 +40,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
         return transcription?.trackPreview(duration: metadata.duration) ?? []
     }
     public internal(set) var suggestions = NameSuggestions()
+    public internal(set) var translation: TranscriptTranslation?
     public internal(set) var outputs = LLMOutputs()
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
 
@@ -246,6 +247,35 @@ public struct SourcedText: Codable, Hashable, Sendable {
     public init(text: String, sources: [UtteranceID]) {
         self.text = text
         self.sources = sources
+    }
+}
+
+public struct TranscriptTranslation: Codable, Hashable, Sendable {
+    public let target: String
+    public let source: CleanedTranscript
+    public let paragraphs: [Int: String]
+
+    public struct Pair: Equatable, Sendable {
+        public let original: String
+        public let translated: String
+    }
+
+    public static func passages(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    public static func pairs(original: String, translated: String) -> [Pair] {
+        let originals = passages(original), translations = passages(translated)
+        guard originals.count > 1, originals.count == translations.count else {
+            return [Pair(original: original, translated: translated)]
+        }
+        return zip(originals, translations).map { Pair(original: $0, translated: $1) }
+    }
+
+    public init(target: String, source: CleanedTranscript, paragraphs: [Int: String]) {
+        self.target = target
+        self.source = source
+        self.paragraphs = paragraphs
     }
 }
 

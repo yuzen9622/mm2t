@@ -96,6 +96,14 @@ public enum Subtitles {
         return sentences
     }
 
+    public static func bilingual(_ rows: [(TimeRange, String, String, String?)]) -> String {
+        rows.enumerated().map { index, row in
+            let (range, speaker, original, translation) = row
+            let lines = [translation, original].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            return "\(index + 1)\n\(timestamp(range.start)) --> \(timestamp(range.end))\n\(speaker): \(lines)\n"
+        }.joined(separator: "\n")
+    }
+
     static func timestamp(_ seconds: TimeInterval) -> String {
         let ms = Int((seconds * 1000).rounded())
         return String(format: "%02d:%02d:%02d,%03d", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)

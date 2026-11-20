@@ -419,6 +419,8 @@ public final class AppController {
         recovered.removeAll { $0 == id }
     }
 
+    public var translationCatalog: any ProviderCatalog { pipelineSetup.catalog }
+
     public func detail(_ id: MeetingID, labels: PresentationLabels, playback: (any MeetingPlayback)?) -> MeetingDetailModel {
         MeetingDetailModel(
             id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback,

@@ -280,13 +280,78 @@ public final class MeetingDetailModel {
         await edit { try await $0.claimAsMe(speaker, in: self.id) }
     }
 
-    public func export(_ view: TranscriptView, as format: ExportFormat) -> String? {
-        presentation?.export(view, as: format)
+    public private(set) var translationProgress: Int?
+    public private(set) var translationTotal = 0
+    public var translationError: String?
+
+    public func translate(_ selection: Set<Int>, target: CaptionTarget, engine: CaptionEngine,
+                          catalog: any ProviderCatalog) async {
+        guard canEditSpeakers, translationProgress == nil, let source = meeting?.outputs.cleaned,
+              let rows = presentation?.cleaned, !selection.isEmpty, selection.allSatisfy(rows.indices.contains) else { return }
+        translationTotal = selection.count
+        translationProgress = 0
+        translationError = nil
+        defer { translationProgress = nil }
+        var results: [Int: String] = [:]
+        var translators: [CaptionLanguage: any CaptionTranslator] = [:]
+        do {
+            for index in selection.sorted() {
+                var outputs: [String] = []
+                let passages = TranscriptTranslation.passages(rows[index].text)
+                guard !passages.isEmpty else { throw CocoaError(.formatting) }
+                for text in passages {
+                    var output = text
+                    if let language = CaptionLanguage.of(text) {
+                        switch target.route(from: language, engine: engine) {
+                        case .none: break
+                        case .simplify: output = TraditionalChinese.simplified(text)
+                        case .models(let path):
+                            if translators[language] == nil {
+                                translators[language] = await catalog.captionTranslator(for: target, engine: engine, source: language)
+                            }
+                            guard let translator = translators[language] else {
+                                translationError = String(localized: "Download the translation model in Settings first.")
+                                return
+                            }
+                            output = try await translator.translate(text, through: path)
+                        }
+                    }
+                    output = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !output.isEmpty else { throw CocoaError(.formatting) }
+                    outputs.append(target == .traditionalChinese ? TraditionalChinese.convert(output) : output)
+                }
+                results[index] = outputs.joined(separator: "\n\n")
+                translationProgress = results.count
+                await Task.yield()
+            }
+            meeting = try await library.saveTranslation(.init(target: target.id, source: source, paragraphs: results), for: id)
+        } catch { translationError = error.localizedDescription }
+    }
+
+    public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String? {
+        presentation?.export(view, as: format, includeTranslation: includeTranslation)
     }
 
     /// SubRip text; nil for the views that are not a timed transcript.
-    public func subtitles(_ view: TranscriptView) -> String? {
+    public func subtitles(_ view: TranscriptView, includeTranslation: Bool = false) -> String? {
         guard let meeting, let presentation else { return nil }
+        let headings = includeTranslation ? presentation.translationHeadings(view) : [:]
+        if !headings.isEmpty {
+            let rows: [(TimeRange, String, String, String?)]
+            if view == .raw {
+                rows = presentation.raw.map { (TimeRange(start: $0.start, end: $0.end), $0.speakerName, $0.text, headings[$0.id.rawValue]) }
+            } else {
+                rows = (presentation.cleaned ?? []).compactMap { row in
+                    guard let start = row.jump?.time, let end = row.end else { return nil }
+                    let text = headings[row.id].map { translated in
+                        TranscriptTranslation.pairs(original: row.text, translated: translated)
+                            .map { $0.translated + "\n" + $0.original }.joined(separator: "\n")
+                    } ?? row.text
+                    return (TimeRange(start: start, end: end), row.speakerName ?? "", text, nil)
+                }
+            }
+            return Subtitles.bilingual(rows)
+        }
         if view == .raw {
             return Subtitles.srt(lines: presentation.raw.map {
                 (TimeRange(start: $0.start, end: $0.end), $0.speakerName, $0.text)

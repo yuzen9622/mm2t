@@ -129,6 +129,66 @@ public struct MeetingPresentation: Sendable {
         }
     }
 
+    public struct TranslationGroup: Equatable, Sendable {
+        public let translation: String
+        public let sources: [String]
+    }
+
+    public func translationGroups(_ view: TranscriptView) -> [TranslationGroup] {
+        guard let translation = meeting.translation, translation.source == meeting.outputs.cleaned else { return [] }
+        let paragraphs = translation.source.paragraphs
+        let selected = paragraphs.indices.filter { translation.paragraphs[$0] != nil }
+        if view == .cleaned {
+            return selected.map { TranslationGroup(translation: translation.paragraphs[$0]!, sources: ["cleaned-\($0)"]) }
+        }
+        guard view == .raw else { return [] }
+        let ids = raw.map(\.id)
+        // Split only at boundaries that exist in both the cleaned source and the translation.
+        // A single rewritten passage can still cover several original utterances.
+        var units: [(text: String, sources: [UtteranceID])] = []
+        for index in selected {
+            let paragraph = paragraphs[index], text = translation.paragraphs[index]!
+            let pairs = TranscriptTranslation.pairs(original: paragraph.text, translated: text)
+            if pairs.count > 1, pairs.count == paragraph.sources.count {
+                units += zip(pairs, paragraph.sources).map { ($0.translated, [$1]) }
+            } else {
+                units.append((text, paragraph.sources))
+            }
+        }
+        var owners: [UtteranceID: [Int]] = [:]
+        for (index, unit) in units.enumerated() {
+            for id in unit.sources { owners[id, default: []].append(index) }
+        }
+        // Paragraphs sharing a source form one bilingual block, so neither the source nor its playback target is duplicated.
+        var visited: Set<Int> = []
+        var blocks: [([Int], [String])] = []
+        var blockForSource: [UtteranceID: Int] = [:]
+        for id in ids {
+            if blockForSource[id] == nil, var pending = owners[id] {
+                var members: [Int] = []
+                while let index = pending.popLast() {
+                    guard visited.insert(index).inserted else { continue }
+                    members.append(index)
+                    for source in units[index].sources where blockForSource[source] == nil {
+                        blockForSource[source] = blocks.count
+                        pending.append(contentsOf: owners[source] ?? [])
+                    }
+                }
+                blocks.append((members.sorted(), []))
+            }
+            if let block = blockForSource[id] { blocks[block].1.append(id.rawValue) }
+        }
+        return blocks.map { members, sources in
+            TranslationGroup(translation: members.map { units[$0].text }.joined(separator: "\n"), sources: sources)
+        }
+    }
+
+    public func translationHeadings(_ view: TranscriptView) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: translationGroups(view).compactMap { group in
+            group.sources.first.map { ($0, group.translation) }
+        })
+    }
+
     public var digests: [DigestSection]? {
         meeting.outputs.digests.map { digests in
             digests.map { digest in
@@ -176,19 +236,25 @@ public struct MeetingPresentation: Sendable {
 
     // MARK: Export
 
-    public func export(_ view: TranscriptView, as format: ExportFormat) -> String {
+    public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String {
+        let headings = includeTranslation ? translationHeadings(view) : [:]
+        func bilingual(_ id: String, _ original: String) -> String {
+            guard let text = headings[id], !text.isEmpty else { return original }
+            return TranscriptTranslation.pairs(original: original, translated: text)
+                .map { $0.translated + "\n" + $0.original }.joined(separator: "\n")
+        }
         var out = ExportText(format: format)
         out.heading(1, "\(meeting.metadata.title): \(labels.viewTitle(view))")
         switch view {
         case .raw:
             for row in raw {
                 out.entry(time: row.start, speaker: row.speakerName,
-                          text: row.text + (row.isOverlapping ? " (\(labels.overlapping))" : ""))
+                          text: bilingual(row.id.rawValue, row.text) + (row.isOverlapping ? " (\(labels.overlapping))" : ""))
             }
         case .cleaned:
             guard let cleaned else { return out.finished(labels.notGenerated) }
             if meeting.outputs.isStale { out.line(labels.stale) }
-            for row in cleaned { out.entry(time: row.jump?.time, speaker: row.speakerName ?? "", text: row.text) }
+            for row in cleaned { out.entry(time: row.jump?.time, speaker: row.speakerName ?? "", text: bilingual(row.id, row.text)) }
         case .perPerson:
             guard let digests else { return out.finished(labels.notGenerated) }
             if meeting.outputs.isStale { out.line(labels.stale) }

@@ -1,5 +1,5 @@
 import Foundation
-import MM2TCore
+@testable import MM2TCore
 import MM2TProviders
 import MM2TSystem
 import Testing
@@ -45,6 +45,76 @@ import Testing
 }
 
 @MainActor @Suite struct MeetingDetailTests {
+    @Test func independentPassagesPairWithTheirOwnUtterancesEvenInOneCleanedRow() async throws {
+        let world = try World()
+        var meeting = try await world.recordedMeeting()
+        let ids = meeting.utterances.map(\.id)
+        let originals = ["第一個問題。", "另一個例子。", "最後一個想法。"]
+        let translations = ["First question.", "Another example.", "Last thought."]
+        let paragraph = CleanedTranscript.Paragraph(speaker: .me, text: originals.joined(separator: "\n\n"), sources: Array(ids.prefix(3)))
+        let cleaned = CleanedTranscript(paragraphs: [paragraph])
+        meeting.outputs.cleaned = cleaned
+        try await world.library.save(meeting)
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        world.catalog.translationDownloaded.update { $0 = true }
+        world.catalog.translator.answers.update { $0 = Dictionary(uniqueKeysWithValues: zip(originals, translations)) }
+        await detail.translate([0], target: .english, engine: .firefox, catalog: world.catalog)
+        let presentation = try #require(detail.presentation)
+        let groups = presentation.translationGroups(.raw)
+        #expect(groups.map(\.translation) == translations)
+        #expect(groups.map(\.sources) == ids.prefix(3).map { [$0.rawValue] })
+        let exported = presentation.export(.cleaned, as: .plainText, includeTranslation: true)
+        #expect(exported.contains(zip(translations, originals).map { $0 + "\n" + $1 }.joined(separator: "\n")))
+
+        meeting.outputs.cleaned = CleanedTranscript(paragraphs: [.init(speaker: .me, text: originals[0], sources: Array(ids.prefix(2)))])
+        try await world.library.save(meeting)
+        await detail.load()
+        await detail.translate([0], target: .english, engine: .firefox, catalog: world.catalog)
+        #expect(detail.presentation?.translationGroups(.raw).map(\.sources) == [ids.prefix(2).map(\.rawValue)])
+    }
+
+    @Test func postMeetingTranslationUsesSelectedCleanedRowsAndReplacesOnlyOnSuccess() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let rows = try #require(detail.presentation?.cleaned)
+        let first = rows[0].text, second = rows[1].text
+        world.catalog.translationDownloaded.update { $0 = true }
+        world.catalog.translator.holds.update { $0 = true }
+        let task = Task { await detail.translate([0, 1], target: .english, engine: .firefox, catalog: world.catalog) }
+        #expect(await eventually { world.catalog.translator.held == [first] })
+        #expect(detail.translationProgress == 0 && detail.translationTotal == 2)
+        await world.catalog.translator.release(first)
+        #expect(await eventually { world.catalog.translator.held == [second] })
+        #expect(detail.translationProgress == 1)
+        await world.catalog.translator.release(second)
+        await task.value
+        world.catalog.translator.holds.update { $0 = false }
+        let saved = try #require(try await world.library.meeting(meeting.id).translation)
+        #expect(saved.paragraphs == [0: "⟨\(first)⟩", 1: "⟨\(second)⟩"])
+        for view in [TranscriptView.raw, .cleaned] {
+            for format in [ExportFormat.markdown, .plainText] {
+                #expect(detail.export(view, as: format)?.contains("⟨") == false)
+                #expect(detail.export(view, as: format, includeTranslation: true)?.contains("⟨\(first)⟩") == true)
+            }
+            #expect(detail.subtitles(view, includeTranslation: true)?.contains("⟨\(second)⟩") == true)
+            #expect(detail.subtitles(view)?.contains("⟨") == false)
+        }
+        world.catalog.translator.failing.update { $0.insert(second) }
+        await detail.translate([1], target: .english, engine: .firefox, catalog: world.catalog)
+        #expect(detail.translationError != nil && detail.translationProgress == nil)
+        #expect(try await world.library.meeting(meeting.id).translation == saved)
+        await detail.translate([0], target: .simplifiedChinese, engine: .firefox, catalog: world.catalog)
+        let reopened = world.detail(meeting.id)
+        await reopened.load()
+        #expect(reopened.meeting?.translation?.paragraphs == [0: TraditionalChinese.simplified(first)])
+        await reopened.editCleaned(rows[0], to: "Updated sentence")
+        #expect(reopened.presentation?.translationHeadings(.raw).isEmpty == true)
+        await #expect(throws: LibraryError.transcriptChanged) { try await world.library.saveTranslation(saved, for: meeting.id) }
+    }
+
     @Test func transcriptCanBeReadBeforeSpeakerSeparation() async throws {
         let world = try World(keys: false)
         let meeting = try await world.recordedMeeting()

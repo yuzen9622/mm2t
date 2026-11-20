@@ -16,6 +16,7 @@ public struct Recording: Sendable {
 }
 
 public enum LibraryError: Error, Equatable {
+    case transcriptChanged
     case unknownMeeting(MeetingID)
 }
 
@@ -88,6 +89,14 @@ public actor MeetingLibrary {
     public func save(_ meeting: Meeting) throws {
         try JSONFile.write(meeting, to: documentURL(meeting.id))
         observer?(meeting.id)
+    }
+
+    public func saveTranslation(_ translation: TranscriptTranslation, for id: MeetingID) throws -> Meeting {
+        var current = try meeting(id)
+        guard current.outputs.cleaned == translation.source else { throw LibraryError.transcriptChanged }
+        current.translation = translation
+        try save(current)
+        return current
     }
 
     public func audioURL(_ meeting: Meeting, track: Track) -> URL {
