@@ -39,6 +39,7 @@ public final class CollabSession {
         let room: CollabRoom
         let target: String
         let batch: CollabOpBatch
+        let replaysOriginalBatch: Bool
     }
 
     private struct Caption {
@@ -526,16 +527,19 @@ public final class CollabSession {
             }
         } catch {
             await sender.close()
+            let original = await sender.unconfirmedBatch
             if showTitle, let route = await model.generation, let target = route.target,
                ownedRoom?.room == room, ownedRoom?.owner == binding.owner {
                 if !route.created, let command = retryCommand {
                     retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
                 }
                 if route.needsCleanup {
-                    let batch = CollabOpBatch([route.created ? .remove(id: target) : .done(id: target)])
-                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: batch)
+                    let replay = !route.created && original?.ops.contains(.done(id: target)) == true ? original : nil
+                    let batch = replay ?? CollabOpBatch([route.created ? .remove(id: target) : .done(id: target)])
+                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: batch,
+                                                 replaysOriginalBatch: replay != nil)
                     pendingCleanup = cleanup
-                    if !Task.isCancelled, !Self.lostAuthorization(error) {
+                    if replay == nil, !Task.isCancelled, !Self.lostAuthorization(error) {
                         try await cleanUpCommand(cleanup, checkingServer: route.created || route.removed)
                         if pendingCleanup == cleanup { pendingCleanup = nil }
                     }
@@ -554,7 +558,7 @@ public final class CollabSession {
         guard account.user?.id == intent.owner else { throw CollabError.notSignedIn }
         if checkingServer {
             let components = try await roomComponents(intent.room)
-            guard components.contains(where: { $0.id == intent.target }) else { return }
+            guard intent.replaysOriginalBatch || components.contains(where: { $0.id == intent.target }) else { return }
         }
         try Task.checkCancellation()
         let cleanup = makeSender(intent.room, owner: intent.owner)

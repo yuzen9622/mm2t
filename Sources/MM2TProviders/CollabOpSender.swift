@@ -13,6 +13,7 @@ public actor CollabOpSender {
     private var failure: (any Error)?
     private var closed = false
     package private(set) var isSealed = false
+    package private(set) var unconfirmedBatch: CollabOpBatch?
     private static let envelopeBytes = #"{"batchId":"00000000-0000-0000-0000-000000000000","ops":[]}"#.utf8.count
 
     public static func fits(_ op: CollabOp) throws -> Bool {
@@ -151,10 +152,12 @@ public actor CollabOpSender {
                     guard !isSealed else { return }
                     do {
                         try await send(batch)
+                        unconfirmedBatch = nil
                         break
                     } catch {
                         switch error as? CollabError {
-                        case .unreachable, .server(status: 429), .server(status: 500...599): break
+                        case .unreachable, .server(status: 200...299), .server(status: 500...599): unconfirmedBatch = batch
+                        case .server(status: 429): break
                         default: throw error
                         }
                         if isSealed { return }

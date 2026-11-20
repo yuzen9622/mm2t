@@ -465,6 +465,35 @@ import Testing
     }
 
     @Test(arguments: [false, true])
+    func lostModelDoneBatchResponseReplaysOriginalModificationAndDoneOnlyOnce(malformedReply: Bool) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let original = try #require(CollabBackend.document.get)
+        let change = CollabOp.appendText(id: original.id, field: .markdown, text: "變更")
+        let done = CollabOp.done(id: original.id)
+        let lines = try [change, done].map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }
+        f.llm.answerChunks.set([lines.joined(separator: "\n") + "\n"])
+        CollabBackend.doneBodies.set([])
+        CollabBackend.dropDoneResponse.set(true)
+        CollabBackend.malformedDoneResponse.set(malformedReply)
+        f.session.run(command: "修改既有文件")
+        await f.session.waitForWork()
+        let expectedError: CollabError = malformedReply ? .server(status: 200) : .unreachable
+        #expect(f.session.commandStatus == .failed(.service(expectedError)))
+
+        let first = try #require(CollabBackend.doneBodies.get.first)
+        let originalBatch = try JSONDecoder().decode(CollabBackend.Batch.self, from: first)
+        #expect(originalBatch.ops == [change, done])
+        CollabBackend.dropDoneResponse.set(false)
+        f.session.retry()
+        await f.session.waitForWork()
+        #expect(f.session.commandStatus == .hidden)
+        #expect(CollabBackend.doneBodies.get == Array(repeating: first, count: 4))
+        #expect(CollabBackend.document.get?.content == original.content + "變更")
+        #expect(CollabBackend.document.get?.rev == original.rev + 1)
+    }
+
+    @Test(arguments: [false, true])
     func modelPromptAndItemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
         let f = try await Fixture()
         try await f.makeRoom()
@@ -740,6 +769,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let doneBodies = Box<[Data]>([])
     static let opBodySizes = Box<[Int]>([])
     static let dropDoneResponse = Box(false)
+    static let malformedDoneResponse = Box(false)
     static let events = Box<[String]>([])
     static let ops = Box<[CollabOp]>([])
     static let offlineEnd = Box(false)
@@ -753,7 +783,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
-        extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false)
+        extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
     }
 
@@ -763,7 +793,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         reply?()
     }
 
-    private struct Batch: Decodable { let batchId: UUID; let ops: [CollabOp] }
+    struct Batch: Decodable { let batchId: UUID; let ops: [CollabOp] }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -812,7 +842,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             }
             Self.ops.update { $0 += batch.ops }
             let hasDone = batch.ops.contains { if case .done = $0 { true } else { false } }
-            if hasDone, batch.ops.count == 1 { Self.doneBodies.update { $0.append(wireBody) } }
+            if hasDone { Self.doneBodies.update { $0.append(wireBody) } }
             if Self.rejectDone.get, hasDone {
                 reply(status: 503, body: Data())
                 return
@@ -821,7 +851,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             Self.appliedBatches.update { duplicate = !$0.insert(batch.batchId).inserted }
             if !duplicate { Self.apply(batch.ops) }
             if hasDone, Self.dropDoneResponse.get {
-                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                if Self.malformedDoneResponse.get { reply(status: 200, body: Data()) }
+                else { client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)) }
                 return
             }
             let finish: @Sendable () -> Void = { [self, duplicate] in
