@@ -14,6 +14,8 @@ final class CollabPendingEnds {
     private let store: FileStore
     private let sleep: @Sendable (Duration) async throws -> Void
     private var pending: Set<Room> = []
+    private var unpersisted: Set<Room> = []
+    var hasUnpersistedClosures: Bool { !unpersisted.isEmpty }
     private var draining: Set<Room> = []
     private var inFlight: Set<Room> = []
 
@@ -28,7 +30,15 @@ final class CollabPendingEnds {
     }
 
     func record(_ room: Room) async throws {
-        try await store.persist(adding: room)
+        unpersisted.insert(room)
+        let saved = try await store.persist(adding: room)
+        unpersisted.subtract(saved)
+    }
+
+    func retryUnpersistedClosures() async throws {
+        guard hasUnpersistedClosures else { return }
+        let saved = try await store.persist()
+        unpersisted.subtract(saved)
     }
 
     func close(_ room: Room, service: CollabService) async throws {
@@ -46,8 +56,10 @@ final class CollabPendingEnds {
                     continue
                 }
             }
-            try await store.persist(removing: room)
             pending.remove(room)
+            unpersisted.remove(room)
+            let saved = try await store.persist(removing: room)
+            unpersisted.subtract(saved)
             return
         }
     }
@@ -93,7 +105,7 @@ final class CollabPendingEnds {
             catch let error as CocoaError where error.code == .fileReadNoSuchFile { return [] }
         }
 
-        func persist(adding added: Room? = nil, removing removed: Room? = nil) throws {
+        func persist(adding added: Room? = nil, removing removed: Room? = nil) throws -> Set<Room> {
             if let added { unwritten.insert(added) }
             if let removed { unwritten.remove(removed) }
             do {
@@ -104,7 +116,9 @@ final class CollabPendingEnds {
                     try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try JSONEncoder().encode(rooms).write(to: file, options: .atomic)
                 }
+                let saved = unwritten
                 unwritten.removeAll()
+                return saved
             } catch {
                 CollabPendingEnds.logger.error("Could not save pending collaboration room closures: \(String(describing: error), privacy: .private)")
                 throw CollabError.pendingEndPersistence

@@ -149,6 +149,63 @@ import Testing
         #expect(try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile)).isEmpty)
     }
 
+    @Test func quitWaitsForInFlightCreationAndRecordsRoomBeforeRemoteEnd() async throws {
+        let retry = Gate<Bool>()
+        let f = try await Fixture(waitOnRetry: { _ = await retry.wait() })
+        defer {
+            CollabBackend.releaseCreation()
+            Task { await retry.open(true) }
+        }
+        CollabBackend.holdCreation.set(true)
+        CollabBackend.offlineEnd.set(true)
+        f.begin()
+        try #require(await waitForCollabEvent { CollabBackend.deferredCreation.get != nil })
+        let ending = f.session.end()
+        #expect(f.account.hasPendingRoomEndWrites)
+        let quitReturned = Box(false)
+        let quit = Task {
+            await f.account.waitForRoomEndWrites()
+            quitReturned.set(true)
+        }
+        #expect(!(await waitForCollabEvent(until: .milliseconds(50)) { quitReturned.get }))
+        #expect(!FileManager.default.fileExists(atPath: f.pendingFile.path))
+        CollabBackend.releaseCreation()
+        try #require(await waitForCollabEvent { quitReturned.get })
+        await quit.value
+        #expect(!f.account.hasPendingRoomEndWrites)
+        let saved = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
+        #expect(saved == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
+        try #require(await eventually { f.retryDelays.get == [.seconds(2)] })
+        await retry.open(true)
+        await ending?.value
+    }
+
+    @Test(arguments: [false, true])
+    func quitRetriesUnpersistedRoomClosureAndReturnsOnPermanentFailure(repairFile: Bool) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        try FileManager.default.createDirectory(at: f.pendingFile, withIntermediateDirectories: false)
+        CollabBackend.offlineEnd.set(true)
+        await f.session.end()?.value
+        #expect(f.account.error == .pendingEndPersistence)
+        #expect(f.account.hasPendingRoomEndWrites)
+        if repairFile { try FileManager.default.removeItem(at: f.pendingFile) }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        await f.account.waitForRoomEndWrites()
+        #expect(start.duration(to: clock.now) <= .seconds(3))
+        if repairFile {
+            #expect(!f.account.hasPendingRoomEndWrites)
+            let saved = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
+            #expect(saved.map(\.id) == ["room"])
+        } else {
+            #expect(f.account.hasPendingRoomEndWrites)
+            #expect(f.account.error == .pendingEndPersistence)
+        }
+        #expect(CollabBackend.endBearers.get.count == 4)
+    }
+
     @Test func unwritablePendingEndReportsErrorAndReplaysFromMemory() async throws {
         let f = try await Fixture()
         try await f.makeRoom()
@@ -680,9 +737,9 @@ import Testing
         await f.session.end()?.value
     }
 
-    private func waitForCollabEvent(_ event: @MainActor () async -> Bool) async -> Bool {
+    private func waitForCollabEvent(until timeout: Duration = .seconds(3), _ event: @MainActor () async -> Bool) async -> Bool {
         let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(3)
+        let deadline = clock.now + timeout
         while clock.now < deadline, !Task.isCancelled {
             if await event() { return true }
             try? await Task.sleep(for: .milliseconds(2))
@@ -779,12 +836,22 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
     static let holdOps = Box(false)
+    static let holdCreation = Box(false)
+    static let deferredCreation = Box<(@Sendable () -> Void)?>(nil)
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
+        holdCreation.set(false); deferredCreation.set(nil)
+    }
+
+    static func releaseCreation() {
+        holdCreation.set(false)
+        var reply: (@Sendable () -> Void)?
+        deferredCreation.update { reply = $0; $0 = nil }
+        reply?()
     }
 
     static func releaseOps() {
@@ -824,7 +891,13 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         case "/v1/me":
             response = (200, Data("{\"user\":\(user),\"quota\":{\"used\":0,\"limit\":10,\"period\":\"2026-11\"}}".utf8))
         case "/v1/rooms":
-            response = (201, Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8))
+            let body = Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8)
+            if Self.holdCreation.get {
+                Self.deferredCreation.set { [self] in reply(status: 201, body: body) }
+                if !Self.holdCreation.get { Self.releaseCreation() }
+                return
+            }
+            response = (201, body)
         case "/v1/rooms/room/components":
             let doc = Self.document.get.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) }
             let json = [doc, Self.extraComponent.get].compactMap { $0 }.joined(separator: ",")

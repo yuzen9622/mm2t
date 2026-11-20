@@ -213,13 +213,19 @@ public final class CollabSession {
         failedUpdates.removeAll()
         let previous = closingRoom
         let draining = draining
-        guard room != nil || creation != nil else { return }
-        let recorded = room.map { account.recordRoomEnd($0.room, owner: $0.owner) }
+        let persistence: Task<Void, Never>
+        if let room {
+            persistence = account.recordRoomEnd(room.room, owner: room.owner)
+        } else if let creation {
+            persistence = account.prepareRoomEnd { [account] in
+                guard let ending = try? await creation.value else { return }
+                await account.recordRoomEnd(ending.room, owner: ending.owner).value
+            }
+        } else { return }
         closingRoom = Task { [account] in
+            await persistence.value
             let ending = if let room { room } else { try? await creation?.value }
             guard let ending else { return }
-            let persistence = recorded ?? account.recordRoomEnd(ending.room, owner: ending.owner)
-            await persistence.value
             await previous?.value
             await draining?.value
             await account.closeRoom(ending.room, owner: ending.owner)
