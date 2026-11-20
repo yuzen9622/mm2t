@@ -38,6 +38,7 @@ import Testing
             case .answerDelta: order.append("delta")
             case .finished(let found): sources = found; order.append("finished")
             case .ledger: break
+            case .filed: Issue.record("Unexpected filing action in retrieval-only scenario")
             case .failed(let reason): Issue.record("\(reason)")
             }
         }

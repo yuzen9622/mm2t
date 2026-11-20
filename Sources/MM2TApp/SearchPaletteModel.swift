@@ -39,6 +39,7 @@ public final class SearchPaletteModel {
         public let content: Content
     }
 
+    public var folders: MeetingFolders?
     public var query = "" { didSet { if query != oldValue { changed() } } }
     public var person: PersonID? { didSet { if person != oldValue { changed() } } }
     public var date: DateFilter? { didSet { if date != oldValue { changed() } } }
@@ -147,7 +148,7 @@ public final class SearchPaletteModel {
         let names = await voiceprints.names().filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         do {
             let found = try await index.search(.init(text: text, people: Set(person.map { [$0] } ?? []),
-                dateRange: range, limit: recent ? 5 : 30, names: names))
+                dateRange: range, limit: recent ? 5 : 30, names: names, priority: folders?.searchPriority))
             guard request == revision, !Task.isCancelled else { return }
             self.names = names
             results = found

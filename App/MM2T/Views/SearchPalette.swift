@@ -83,7 +83,9 @@ private struct SearchPalette: View {
     init(app: AppController, maxHeight: CGFloat, close: @escaping () -> Void) {
         self.maxHeight = maxHeight
         self.close = close
-        _model = State(initialValue: SearchPaletteModel(index: app.searchIndex, voiceprints: app.voiceprints))
+        let model = SearchPaletteModel(index: app.searchIndex, voiceprints: app.voiceprints)
+        model.folders = app.folders
+        _model = State(initialValue: model)
     }
 
     private var contentHeight: CGFloat {
@@ -306,6 +308,10 @@ private struct SearchPalette: View {
                 Icon("file-text", size: 15).foregroundStyle(Palette.secondary)
                 Text(verbatim: meeting.title).font(Typo.bodyStrong).foregroundStyle(Palette.text).lineLimit(1)
                 Spacer(minLength: 8)
+                if let folders = model.folders {
+                    Text(verbatim: folders.folders.first { $0.id == folders.folder(of: meeting.id) }?.name ?? String(localized: "Unfiled"))
+                        .font(Typo.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                }
                 Text(verbatim: Copy.searchMeetingDate(meeting.startedAt, locale: locale))
                     .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
             }

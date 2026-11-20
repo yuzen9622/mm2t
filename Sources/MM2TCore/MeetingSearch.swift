@@ -4,11 +4,20 @@ public struct SearchQuery: Sendable, Equatable {
     public var text: String
     public var people: Set<PersonID>
     public var dateRange: ClosedRange<Date>?
+    public struct Priority: Sendable, Equatable {
+        public let ids: Set<MeetingID>
+        public let inverted: Bool
+        public init(ids: Set<MeetingID>, inverted: Bool = false) { self.ids = ids; self.inverted = inverted }
+    }
+    public var scope: Set<MeetingID>?
+    public var priority: Priority?
     public var limit: Int
     public var names: [PersonID: String]
 
     public init(text: String = "", people: Set<PersonID> = [], dateRange: ClosedRange<Date>? = nil,
-                limit: Int = 30, names: [PersonID: String] = [:]) {
+                limit: Int = 30, names: [PersonID: String] = [:], scope: Set<MeetingID>? = nil, priority: Priority? = nil) {
+        self.scope = scope
+        self.priority = priority
         self.text = text
         self.people = people
         self.dateRange = dateRange

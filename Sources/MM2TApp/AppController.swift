@@ -46,6 +46,7 @@ public final class AppController {
     public let queue: ProcessingQueue
     public let capture: CaptureController
     public let setup: SetupModel
+    public let folders: MeetingFolders
     public let meetings: MeetingListModel
     public let people: VoiceprintsModel
     public let dashboard: DashboardModel
@@ -89,7 +90,7 @@ public final class AppController {
     }
 
     public func makeAssistant() -> AssistantModel {
-        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints,
+        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints, folders: folders,
                                                todos: { [todoStatus] in await todoStatus.snapshot }),
                        conversations: assistantConversations, preferences: assistantPreferences,
                        build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
@@ -116,6 +117,8 @@ public final class AppController {
         endCountdown: Duration = CaptureController.endCountdown,
         recordingTitle: String = "Recording"
     ) throws {
+        let folders = try MeetingFolders(file: paths.root.appending(path: "folders.json"))
+        self.folders = folders
         self.paths = paths
         assistantConversations = AssistantConversations(directory: paths.assistantConversations)
         assistantPreferences = AssistantPreferences(file: paths.assistantPreferences)
@@ -140,6 +143,13 @@ public final class AppController {
         let queue = ProcessingQueue(
             makePipeline: { try pipelineSetup.build(settings.settings) },
             makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
+        queue.onCompleted = { meeting in
+            guard folders.claimRecording(meeting.id), !folders.folders.isEmpty, folders.revision(of: meeting.id) == nil else { return }
+            Task {
+                guard case .ready(let provider) = try? pipelineSetup.buildLLM(settings.settings) else { return }
+                _ = try? await FolderOrganizer.run(folders, library: library, provider: provider, question: "", scope: [meeting.id], automatic: true)
+            }
+        }
         self.settings = settings
         self.library = library
         let searchIndex = MeetingIndex(fileURL: paths.searchIndex)
@@ -216,6 +226,7 @@ public final class AppController {
                     hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
             },
             enqueueRecording: { id, live in
+                folders.recorded(id)
                 guard let live else { return queue.enqueue(.process, on: id) }
                 let prepared = live.processing
                 return queue.enqueue(.process, on: id, using: prepared?.pipeline, finalize: {

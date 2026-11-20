@@ -1,8 +1,11 @@
 import AppKit
+import CoreText
 import MM2TApp
+import MM2TCore
 import SwiftUI
 
 struct AssistantComposer: View {
+    @Environment(FilingDragState.self) private var filingDrag
     @Bindable var model: AssistantModel
     @State private var focused = false
     @State private var hasMarkedText = false
@@ -17,7 +20,7 @@ struct AssistantComposer: View {
             Icon("sparkles", size: 17)
                 .foregroundStyle(showsPlaceholder ? Palette.muted : Palette.orange)
                 .frame(height: 30)
-            AssistantInput(text: $model.draft, focused: $focused, height: $height, hasMarkedText: $hasMarkedText,
+            AssistantInput(text: $model.draft, references: $model.draftReferences, focused: $focused, height: $height, hasMarkedText: $hasMarkedText,
                 submit: { model.send() }, leave: { if model.draft.isEmpty && !model.isRunning { model.isActive = false } })
                 .frame(height: height)
                 .padding(.vertical, max(0, (30 - InputTextView.singleLineHeight) / 2))
@@ -37,7 +40,20 @@ struct AssistantComposer: View {
             .motion(Motion.touch, value: model.isRunning)
         }
         .padding(.vertical, 10).padding(.horizontal, 14)
+        .filingTarget(.composer)
         .modifier(PlaybackGlass(shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
+        .overlay {
+            let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+            ZStack {
+                shape.fill(Palette.orange.opacity(0.07))
+                shape.strokeBorder(Palette.orange.opacity(0.55), lineWidth: 5)
+                    .blur(radius: 5).clipShape(shape)
+                shape.strokeBorder(Palette.orange.opacity(0.9), lineWidth: 1.5)
+            }
+            .opacity(filingDrag.hovered == .composer ? 1 : 0)
+            .motion(Motion.touch, value: filingDrag.hovered == .composer)
+            .allowsHitTesting(false).accessibilityHidden(true)
+        }
         .shadow(color: Palette.shadow, radius: focused ? 26 : 18, y: focused ? 10 : 6)
         .motion(Motion.touch, value: focused)
     }
@@ -46,6 +62,8 @@ struct AssistantComposer: View {
 
 private struct AssistantInput: NSViewRepresentable {
     @Binding var text: String
+    @Environment(FilingDragState.self) private var drag
+    @Binding var references: Set<MeetingID>
     @Binding var focused: Bool
     @Binding var height: CGFloat
     @Binding var hasMarkedText: Bool
@@ -64,6 +82,10 @@ private struct AssistantInput: NSViewRepresentable {
         editor.textContainer?.containerSize = NSSize(width: 300, height: CGFloat.greatestFiniteMagnitude)
         editor.resized = { [weak coordinator = context.coordinator] editor in coordinator?.measure(editor) }
         editor.isRichText = false
+        drag.insertReference = { [weak editor] item in
+            guard let editor, let window = editor.window else { return }
+            editor.insertReferences([item], at: editor.convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.drawsBackground = false
@@ -92,8 +114,7 @@ private struct AssistantInput: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let editor = scroll.documentView as? InputTextView else { return }
-        if editor.string != text && !editor.hasMarkedText() { editor.string = text }
-        editor.textColor = NSColor(Palette.text)
+        if editor.composed.text != text && !editor.hasMarkedText() { editor.string = text }
         editor.placeholder = String(localized: "Ask about your meetings", locale: locale)
         editor.needsDisplay = true
         editor.submit = submit; editor.leave = leave
@@ -108,7 +129,7 @@ private struct AssistantInput: NSViewRepresentable {
         }
         func textChanged(_ editor: InputTextView) {
             editor.needsDisplay = true
-            if !editor.hasMarkedText() { parent.text = editor.string }
+            if !editor.hasMarkedText() { let content = editor.composed; parent.references = content.ids; parent.text = content.text }
             measure(editor)
         }
         func measure(_ editor: NSTextView) {
@@ -123,6 +144,27 @@ private struct AssistantInput: NSViewRepresentable {
 }
 
 private final class InputTextView: NSTextView {
+    var composed: (text: String, ids: Set<MeetingID>) {
+        guard let storage = textStorage else { return (string, []) }
+        var text = "", ids = Set<MeetingID>()
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let reference = value as? ReferenceAttachment {
+                text += reference.meeting.title; ids.insert(reference.meeting.id)
+            } else { text += (storage.string as NSString).substring(with: range) }
+        }
+        return (text, ids)
+    }
+    func insertReferences(_ meetings: [MeetingDrag], at location: NSPoint) {
+        let index = characterIndexForInsertion(at: location)
+        guard let storage = textStorage else { return }
+        var position = index
+        for meeting in meetings {
+            storage.insert(NSAttributedString(attachment: ReferenceAttachment(meeting)), at: position); position += 1
+        }
+        setSelectedRange(NSRange(location: position, length: 0)); window?.makeFirstResponder(self)
+        typingAttributes = [.font: Self.inputFont, .foregroundColor: NSColor(Palette.text)]
+        didChangeText()
+    }
     static var inputFont: NSFont { .systemFont(ofSize: 15).withRoundedDesign }
     static var singleLineHeight: CGFloat { ceil(NSLayoutManager().defaultLineHeight(for: inputFont)) }
 
@@ -198,6 +240,41 @@ private final class InputTextView: NSTextView {
         if result { focusChanged(false) }
         return result
     }
+}
+
+private final class ReferenceAttachment: NSTextAttachment {
+    let meeting: MeetingDrag
+    @MainActor init(_ meeting: MeetingDrag) {
+        self.meeting = meeting
+        super.init(data: nil, ofType: nil)
+        let font = InputTextView.inputFont
+        let tint = NSColor(Palette.orange)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: tint]
+        let title = CTLineCreateWithAttributedString(NSAttributedString(string: meeting.title, attributes: attributes))
+        let ellipsis = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
+        let line = CTLineCreateTruncatedLine(title, 260, .end, ellipsis) ?? title
+        let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let baseline = ceil(-font.descender)
+        let side: CGFloat = 15
+        let size = NSSize(width: 20 + ceil(CTLineGetTypographicBounds(line, nil, nil, nil)) + 3,
+                          height: ceil(font.ascender - font.descender + font.leading))
+        let icon = Bundle.main.url(forResource: "file-text", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
+        let image = NSImage(size: size, flipped: false) { _ in
+            let iconRect = NSRect(x: 1, y: (baseline + ink.midY - side / 2).rounded(), width: side, height: side)
+            icon?.draw(in: iconRect)
+            tint.setFill(); iconRect.fill(using: .sourceAtop)
+            if let context = NSGraphicsContext.current?.cgContext {
+                context.textMatrix = .identity
+                context.textPosition = CGPoint(x: 20, y: baseline)
+                CTLineDraw(line, context)
+            }
+            return true
+        }
+        let cell = NSTextAttachmentCell(imageCell: image)
+        cell.setAccessibilityLabel(meeting.title)
+        attachmentCell = cell
+    }
+    required init?(coder: NSCoder) { nil }
 }
 
 private extension NSFont {

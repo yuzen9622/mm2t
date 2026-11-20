@@ -84,6 +84,10 @@ private struct AssistantTurnView: View {
                     AssistantAnswer(turn: turn, openSource: openSource)
                         .padding(.top, 16)
                 }
+                ForEach(turn.folderProposals ?? [], id: \.name) { proposal in
+                    PillButton("Create folder: \(proposal.name)", icon: "plus") { model.createProposedFolder(proposal, turn: turn.id) }
+                }
+
                 if turn.memoryProposal != nil {
                     AssistantPreferenceProposal(model: model, turn: turn).padding(.top, 16)
                 }
@@ -105,6 +109,9 @@ private struct AssistantTurnView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            if turn.folderBatch != nil { Button("Undo move") { model.undoFiling(turn.id) } }
+        }
         .motion(Motion.reveal, value: turn.activityExpanded)
         .motion(Motion.reveal, value: turn.state)
         .alert("Source changed or removed", isPresented: $unavailableSource) { Button("OK", role: .cancel) {} }

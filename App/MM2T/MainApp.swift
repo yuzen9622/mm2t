@@ -26,6 +26,10 @@ struct MainApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
+            CommandGroup(after: .undoRedo) {
+                Button("Undo move") { delegate.app?.folders.undo() }
+                    .disabled(delegate.app?.folders.canUndo != true)
+            }
             CommandGroup(after: .textEditing) {
                 Button("Search…") { MainNavigation.shared.searchOpen.toggle() }
                     .keyboardShortcut("k", modifiers: .command)

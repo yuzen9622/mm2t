@@ -4,9 +4,9 @@ import SwiftUI
 
 enum SidebarItem: Hashable, CaseIterable {
     case home
-    case meetings
     case people
     case vocabulary
+    case meetings
     case settings
 
     var icon: String {
@@ -22,7 +22,7 @@ enum SidebarItem: Hashable, CaseIterable {
     var title: LocalizedStringKey {
         switch self {
         case .home: "Home"
-        case .meetings: "Meetings"
+        case .meetings: "Unfiled"
         case .people: "People"
         case .vocabulary: "Vocabulary"
         case .settings: "Settings"
@@ -30,7 +30,7 @@ enum SidebarItem: Hashable, CaseIterable {
     }
 
     /// The places the sidebar lists; settings opens as a dialog from the sidebar's foot instead.
-    static let destinations: [SidebarItem] = [.home, .meetings, .people, .vocabulary]
+    static let destinations: [SidebarItem] = [.home, .people, .vocabulary]
 }
 
 /// Where the main window should go next, asked for from outside it, such as the menu bar.
@@ -91,6 +91,11 @@ enum ContentColumn {
 
 struct MainWindow: View {
     let app: AppController
+    @State private var foldersExpanded = true
+    @State private var filingDrag = FilingDragState()
+    @State private var addingFolder = false
+    @State private var editingFolder: MeetingFolders.Folder?
+    @State private var expandedFolderIDs: Set<UUID?> = []
     @State private var assistant: AssistantModel
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
@@ -258,10 +263,31 @@ struct MainWindow: View {
                 .background(Palette.window)
                 .clipped()
             }
+            .coordinateSpace(name: "meeting-filing")
+            .onPreferenceChange(FilingBounds.self) { filingDrag.bounds = $0 }
+            .overlay(alignment: .topLeading) {
+                if let item = filingDrag.item {
+                    HStack(spacing: 6) { Icon("file-text", size: 14).foregroundStyle(Palette.orange); Text(verbatim: item.title).lineLimit(1).font(Typo.captionStrong) }
+                        .padding(.horizontal, 10).frame(height: 28).background(Palette.panel, in: Capsule()).shadow(color: Palette.shadow, radius: 6, y: 2)
+                        .fixedSize().offset(x: filingDrag.location.x + 8, y: filingDrag.location.y + 8).allowsHitTesting(false)
+                }
+            }
+            .environment(filingDrag)
+            .dropdownLayer()
             .tipLayer()
             .disabled(vocabularyEditor != nil)
             .accessibilityHidden(vocabularyEditor != nil)
             .overlay { vocabularyDialog }
+            .sheet(isPresented: $addingFolder) {
+                FolderNameDialog(save: { name in
+                    if let id = app.folders.create(name) { selectFolder(id); addingFolder = false }
+                }, dismiss: { addingFolder = false })
+            }
+            .sheet(item: $editingFolder) { folder in
+                FolderNameDialog(folder: folder, validate: { app.folders.canRename(folder.id, to: $0) }, save: { name in
+                    if app.folders.rename(folder.id, to: name) { editingFolder = nil }
+                }, dismiss: { editingFolder = nil })
+            }
             .overlay { settings(isOpen: navigation.settingsOpen) }
         }
         .disabled(navigation.searchOpen)
@@ -296,17 +322,20 @@ struct MainWindow: View {
                 .padding(.bottom, 18)
 
             VStack(alignment: .leading, spacing: 3) {
-                ForEach(SidebarItem.destinations, id: \.self) { row($0) }
+                ForEach(SidebarItem.destinations, id: \.self) { item in
+                    SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
+                }
             }
             // One highlight that travels to the selected row. Drawing it per row made the old one
             // fade out while the new one faded in, which read as a shadow passing rather than a move.
             .background {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Palette.selected)
+                    .fill(section == .meetings ? .clear : Palette.selected)
                     .matchedGeometryEffect(id: section, in: sidebarSpace, isSource: false)
             }
             .motion(Motion.select, value: section)
 
+            folderSection
             Spacer(minLength: 12)
             if let update = app.voiceprintUpdate {
                 VoiceprintUpdateStatus(update: update)
@@ -374,8 +403,67 @@ struct MainWindow: View {
         .motion(Motion.reveal, value: vocabularyEditor != nil)
     }
 
-    private func row(_ item: SidebarItem) -> some View {
-        SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
+    private func selectFolder(_ id: UUID?, expand: Bool = true) {
+        if expand { foldersExpanded = true; expandedFolderIDs.insert(id) }
+        DropdownState.shared.open = nil
+        assistant.isActive = false
+        app.folders.selected = id
+        show(.meetings)
+    }
+
+    private var folderSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Button { foldersExpanded.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Icon("chevron-right", size: 11).rotationEffect(.degrees(foldersExpanded ? 90 : 0))
+                        Text("My Folders").font(Typo.captionStrong)
+                    }.foregroundStyle(Palette.secondary).padding(.horizontal, 8).frame(height: 32).contentShape(Rectangle())
+                }.buttonStyle(Pressable())
+                Spacer()
+                IconButton("New Folder", icon: "plus") { addingFolder = true }
+            }
+            if foldersExpanded {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        folderBranch(nil)
+                        ForEach(app.folders.folders) { folder in folderBranch(folder) }
+                    }
+                }.entrance(from: .top, distance: 6)
+            }
+        }.padding(.top, 12)
+        .motion(Motion.reveal, value: foldersExpanded)
+        .motion(Motion.reveal, value: expandedFolderIDs)
+    }
+
+    @ViewBuilder private func folderBranch(_ folder: MeetingFolders.Folder?) -> some View {
+        let id = folder?.id
+        let expanded = expandedFolderIDs.contains(id)
+        let selected = section == .meetings && app.folders.selected == id
+        let target = FilingTarget.folder(id)
+        FolderSidebarRow(name: folder?.name ?? String(localized: "Unfiled"), icon: "folder", expanded: expanded,
+            selected: selected, accepting: filingDrag.hovered == target, received: filingDrag.received == target) {
+                if expanded && selected && meeting == nil { expandedFolderIDs.remove(id) }
+                else { expandedFolderIDs.insert(id) }
+                selectFolder(id, expand: false)
+            }
+            .filingTarget(target)
+            .contextMenu {
+                if let folder {
+                    Button("Edit Folder") { editingFolder = folder }
+                    Divider()
+                    Button("Delete Folder", role: .destructive) { expandedFolderIDs.remove(id); app.folders.delete(folder.id) }
+                }
+            }
+        if expanded {
+            VStack(spacing: 1) {
+                ForEach(app.meetings.rows.filter { app.folders.folder(of: $0.id) == id }) { row in
+                    FolderSidebarRow(name: row.title, icon: "file-text", selected: meeting == row.id) {
+                        app.folders.selected = id; show(.meetings, meeting: row.id)
+                    }
+                }
+            }.padding(.leading, 20).entrance(from: .top, distance: 5)
+        }
     }
 
     private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil) {
@@ -399,7 +487,14 @@ struct MainWindow: View {
 
     /// The section's name stays in place and its characters roll to the next name, the way a
     /// changing number does; only the panel under it fades. A meeting's own header replaces it.
-    private var title: some View {
+    @ViewBuilder private var title: some View {
+        if section == .meetings && meeting == nil {
+            Dropdown<UUID?>(label: "Folders", options: [DropdownOption(id: nil, title: String(localized: "Unfiled"))] + app.folders.folders.map { DropdownOption(id: $0.id, title: $0.name) }, selection: Binding(get: { app.folders.selected }, set: { selectFolder($0) }))
+                .padding(.leading, 24).frame(height: 60)
+        } else { sectionTitle }
+    }
+
+    private var sectionTitle: some View {
         Text(section.title)
             .font(Typo.title)
             .lineLimit(1)

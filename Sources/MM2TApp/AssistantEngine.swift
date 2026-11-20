@@ -19,7 +19,7 @@ public struct AssistantSource: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-public enum AssistantTool: String, Codable, Sendable { case search, read, tasks }
+public enum AssistantTool: String, Codable, Sendable { case search, read, tasks, filing }
 
 public struct AssistantArguments: Codable, Sendable {
     public var query = ""
@@ -42,6 +42,7 @@ public enum AssistantEvent: Sendable {
     case toolStarted(id: UUID, kind: AssistantTool, arguments: AssistantArguments)
     case toolFinished(id: UUID, summary: AssistantToolResult)
     case answerDelta(String)
+    case filed(UUID?, [FolderProposal])
     case ledger(AssistantLedger)
     case finished(sources: [AssistantSource])
     case failed(reason: String)
@@ -53,12 +54,14 @@ public struct AssistantEngine: Sendable {
     let index: MeetingIndex
     let voiceprints: VoiceprintStore
     let budget: Int
+    let folders: MeetingFolders?
     let limits: AssistantBudget
     let todos: @Sendable () async -> TodoSnapshot
 
     public init(library: MeetingLibrary, index: MeetingIndex, voiceprints: VoiceprintStore,
-                contextBudget: Int = Self.contextBudget, limits: AssistantBudget = .init(),
+                folders: MeetingFolders? = nil, contextBudget: Int = Self.contextBudget, limits: AssistantBudget = .init(),
                 todos: @escaping @Sendable () async -> TodoSnapshot = { .init() }) {
+        self.folders = folders
         self.library = library
         self.index = index
         self.voiceprints = voiceprints
@@ -69,7 +72,7 @@ public struct AssistantEngine: Sendable {
 
     public func events(question: String, previous: [String] = [], provider: any LLMProvider,
                        now: Date = Date(), history: String = "", preferences: String = "",
-                       ledger initialLedger: AssistantLedger = .init()) -> AsyncStream<AssistantEvent> {
+                       ledger initialLedger: AssistantLedger = .init(), scope: Set<MeetingID>? = nil, explicitReferences: Set<MeetingID> = []) -> AsyncStream<AssistantEvent> {
         AsyncStream { continuation in
             let task = Task {
                 do {
@@ -81,6 +84,13 @@ public struct AssistantEngine: Sendable {
                     var context = AssistantContext(budget: budget)
                     var ledger = initialLedger
                     var observations: [String] = []
+                    var filed = false
+                    for id in (scope ?? []).sorted(by: { $0.description < $1.description }) {
+                        guard let meeting = try? await library.meeting(id) else { observations.append("Referenced meeting unavailable"); continue }
+                        let hits = MeetingHits(id: id, title: meeting.metadata.title, startedAt: meeting.metadata.startedAt, hits: [], totalHits: 0)
+                        let item = ledger.register(AssistantContext.item(meeting, hits: hits, ordinal: 1, names: names, user: user?.name))
+                        if !context.append(item) { observations.append("Referenced meeting exceeds evidence budget") }
+                    }
                     var found: [MeetingHits] = []
                     var seen: Set<String> = []
                     var nextPages: [String: String] = [:]
@@ -136,7 +146,7 @@ public struct AssistantEngine: Sendable {
                             if emptySteps >= 2 { break }
                             continue
                         }
-                        let kind: AssistantTool = decision.action == .query_actions ? .tasks : decision.action == .search_meetings ? .search : .read
+                        let kind: AssistantTool = decision.action == .organize_meetings ? .filing : decision.action == .query_actions ? .tasks : decision.action == .search_meetings ? .search : .read
                         let id = UUID()
                         continuation.yield(.toolStarted(id: id, kind: kind, arguments: .init(query: decision.query,
                             people: decision.people, dateFrom: decision.dateFrom, dateTo: decision.dateTo,
@@ -154,7 +164,7 @@ public struct AssistantEngine: Sendable {
                                 let page = try AssistantTasks.page(.init(owner: owner, status: status, people: decision.people,
                                     meetingFrom: decision.dateFrom, meetingTo: decision.dateTo, dueFrom: decision.dueFrom,
                                     dueTo: decision.dueTo, sort: sort, cursor: decision.cursor),
-                                    meetings: meetings, names: names, user: user?.id, status: statusSnapshot)
+                                    meetings: meetings.filter { scope?.contains($0.id) ?? true }, names: names, user: user?.id, status: statusSnapshot)
                                 var included = 0
                                 for row in page.rows {
                                     var proposedLedger = ledger
@@ -172,7 +182,7 @@ public struct AssistantEngine: Sendable {
                                 guard decision.people.allSatisfy({ names.values.contains($0) }) else { throw AssistantQueryError.invalid("Unknown person filter") }
                                 let range = try AssistantTasks.range(decision.dateFrom, decision.dateTo)
                                 found = try await assistantTimeout(seconds: Self.remaining(retrievalDeadline)) {
-                                    try await index.search(.init(text: decision.query, people: Set(names.filter { decision.people.contains($0.value) }.keys), dateRange: range, limit: 8, names: names))
+                                    try await index.search(.init(text: decision.query, people: Set(names.filter { decision.people.contains($0.value) }.keys), dateRange: range, limit: 8, names: names, scope: scope))
                                 }
                                 var descriptions: [String] = []
                                 for hit in found {
@@ -186,7 +196,7 @@ public struct AssistantEngine: Sendable {
                                 var readSources: [AssistantSource] = []
                                 var clipped = false
                                 for handle in handles {
-                                    guard let source = ledger.sources.first(where: { $0.id == handle }) else { throw AssistantQueryError.invalid("Unknown handle \(handle)") }
+                                    guard let source = ledger.sources.first(where: { $0.id == handle && (scope?.contains($0.meeting) ?? true) }) else { throw AssistantQueryError.invalid("Unknown handle \(handle)") }
                                     let meeting = try await assistantTimeout(seconds: Self.remaining(retrievalDeadline)) { try await library.meeting(source.meeting) }
                                     if let ref = source.task, ref.resolve(in: meeting) == nil { throw AssistantQueryError.invalid("Task \(handle) changed or was removed; query current tasks") }
                                     var hits = found.first { $0.id == meeting.id } ?? MeetingHits(id: meeting.id, title: meeting.metadata.title, startedAt: meeting.metadata.startedAt, hits: [], totalHits: 0)
@@ -204,6 +214,12 @@ public struct AssistantEngine: Sendable {
                                     readSources.append(item.sources[0])
                                 }
                                 result = .init(count: readSources.count, coverage: "READ: \(readSources.count) meeting(s); clipped=\(clipped)", sources: context.sources, meetings: readSources)
+                            case .organize_meetings:
+                                guard !filed, let folders else { throw AssistantQueryError.invalid("Filing unavailable or already executed") }
+                                filed = true
+                                let outcome = try await FolderOrganizer.run(folders, library: library, provider: provider, question: question, scope: scope, automatic: false, explicitReferences: explicitReferences)
+                                continuation.yield(.filed(outcome.batch, outcome.proposals))
+                                result = .init(count: outcome.moved, coverage: "Moved \(outcome.moved) meetings. \(outcome.proposals.count) folder proposals await approval; no proposed folder has been created.")
                             case .answer: break
                             }
                             observations.append(result.coverage)
@@ -233,7 +249,7 @@ public struct AssistantEngine: Sendable {
                         return answer
                     }
                     try Task.checkCancellation()
-                    let eligible = Set((initialLedger.sources + context.sources).map(\.id))
+                    let eligible = Set((initialLedger.sources + context.sources).filter { scope?.contains($0.meeting) ?? true }.map(\.id))
                     let ids = AssistantMarkdown.parse(answer, known: eligible).citationIDs
                     var cited: [AssistantSource] = []
                     var meetings: [MeetingID: Meeting] = [:]

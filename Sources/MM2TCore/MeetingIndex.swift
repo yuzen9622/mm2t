@@ -60,6 +60,18 @@ public actor MeetingIndex {
         }
         var conditions: [String] = []
         var arguments: [String?] = []
+        func encoded(_ ids: Set<MeetingID>) throws -> String {
+            String(decoding: try JSONEncoder().encode(ids.map(\.description)), as: UTF8.self)
+        }
+        if let scope = query.scope {
+            guard !scope.isEmpty else { return [] }
+            conditions.append("m.id IN (SELECT value FROM json_each(?))"); arguments.append(try encoded(scope))
+        }
+        var priorityOrder = "", priorityArgs: [String?] = []
+        if let priority = query.priority, !priority.ids.isEmpty {
+            priorityOrder = "(m.id IN (SELECT value FROM json_each(?))) " + (priority.inverted ? "ASC, " : "DESC, ")
+            priorityArgs = [try encoded(priority.ids)]
+        }
         if !people.isEmpty {
             conditions.append("EXISTS (SELECT 1 FROM participants p WHERE p.meeting = m.id AND p.person IN (\(people.map { _ in "?" }.joined(separator: ","))))")
             arguments += people.sorted { $0.description < $1.description }.map(\.description)
@@ -70,8 +82,8 @@ public actor MeetingIndex {
         }
         if terms.isEmpty {
             let predicate = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
-            return try db.rows("SELECT m.id, m.title, m.started FROM meetings m \(predicate) ORDER BY m.started DESC, m.id LIMIT ?",
-                               arguments + [String(query.limit)], cancellable: true).map {
+            return try db.rows("SELECT m.id, m.title, m.started FROM meetings m \(predicate) ORDER BY \(priorityOrder)m.started DESC, m.id LIMIT ?",
+                               arguments + priorityArgs + [String(query.limit)], cancellable: true).map {
                 MeetingHits(id: MeetingID(UUID(uuidString: $0[0]!)!), title: $0[1]!,
                             startedAt: Date(timeIntervalSince1970: Double($0[2]!)!), hits: [], totalHits: 0)
             }
@@ -93,9 +105,9 @@ public actor MeetingIndex {
             SELECT m.id, m.title, m.started, c.kind, c.text, c.utterance, c.time, c.person, \(score)
             FROM content c JOIN meetings m ON m.id = c.meeting
             WHERE \(conditions.joined(separator: " AND "))
-            ORDER BY CASE c.kind WHEN 'title' THEN 0 WHEN 'cleaned' THEN 2 WHEN 'utterance' THEN 3 ELSE 1 END,
+            ORDER BY \(priorityOrder)CASE c.kind WHEN 'title' THEN 0 WHEN 'cleaned' THEN 2 WHEN 'utterance' THEN 3 ELSE 1 END,
                      \(score), m.started DESC, m.id, c.rowid
-            """, arguments, cancellable: true)
+            """, arguments + priorityArgs, cancellable: true)
         var results: [MeetingHits] = []
         var positions: [MeetingID: Int] = [:]
         for row in rows {

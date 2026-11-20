@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "資料夾"}}}},
+    "New Folder": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "新增資料夾"}}}},
+    "My Folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "我的資料夾"}}}},
+    "Edit Folder": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "編輯資料夾"}}}},
+    "Folder name": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "資料夾名稱"}}}},
+    "Create": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "建立"}}}},
+    "Delete Folder": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "刪除資料夾"}}}},
+    "Unfiled": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "未分類"}}}},
+    "Undo move": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "復原移動"}}}},
+    "Create folder: %@": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "建立資料夾：%@"}}}},
+    "Filed meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "整理會議"}}}},
     "All": {
       "localizations": {
         "zh-Hant": {

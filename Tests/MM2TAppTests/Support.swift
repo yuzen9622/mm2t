@@ -160,6 +160,7 @@ struct FakeLLMError: Error, CustomStringConvertible {
 struct FakeLLM: LLMProvider, StructuredGenerator {
     let decisions = Box([assistantDecision("search_meetings", query: "預算"), assistantDecision("read_meeting"), assistantDecision("answer")])
     let generationInputs = Box<[String]>([])
+    let scopeDirective = Box("keep")
     let memoryJSON = Box(#"{"preference":null}"#)
     let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
     let resumedAnswerChunks = Box<[String]>([])
@@ -170,6 +171,7 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
+        if system.hasPrefix("Scope of referenced meetings:") { return "{\"choice\":\"\(scopeDirective.get)\"}" }
         if system.hasPrefix("Memory intent:") { return memoryJSON.get }
         generationInputs.update { $0.append(input) }
         try await record("plan")
