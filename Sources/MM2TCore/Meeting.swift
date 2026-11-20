@@ -41,6 +41,10 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     }
     public internal(set) var suggestions = NameSuggestions()
     public internal(set) var translation: TranscriptTranslation?
+    public var currentTranslation: TranscriptTranslation? {
+        guard let translation, translation.source == outputs.cleaned else { return nil }
+        return translation
+    }
     public internal(set) var outputs = LLMOutputs()
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
 

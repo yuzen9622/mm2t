@@ -6,6 +6,8 @@ import MM2TCore
 @MainActor @Suite struct CaptionEngineTests {
     @Test func legacySettingsKeepFirefoxAndEveryChoiceSurvivesRestart() throws {
         let legacy = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"captionTranslation":"japanese"}"#.utf8))
+        #expect(!AppSettings().translationEnabled)
+        #expect(legacy.translationEnabled)
         #expect(legacy.captionEngine == .firefox)
         #expect(legacy.captionTranslation.target == .japanese)
         #expect(AppSettings().captionEngine == CaptionEngine.initial)
@@ -15,6 +17,7 @@ import MM2TCore
             store.settings.captionEngine = engine
             store.settings.captionTranslation = CaptionTranslation(engine == .firefox ? .japanese : CaptionTarget(languageCode: "vi"))
             let reloaded = SettingsStore(defaults: defaults).settings
+            #expect(!reloaded.translationEnabled)
             #expect(reloaded.captionEngine == engine)
             #expect(reloaded.captionTranslation == store.settings.captionTranslation)
             #expect(reloaded.forProcessing == legacy.forProcessing)
@@ -42,6 +45,18 @@ import MM2TCore
             #expect(app.setup.translationTarget == nil)
             #expect(world.translationInstaller.downloads.get == 1)
         }
+    }
+
+    @Test func disabledTranscriptTranslationDoesNotInstallOrForgetTheModel() async throws {
+        let world = try World()
+        let app = world.app
+        await app.setTranslationEnabled(false)
+        #expect(await !app.setup.prepareTranscriptModel(engine: .firefox, target: .japanese))
+        #expect(world.translationInstaller.downloads.get == 0)
+        await app.setTranslationEnabled(true)
+        #expect(await app.setup.prepareTranscriptModel(engine: .firefox, target: .japanese))
+        #expect(app.settings.settings.captionTranslation == .off)
+        #expect(world.translationInstaller.downloads.get == 1)
     }
 
     @Test func languageListsAndRoutesFollowTheSelectedModel() throws {

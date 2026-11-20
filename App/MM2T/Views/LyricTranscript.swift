@@ -174,7 +174,7 @@ struct LyricRow: View {
             }
             .padding(.leading, 14)
             .padding(.trailing, 10)
-            .padding(.vertical, translation == nil ? 8 : 0)
+            .padding(.vertical, translation?.isEmpty == true ? 0 : 8)
             .background {
                 RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(state == .current || isFocused ? Palette.orangeSoft : hovering ? Palette.hover : .clear)

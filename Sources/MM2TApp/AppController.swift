@@ -205,7 +205,7 @@ public final class AppController {
                 guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
                 let source = current.captionEngine == .apple ? current.transcriptionLanguage.fixedCaptionSource : nil
-                if let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
+                if current.translationEnabled, let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
                     guard !Task.isCancelled else { return nil }
                     captions.translate(with: translator, to: target, engine: current.captionEngine, source: source)
                 }
@@ -369,6 +369,12 @@ public final class AppController {
 
     /// Live caption translation: the models the chosen language needs download when it is first
     /// chosen; other languages' models stay on disk. It applies from the next recording.
+    public func setTranslationEnabled(_ enabled: Bool) async {
+        settings.settings.translationEnabled = enabled
+        setup.refreshTranslation()
+        if enabled { await setup.downloadTranslationModels() }
+    }
+
     public func setCaptionEngine(_ engine: CaptionEngine) async {
         if engine == .apple, #unavailable(macOS 26) { return }
         var current = settings.settings

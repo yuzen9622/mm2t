@@ -137,7 +137,7 @@ public final class SetupModel {
     public var translationModelBytes: Int64 { selectedInstaller?.downloadBytes ?? 0 }
     /// The language captions are translated into; nil when translation is off and needs no models.
     public var translationTarget: CaptionTarget? {
-        settings.settings.captionEngine == .apple ? nil : settings.settings.captionTranslation.target
+        !settings.settings.translationEnabled || settings.settings.captionEngine == .apple ? nil : settings.settings.captionTranslation.target
     }
 
     private var selectedInstaller: (any ModelInstalling)? {
@@ -164,7 +164,8 @@ public final class SetupModel {
         let target: CaptionTarget?
     }
     private var downloadKey: DownloadKey? {
-        installerTarget(for: settings.settings.captionEngine).map { DownloadKey(engine: settings.settings.captionEngine,
+        guard settings.settings.translationEnabled else { return nil }
+        return installerTarget(for: settings.settings.captionEngine).map { DownloadKey(engine: settings.settings.captionEngine,
                                            target: settings.settings.captionEngine == .hyMT2 ? nil : $0) }
     }
     @ObservationIgnored private var downloadTasks: [DownloadKey: Task<Void, Never>] = [:]
@@ -354,6 +355,18 @@ public final class SetupModel {
 
     public func downloadTranslationModels() async {
         guard let key = downloadKey, let installer = selectedInstaller else { return }
+        await download(key, installer: installer)
+    }
+
+    public func prepareTranscriptModel(engine: CaptionEngine, target: CaptionTarget) async -> Bool {
+        guard settings.settings.translationEnabled else { return false }
+        if engine == .apple { return true } // Language packs are prepared by the system translation session.
+        guard let installer = translationInstaller(engine, target) else { return false }
+        await download(DownloadKey(engine: engine, target: engine == .hyMT2 ? nil : target), installer: installer)
+        return installer.isDownloaded
+    }
+
+    private func download(_ key: DownloadKey, installer: any ModelInstalling) async {
         if let existing = downloadTasks[key] { await existing.value; return }
         guard !installer.isDownloaded else { refreshTranslation(); return }
         let predecessor = lastDownload

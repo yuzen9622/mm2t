@@ -5,6 +5,19 @@ import MM2TLocal
 import SwiftUI
 import Translation
 
+struct TranslationEnableRow: View {
+    let app: AppController
+
+    var body: some View {
+        let enabled = Binding(get: { app.settings.settings.translationEnabled }, set: { enabled in
+            Task { await app.setTranslationEnabled(enabled) }
+        })
+        Toggle("Enable translation", isOn: enabled)
+            .toggleStyle(SwitchStyle())
+            .accessibilityRepresentation { Toggle("Enable translation", isOn: enabled).toggleStyle(.switch) }
+    }
+}
+
 struct CaptionTranslationRow: View {
     let app: AppController
     @State private var appleLanguages: [AppleCaptionLanguage]?
@@ -12,7 +25,7 @@ struct CaptionTranslationRow: View {
     @State private var appleRequest: UUID?
 
     private struct CatalogRequest: Equatable {
-        let engine: CaptionEngine
+        let engine: CaptionEngine?
         let revision: Int
         let source: CaptionLanguage?
     }
@@ -36,22 +49,24 @@ struct CaptionTranslationRow: View {
                 Text("Apple Translation requires macOS 26 or later.")
                     .font(Typo.caption).foregroundStyle(Palette.secondary)
             }
-            HStack {
-                Text("Translate captions")
-                Spacer()
-                Dropdown(label: "Translate captions", options: targetOptions,
-                         selection: Binding(get: { choice }, set: { new in
-                             Task {
-                                 await app.setCaptionTranslation(new)
-                                 if engine == .apple { appleRequest = new == .off ? nil : UUID() }
-                             }
-                         }),
-                         placeholder: engine == .apple && appleLanguages == nil ? String(localized: "Checking…") : String(localized: "Unavailable"),
-                         showsSelectedLeading: false)
-                    .disabled(engine == .apple && (appleLanguages == nil || !AppleCaptionTranslator.isAvailable))
+            if app.settings.settings.translationEnabled {
+                HStack {
+                    Text("Translate captions")
+                    Spacer()
+                    Dropdown(label: "Translate captions", options: targetOptions,
+                             selection: Binding(get: { choice }, set: { new in
+                                 Task {
+                                     await app.setCaptionTranslation(new)
+                                     if engine == .apple { appleRequest = new == .off ? nil : UUID() }
+                                 }
+                             }),
+                             placeholder: engine == .apple && appleLanguages == nil ? String(localized: "Checking…") : String(localized: "Unavailable"),
+                             showsSelectedLeading: false)
+                        .disabled(engine == .apple && (appleLanguages == nil || !AppleCaptionTranslator.isAvailable))
+                }
             }
             if engine == .apple {
-                if let language = appleLanguages?.first(where: { $0.target == choice.target }),
+                if app.settings.settings.translationEnabled, let language = appleLanguages?.first(where: { $0.target == choice.target }),
                    !language.missingSources.isEmpty, let appleRequest, #available(macOS 26, *) {
                     AppleModelDownload(language: language) { refresh += 1 }.id(appleRequest)
                 } else if appleLanguages?.isEmpty == true, AppleCaptionTranslator.isAvailable {
@@ -61,8 +76,8 @@ struct CaptionTranslationRow: View {
                 modelDownload
             }
         }
-        .task(id: CatalogRequest(engine: engine, revision: refresh, source: app.settings.settings.transcriptionLanguage.fixedCaptionSource)) {
-            if engine == .apple { await loadAppleLanguages() } else { appleLanguages = nil }
+        .task(id: CatalogRequest(engine: app.settings.settings.translationEnabled ? engine : nil, revision: refresh, source: app.settings.settings.transcriptionLanguage.fixedCaptionSource)) {
+            if app.settings.settings.translationEnabled && engine == .apple { await loadAppleLanguages() } else { appleLanguages = nil }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if engine == .apple { refresh += 1 }
@@ -116,7 +131,7 @@ struct CaptionTranslationRow: View {
 }
 
 @available(macOS 26, *)
-private struct AppleModelDownload: View {
+struct AppleModelDownload: View {
     let language: AppleCaptionLanguage
     let refresh: () -> Void
     @State private var pending: [String] = []
@@ -126,6 +141,7 @@ private struct AppleModelDownload: View {
         HStack {
             if failed {
                 Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.muted)
+                Button("Retry") { failed = false; pending = language.missingSources }
             }
             Spacer()
             if let source = pending.first {
@@ -143,7 +159,6 @@ private struct AppleModelDownload: View {
                                 guard !Task.isCancelled, pending.first == source else { return }
                                 pending = []
                                 failed = true
-                                refresh()
                             }
                         }
                     }

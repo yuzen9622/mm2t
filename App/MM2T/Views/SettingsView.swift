@@ -48,7 +48,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
     case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions
-    case diarizationModel
+    case diarizationModel, translationEnabled, translationModel
     case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
     case hideFromCapture
@@ -65,10 +65,10 @@ enum SettingsRow: Hashable {
         case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
         case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
         case .localTranscription: [Copy.source(.local), String(localized: "Transcription model")]
-        case .liveCaptions: [String(localized: "Live captions"), String(localized: "Live caption model"),
-                             String(localized: "Translate captions"), String(localized: "Translation model"),
-                             "Apple Translation", "Mozilla Firefox Translations", "Bergamot", "Tencent Hy-MT2-1.8B", "Q4_K_M", Copy.source(.selfHosted), Copy.source(.cloud),
-                             Copy.source(.local)] + CaptionTarget.all.map(\.name)
+        case .liveCaptions: [String(localized: "Live captions"), String(localized: "Live caption model"), Copy.source(.selfHosted), Copy.source(.cloud), Copy.source(.local)]
+        case .translationEnabled: [String(localized: "Enable translation")]
+        case .translationModel: [String(localized: "Translate captions"), String(localized: "Translation model"),
+                                 "Apple Translation", "Mozilla Firefox Translations", "Bergamot", "Tencent Hy-MT2"] + CaptionTarget.all.map(\.name)
         case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
         case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
                                String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
@@ -108,6 +108,7 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
                                  .liveCaptions]),
+            SettingsGroup(id: "translation", section: .general, title: String(localized: "Translation"), rows: [.translationEnabled, .translationModel]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationModel]),
             SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
@@ -333,6 +334,8 @@ struct SettingsRowView: View {
             if store.settings.transcriptionOrder.contains(.local) {
                 SpeechModelPicker(store: store, setup: app.setup)
             }
+        case .translationEnabled: TranslationEnableRow(app: app)
+        case .translationModel: CaptionTranslationRow(app: app)
         case .liveCaptions:
             LiveCaptionsRow(app: app)
         case .diarizationModel:
@@ -689,7 +692,6 @@ private struct LiveCaptionsRow: View {
             if app.settings.settings.transcriptionOrder.contains(.local) {
                 SpeechModelPicker(store: app.settings, setup: app.setup, field: \.localCaptionModel)
             }
-            CaptionTranslationRow(app: app)
         }
     }
 }

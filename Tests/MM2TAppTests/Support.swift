@@ -586,6 +586,7 @@ struct World {
             offlineInstallers: offlineInstallers,
             translationInstaller: { _, _ in translation },
             machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
+        app.settings.settings.translationEnabled = true
         app.settings.settings.captionEngine = .firefox
     }
 

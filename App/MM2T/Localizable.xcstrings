@@ -91,6 +91,9 @@
         }
       }
     },
+    "Enable translation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "啟用翻譯" } } } },
+    "Set up translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "設定翻譯模型" } } } },
+    "Model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "模型" } } } },
     "Translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯模型" } } } },
     "Apple Translation requires macOS 26 or later.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Apple 翻譯需要 macOS 26 或以上版本。" } } } },
     "Unavailable": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法使用" } } } },
@@ -142,6 +145,8 @@
     "Translate transcript": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "翻譯逐字稿"}}}},
     "Target language": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "目標語言"}}}},
     "Select all": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "全選"}}}},
+    "Show original": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "顯示原文"}}}},
+    "Show translation": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "顯示譯文"}}}},
     "Replace translation": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "取代現有譯文"}}}},
     "Include translation": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "包含譯文"}}}},
     "Couldn't translate transcript": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法翻譯逐字稿"}}}},

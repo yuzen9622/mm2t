@@ -243,7 +243,7 @@ public final class MeetingDetailModel {
         queue.cancel(id)
     }
 
-    /// Shows the source utterance in the raw transcript and plays from it.
+    /// Shows the original utterance and plays from the original time.
     public func jump(to target: JumpTarget) {
         selectedView = .raw
         focusedUtterance = target.utterance
@@ -297,18 +297,18 @@ public final class MeetingDetailModel {
     public private(set) var translationTotal = 0
     public var translationError: String?
 
-    public func translate(_ selection: Set<Int>, target: CaptionTarget, engine: CaptionEngine,
+    public func translate(target: CaptionTarget, engine: CaptionEngine,
                           catalog: any ProviderCatalog) async {
         guard canEditSpeakers, translationProgress == nil, let source = meeting?.outputs.cleaned,
-              let rows = presentation?.cleaned, !selection.isEmpty, selection.allSatisfy(rows.indices.contains) else { return }
-        translationTotal = selection.count
+              let rows = presentation?.cleaned, !rows.isEmpty else { return }
+        translationTotal = rows.count
         translationProgress = 0
         translationError = nil
         defer { translationProgress = nil }
         var results: [Int: String] = [:]
         var translators: [CaptionLanguage: any CaptionTranslator] = [:]
         do {
-            for index in selection.sorted() {
+            for index in rows.indices {
                 var outputs: [String] = []
                 let passages = TranscriptTranslation.passages(rows[index].text)
                 guard !passages.isEmpty else { throw CocoaError(.formatting) }

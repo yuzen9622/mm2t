@@ -16,7 +16,9 @@ struct MeetingDetailView: View {
     @State private var showSpeakers = true
     @State private var renaming = false
     @State private var newTitle = ""
+    @State private var showsTranslation = true
     @State private var translationSheet = false
+    @State private var waitingForTranslationSettings = false
     @State private var copied = false
     @State private var playhead = Playhead()
     @State private var confirmRegenerate = false
@@ -41,13 +43,21 @@ struct MeetingDetailView: View {
                 IconButton("Regenerate Views…", icon: "sparkles") { confirmRegenerate = true }
                     .disabled(!model.canEditSpeakers)
                 IconButton(copied ? "Copied" : "Copy", icon: copied ? "check" : "copy", isOn: copied, action: copy)
-                if let done = model.translationProgress {
+                if model.selectedView == .cleaned, let done = model.translationProgress {
                     ProgressView(value: Double(done), total: Double(model.translationTotal)).frame(width: 64)
                     Text(verbatim: "\(done)/\(model.translationTotal)").font(Typo.caption).monospacedDigit()
-                } else if model.selectedView == .raw || model.selectedView == .cleaned {
-                    Button { translationSheet = true } label: { Image(systemName: "translate").accessibilityLabel(Text("Translate transcript")) }
-                        .buttonStyle(.plain).help("Translate transcript")
-                        .disabled(!model.canEditSpeakers || model.presentation?.cleaned?.isEmpty != false)
+                } else if model.selectedView == .cleaned {
+                    if model.meeting?.currentTranslation != nil {
+                        IconButton(showsTranslation ? "Show original" : "Show translation", icon: "language", isOn: showsTranslation) {
+                            showsTranslation.toggle()
+                        }
+                        .contextMenu {
+                            Button("Replace translation") { translationSheet = true }.disabled(!model.canEditSpeakers)
+                        }
+                    } else {
+                        IconButton("Translate transcript", icon: "language") { translationSheet = true }
+                            .disabled(!model.canEditSpeakers || model.presentation?.cleaned?.isEmpty != false)
+                    }
                 }
                 ExportMenu(model: model)
                 IconButton("Speakers", icon: "users", isOn: showSpeakers) { showSpeakers.toggle() }
@@ -57,7 +67,7 @@ struct MeetingDetailView: View {
                     banners
                     Segmented(options: TranscriptView.allCases, selection: $model.selectedView) { Copy.view(for: $0) }
                     if let presentation = model.presentation {
-                        TranscriptContent(model: model, presentation: presentation, playhead: playhead, todoKey: todoKey)
+                        TranscriptContent(model: model, presentation: presentation, playhead: playhead, showsTranslation: showsTranslation, todoKey: todoKey)
                             .overlay(alignment: .bottom) {
                                 if let playback = model.playback {
                                     TransportBar(playhead: playhead, status: playback.status, toggle: {
@@ -103,13 +113,32 @@ struct MeetingDetailView: View {
         }
         .onChange(of: model.playback?.duration) { sample() }
         .onChange(of: model.playback?.status) { sample() }
-        .sheet(isPresented: $translationSheet) {
-            if let rows = model.presentation?.cleaned {
-                TranscriptTranslationSheet(app: app, rows: rows, replacing: model.meeting?.translation != nil) { selected, target in
-                    translationSheet = false
-                    Task { await model.translate(selected, target: target, engine: app.settings.settings.captionEngine, catalog: app.translationCatalog) }
+        .disabled(translationSheet)
+        .accessibilityHidden(translationSheet)
+        .overlay {
+            if translationSheet {
+                ZStack {
+                    Color.black.opacity(0.28).onTapGesture { translationSheet = false }
+                    TranscriptTranslationSheet(app: app, replacing: model.meeting?.translation != nil, cancel: { translationSheet = false }, openSettings: {
+                        translationSheet = false
+                        waitingForTranslationSettings = true
+                        MainNavigation.shared.settingsSection = .general
+                        MainNavigation.shared.settingsOpen = true
+                    }) { target, engine in
+                        translationSheet = false
+                        Task {
+                            await model.translate(target: target, engine: engine, catalog: app.translationCatalog)
+                            if model.translationError == nil { showsTranslation = true }
+                        }
+                    }
                 }
+                .dropdownLayer()
             }
+        }
+        .onChange(of: MainNavigation.shared.settingsOpen) { _, open in
+            guard !open, waitingForTranslationSettings else { return }
+            waitingForTranslationSettings = false
+            translationSheet = app.settings.settings.translationEnabled
         }
         .alert("Couldn't translate transcript", isPresented: .init(get: { model.translationError != nil }, set: { if !$0 { model.translationError = nil } })) {
             Button("OK") { model.translationError = nil }
@@ -234,11 +263,9 @@ struct ExportMenu: View {
 
     var body: some View {
         Menu {
-            if model.meeting?.translation != nil {
-                Toggle("Include translation", isOn: $includeTranslation)
-            }
             ForEach(TranscriptView.allCases, id: \.self) { view in
                 Section(Copy.view(for: view)) {
+                    if view == .cleaned, model.meeting?.currentTranslation != nil { Toggle("Include translation", isOn: $includeTranslation) }
                     Button("Markdown…") { save(view, .markdown) }
                     Button("Plain Text…") { save(view, .plainText) }
                     if view == .raw || view == .cleaned { Button("Subtitles (.srt)…") { saveSubtitles(view) } }
@@ -276,43 +303,85 @@ struct ExportMenu: View {
 
 private struct TranscriptTranslationSheet: View {
     let app: AppController
-    let rows: [SourcedRow]
     let replacing: Bool
-    let start: (Set<Int>, CaptionTarget) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let cancel: () -> Void
+    let openSettings: () -> Void
+    let start: (CaptionTarget, CaptionEngine) -> Void
     @State private var targets: [CaptionTarget] = []
     @State private var target: CaptionTarget?
-    @State private var selected: Set<Int> = []
+
+    @State private var appleLanguages: [AppleCaptionLanguage] = []
+    @State private var revision = 0
+    @State private var preparing = false
+    @State private var downloadFailed = false
+
+    private var enabled: Bool { app.settings.settings.translationEnabled }
+    private var engine: CaptionEngine { app.settings.settings.captionEngine }
+    private var missingPack: AppleCaptionLanguage? {
+        appleLanguages.first { engine == .apple && $0.target == target && !$0.missingSources.isEmpty }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Translate transcript").font(Typo.heading)
-            Picker("Target language", selection: $target) {
-                ForEach(targets) { Text(verbatim: $0.name).tag(Optional($0)) }
-            }
-            Toggle("Select all", isOn: Binding(get: { selected.count == rows.count }, set: { selected = $0 ? Set(rows.indices) : [] }))
-            List(Array(rows.enumerated()), id: \.element.id) { index, row in
-                Toggle(isOn: Binding(get: { selected.contains(index) }, set: { if $0 { selected.insert(index) } else { selected.remove(index) } })) {
-                    Text(verbatim: row.text)
+            Text(enabled ? LocalizedStringKey("Translate transcript") : "Set up translation model").font(Typo.title)
+            if enabled {
+                HStack {
+                    Text("Target language")
+                    Spacer()
+                    Dropdown(label: "Target language", options: targets.map {
+                        DropdownOption(id: Optional($0), leading: $0.flag, title: $0.name)
+                    }, selection: $target, placeholder: String(localized: "Checking…"))
+                    .disabled(preparing)
+                }
+                if let missingPack, #available(macOS 26, *) {
+                    AppleModelDownload(language: missingPack) { revision += 1 }.id(missingPack.identifier)
                 }
             }
-            HStack {
+            if downloadFailed { Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.danger) }
+            HStack(spacing: 8) {
+                if preparing { ProgressView().controlSize(.small) }
                 Spacer()
-                Button("Cancel") { dismiss() }
-                Button(replacing ? "Replace translation" : "Translate transcript") { if let target { start(selected, target) } }
-                    .keyboardShortcut(.defaultAction).disabled(target == nil || selected.isEmpty)
+                PillButton("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                if enabled {
+                    PillButton(replacing ? "Replace translation" : "Translate transcript", kind: .primary) { preparing = true }
+                        .keyboardShortcut(.defaultAction).disabled(preparing || target == nil || missingPack != nil)
+                } else {
+                    PillButton("Open Settings", kind: .primary, action: openSettings).keyboardShortcut(.defaultAction)
+                }
             }
         }
-        .padding(20).frame(width: 480, height: 410)
-        .onAppear { selected = Set(rows.indices) }
-        .task(id: app.settings.settings.captionEngine) {
-            switch app.settings.settings.captionEngine {
-            case .apple: targets = await AppleCaptionTranslator.languages().map(\.target)
-            case .firefox: targets = CaptionTarget.all
-            case .hyMT2: targets = CaptionTarget.hyTargets
-            }
-            let preferred = app.settings.settings.captionTranslation.target ?? .english
-            target = targets.first(where: { $0 == preferred }) ?? targets.first
+        .padding(22).frame(width: 340)
+        .background(Palette.window, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .shadow(color: Palette.shadow, radius: 30, y: 12)
+        .task(id: enabled ? engine : nil) { await loadTargets() }
+        .task(id: revision) { if revision > 0 { await loadTargets() } }
+        .task(id: preparing) {
+            guard preparing, enabled, let target else { return }
+            let chosen = engine
+            let ready = await app.setup.prepareTranscriptModel(engine: chosen, target: target)
+            guard !Task.isCancelled else { return }
+            preparing = false
+            downloadFailed = !ready
+            if ready, enabled, engine == chosen { start(target, chosen) }
         }
+    }
+
+    private func loadTargets() async {
+        let preferred = target ?? app.settings.settings.captionTranslation.target ?? .english
+        targets = []
+        target = nil
+        appleLanguages = []
+        downloadFailed = false
+        guard enabled else { return }
+        switch engine {
+        case .apple:
+            let languages = await AppleCaptionTranslator.languages()
+            guard !Task.isCancelled else { return }
+            appleLanguages = languages
+            targets = languages.map(\.target)
+        case .firefox: targets = CaptionTarget.all
+        case .hyMT2: targets = CaptionTarget.hyTargets
+        }
+        target = targets.first(where: { $0 == preferred }) ?? targets.first
     }
 }

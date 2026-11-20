@@ -6,25 +6,26 @@ struct TranscriptContent: View {
     let model: MeetingDetailModel
     let presentation: MeetingPresentation
     let playhead: Playhead
+    let showsTranslation: Bool
     var todoKey: String? = nil
     @State private var highlight: String?
     /// Set when the user scrolls away while playing; the view stops following until they come back.
     @State private var followPaused = false
 
     var body: some View {
+        let focus = model.selectedView == .raw ? model.focusedUtterance?.rawValue : model.focusedUtterance.flatMap { presentation.cleanedRowID(containing: $0) }
         let lines = lyricLines
-        let groups = presentation.translationGroups(model.selectedView)
-        let anchors = Dictionary(uniqueKeysWithValues: groups.flatMap { group in group.sources.map { ($0, group.sources[0]) } })
+        let translations = showsTranslation ? presentation.translationHeadings(model.selectedView) : [:]
         let current = playhead.currentLine
         let currentID = current.flatMap { index in
-            lines.flatMap { $0.indices.contains(index) ? (anchors[$0[index].id] ?? $0[index].id) : nil }
+            lines.flatMap { $0.indices.contains(index) ? $0[index].id : nil }
         }
         ScrollViewReader { proxy in
             FadingScrollView(ground: Palette.window) {
                 LazyVStack(alignment: .leading, spacing: lines == nil ? 10 : 2) {
                     switch model.selectedView {
                     case .raw, .cleaned:
-                        if let lines { lyrics(lines, current: current, groups: groups, anchors: anchors) } else { NotGenerated() }
+                        if let lines { lyrics(lines, current: current, translations: translations, focus: focus) } else { NotGenerated() }
                     case .perPerson: perPerson
                     case .summary: summary
                     }
@@ -38,8 +39,8 @@ struct TranscriptContent: View {
             .onChange(of: lines, initial: true) { _, lines in
                 playhead.follow(lines?.map(\.start) ?? [])
             }
-            .onChange(of: model.focusedUtterance, initial: true) { _, id in
-                if let id { withAnimation(Motion.page) { proxy.scrollTo(anchors[id.rawValue] ?? id.rawValue, anchor: .center) } }
+            .onChange(of: focus, initial: true) { _, id in
+                if let id { withAnimation(Motion.page) { proxy.scrollTo(id, anchor: .center) } }
             }
             .task(id: todoKey) {
                 guard let todoKey, model.selectedView == .summary else { return }
@@ -92,38 +93,23 @@ struct TranscriptContent: View {
         }
     }
 
-    @ViewBuilder private func lyrics(_ lines: [LyricLine], current: Int?, groups: [MeetingPresentation.TranslationGroup], anchors: [String: String]) -> some View {
-        let indices = Dictionary(uniqueKeysWithValues: lines.indices.map { (lines[$0].id, $0) })
-        let blocks = Dictionary(uniqueKeysWithValues: groups.map { ($0.sources[0], $0) })
-        ForEach(lines.indices.filter { anchors[lines[$0].id] == nil || anchors[lines[$0].id] == lines[$0].id }, id: \.self) { index in
-            let line = lines[index]
-            if let group = blocks[line.id] {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(group.sources, id: \.self) { source in
-                        if let i = indices[source] {
-                            lyric(lines[i], index: i, current: current,
-                                  showsSpeaker: source == line.id && (index == 0 || lines[index - 1].speakerName != line.speakerName),
-                                  translation: source == line.id ? group.translation : "")
-                        }
-                    }
-                }
-                .padding(.vertical, 8)
+    @ViewBuilder private func lyrics(_ lines: [LyricLine], current: Int?, translations: [String: String], focus: String?) -> some View {
+        ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+            lyric(line, index: index, current: current,
+                  showsSpeaker: index == 0 || lines[index - 1].speakerName != line.speakerName,
+                  translation: translations[line.id], focused: focus == line.id)
                 .id(line.id)
-            } else {
-                lyric(line, index: index, current: current, showsSpeaker: index == 0 || lines[index - 1].speakerName != line.speakerName, translation: nil)
-                    .id(line.id)
-            }
         }
     }
 
-    private func lyric(_ line: LyricLine, index: Int, current: Int?, showsSpeaker: Bool, translation: String?) -> some View {
+    private func lyric(_ line: LyricLine, index: Int, current: Int?, showsSpeaker: Bool, translation: String?, focused: Bool) -> some View {
         let raw = model.selectedView == .raw
         let state = KaraokeTiming.state(of: index, current: current, isPlaying: playhead.isPlaying)
         return LyricRow(line: line, translation: translation,
                  showsSpeaker: showsSpeaker,
                  state: state,
                  playhead: playhead,
-                 isFocused: raw && model.focusedUtterance?.rawValue == line.id,
+                 isFocused: focused,
                  canEdit: model.canEditSpeakers && model.trackPreview.isEmpty,
                  play: {
                      followPaused = false

@@ -59,22 +59,20 @@ import Testing
         await detail.load()
         world.catalog.translationDownloaded.update { $0 = true }
         world.catalog.translator.answers.update { $0 = Dictionary(uniqueKeysWithValues: zip(originals, translations)) }
-        await detail.translate([0], target: .english, engine: .firefox, catalog: world.catalog)
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
         let presentation = try #require(detail.presentation)
-        let groups = presentation.translationGroups(.raw)
-        #expect(groups.map(\.translation) == translations)
-        #expect(groups.map(\.sources) == ids.prefix(3).map { [$0.rawValue] })
+        #expect(presentation.translationHeadings(.raw).isEmpty)
         let exported = presentation.export(.cleaned, as: .plainText, includeTranslation: true)
         #expect(exported.contains(zip(translations, originals).map { $0 + "\n" + $1 }.joined(separator: "\n")))
 
         meeting.outputs.cleaned = CleanedTranscript(paragraphs: [.init(speaker: .me, text: originals[0], sources: Array(ids.prefix(2)))])
         try await world.library.save(meeting)
         await detail.load()
-        await detail.translate([0], target: .english, engine: .firefox, catalog: world.catalog)
-        #expect(detail.presentation?.translationGroups(.raw).map(\.sources) == [ids.prefix(2).map(\.rawValue)])
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
+        #expect(detail.presentation?.translationHeadings(.cleaned)["cleaned-0"] == translations[0])
     }
 
-    @Test func postMeetingTranslationUsesSelectedCleanedRowsAndReplacesOnlyOnSuccess() async throws {
+    @Test func postMeetingTranslationUsesAllCleanedRowsAndReplacesOnlyOnSuccess() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()
         let detail = world.detail(meeting.id)
@@ -83,35 +81,35 @@ import Testing
         let first = rows[0].text, second = rows[1].text
         world.catalog.translationDownloaded.update { $0 = true }
         world.catalog.translator.holds.update { $0 = true }
-        let task = Task { await detail.translate([0, 1], target: .english, engine: .firefox, catalog: world.catalog) }
+        let task = Task { await detail.translate(target: .english, engine: .firefox, catalog: world.catalog) }
         #expect(await eventually { world.catalog.translator.held == [first] })
-        #expect(detail.translationProgress == 0 && detail.translationTotal == 2)
+        #expect(detail.translationProgress == 0 && detail.translationTotal == rows.count)
         await world.catalog.translator.release(first)
         #expect(await eventually { world.catalog.translator.held == [second] })
         #expect(detail.translationProgress == 1)
+        world.catalog.translator.holds.update { $0 = false }
         await world.catalog.translator.release(second)
         await task.value
-        world.catalog.translator.holds.update { $0 = false }
         let saved = try #require(try await world.library.meeting(meeting.id).translation)
-        #expect(saved.paragraphs == [0: "⟨\(first)⟩", 1: "⟨\(second)⟩"])
+        #expect(saved.paragraphs == Dictionary(uniqueKeysWithValues: rows.indices.map { ($0, "⟨\(rows[$0].text)⟩") }))
         for view in [TranscriptView.raw, .cleaned] {
             for format in [ExportFormat.markdown, .plainText] {
                 #expect(detail.export(view, as: format)?.contains("⟨") == false)
-                #expect(detail.export(view, as: format, includeTranslation: true)?.contains("⟨\(first)⟩") == true)
+                #expect(detail.export(view, as: format, includeTranslation: true)?.contains("⟨\(first)⟩") == (view == .cleaned))
             }
-            #expect(detail.subtitles(view, includeTranslation: true)?.contains("⟨\(second)⟩") == true)
+            #expect(detail.subtitles(view, includeTranslation: true)?.contains("⟨\(second)⟩") == (view == .cleaned))
             #expect(detail.subtitles(view)?.contains("⟨") == false)
         }
         world.catalog.translator.failing.update { $0.insert(second) }
-        await detail.translate([1], target: .english, engine: .firefox, catalog: world.catalog)
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
         #expect(detail.translationError != nil && detail.translationProgress == nil)
         #expect(try await world.library.meeting(meeting.id).translation == saved)
-        await detail.translate([0], target: .simplifiedChinese, engine: .firefox, catalog: world.catalog)
+        await detail.translate(target: .simplifiedChinese, engine: .firefox, catalog: world.catalog)
         let reopened = world.detail(meeting.id)
         await reopened.load()
-        #expect(reopened.meeting?.translation?.paragraphs == [0: TraditionalChinese.simplified(first)])
+        #expect(reopened.meeting?.translation?.paragraphs == Dictionary(uniqueKeysWithValues: rows.indices.map { ($0, TraditionalChinese.simplified(rows[$0].text)) }))
         await reopened.editCleaned(rows[0], to: "Updated sentence")
-        #expect(reopened.presentation?.translationHeadings(.raw).isEmpty == true)
+        #expect(reopened.presentation?.translationHeadings(.cleaned).isEmpty == true)
         await #expect(throws: LibraryError.transcriptChanged) { try await world.library.saveTranslation(saved, for: meeting.id) }
     }
 

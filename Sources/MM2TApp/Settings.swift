@@ -86,6 +86,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
     /// Translates live captions on this Mac with the downloaded models; never saved.
+    public var translationEnabled = false
     public var captionEngine: CaptionEngine = .initial
     public var captionTranslation: CaptionTranslation = .off
     /// Where the user dragged the caption bar, by screen (its display number as text): the bar's
@@ -139,6 +140,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
         captionEngine = (try? c.decode(CaptionEngine.self, forKey: .captionEngine)) ?? .firefox
         captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
+        translationEnabled = try c.decodeIfPresent(Bool.self, forKey: .translationEnabled) ?? (captionTranslation != .off)
         captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
@@ -152,7 +154,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
         case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
         case detectionRules
-        case liveCaptions, captionBarOffsets, captionEngine, captionTranslation
+        case liveCaptions, captionBarOffsets, captionEngine, captionTranslation, translationEnabled
     }
 
     /// These settings with the ones that only change what is shown while recording set aside, so
@@ -161,6 +163,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var settings = self
         settings.liveCaptions = false
         settings.localCaptionModel = nil
+        settings.translationEnabled = false
         settings.captionEngine = .initial
         settings.captionTranslation = .off
         settings.captionBarOffsets = [:]

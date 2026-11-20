@@ -329,6 +329,7 @@ private struct StepPage: View {
                     }
                     .setupRow()
                 }
+                TranslationEnableRow(app: app).setupRow()
                 CaptionTranslationRow(app: app).setupRow()
                 ModelRows(setup: app.setup)
             case .voice: VoiceEnrollmentView(model: app.enrollment, models: app.setup.models)
