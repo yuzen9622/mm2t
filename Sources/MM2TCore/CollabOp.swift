@@ -68,6 +68,15 @@ public enum CollabOp: Codable, Equatable, Sendable {
     public enum Collection: String, Codable, Sendable {
         case nodes, edges, options, tasks, rows
 
+        public var requiredFields: [String] {
+            switch self {
+            case .nodes, .options: ["label"]
+            case .edges: ["from", "to"]
+            case .tasks: ["name", "start", "end"]
+            case .rows: ["task"]
+            }
+        }
+
         fileprivate func validates(_ item: [String: CollabJSON]) -> Bool {
             func check(_ field: String, _ valid: (CollabJSON) -> Bool) -> Bool { item[field].map(valid) ?? true }
             func string(_ field: String) -> Bool { check(field) { if case .string = $0 { true } else { false } } }
@@ -192,22 +201,42 @@ public enum CollabOp: Codable, Equatable, Sendable {
 }
 
 public struct CollabOpStreamParser: Sendable {
-    private var pending = ""
+    private static let maxLineBytes = 512 * 1024
+    private var pending = Data()
+    private var discardingLine = false
     public private(set) var rejectedLines = 0
 
     public init() {}
 
     public mutating func feed(_ fragment: String) -> [CollabOp] {
-        pending += fragment
-        let lines = pending.components(separatedBy: "\n")
-        pending = lines.last ?? ""
-        return lines.dropLast().compactMap { parse($0) }
+        var result: [CollabOp] = []
+        for byte in fragment.utf8 {
+            if byte == 10 {
+                if let op = finishLine() { result.append(op) }
+            } else if !discardingLine {
+                if pending.count == Self.maxLineBytes {
+                    pending.removeAll(keepingCapacity: true)
+                    discardingLine = true
+                    rejectedLines += 1
+                } else {
+                    pending.append(byte)
+                }
+            }
+        }
+        return result
     }
 
     public mutating func finish() -> [CollabOp] {
-        let line = pending
-        pending = ""
-        return parse(line).map { [$0] } ?? []
+        finishLine().map { [$0] } ?? []
+    }
+
+    private mutating func finishLine() -> CollabOp? {
+        defer {
+            pending.removeAll(keepingCapacity: true)
+            discardingLine = false
+        }
+        guard !discardingLine, !pending.isEmpty else { return nil }
+        return parse(String(decoding: pending, as: UTF8.self))
     }
 
     private mutating func parse(_ line: String) -> CollabOp? {

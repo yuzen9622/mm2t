@@ -125,3 +125,48 @@ struct CollabTests {
         }
     }
 }
+
+struct CollabParserLimitTests {
+    @Test func overlongLineIsDiscardedOnceAndParsingResumes() {
+        var parser = CollabOpStreamParser()
+        let limit = 512 * 1024
+        #expect(parser.feed(String(repeating: "a", count: limit)).isEmpty)
+        #expect(parser.rejectedLines == 0)
+        #expect(parser.feed("é").isEmpty)
+        #expect(parser.feed(String(repeating: "z", count: limit)).isEmpty)
+        #expect(parser.rejectedLines == 1)
+        #expect(parser.feed("\r\n" + #"{"op":"done","id":"after"}"# + "\r\n") == [.done(id: "after")])
+        #expect(parser.finish().isEmpty)
+        #expect(parser.rejectedLines == 1)
+    }
+
+    @Test func oneCharacterFragmentsScaleLinearlyFrom200KBTo2MB() {
+        func fragments(_ length: Int) -> [String] {
+            let header = #"{"op":"appendText","id":"doc","field":"markdown","text":""#
+            let line = header + String(repeating: "x", count: length - header.utf8.count - 3) + "\"}\n"
+            return line.map(String.init)
+        }
+        let smallLine = fragments(200_000)
+        let largeLine = fragments(500_000)
+        func measure(_ fragments: [String], lines: Int) -> Double {
+            var parser = CollabOpStreamParser()
+            var parsed = 0
+            let elapsed = ContinuousClock().measure {
+                for _ in 0..<lines {
+                    for fragment in fragments { parsed += parser.feed(fragment).count }
+                }
+            }
+            #expect(parsed == lines)
+            #expect(parser.rejectedLines == 0)
+            let duration = elapsed.components
+            return Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+        }
+        _ = measure(smallLine, lines: 1)
+        var small: [Double] = []
+        var large: [Double] = []
+        for _ in 0..<5 { small.append(measure(smallLine, lines: 1)); large.append(measure(largeLine, lines: 4)) }
+        let ratio = large.sorted()[2] / small.sorted()[2]
+        print("Collab parser 200 KB: \(small) s; 2 MB: \(large) s; median ratio: \(ratio)")
+        #expect(ratio < 15)
+    }
+}
