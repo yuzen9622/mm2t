@@ -20,7 +20,7 @@ public actor CollabOpSender {
     }
 
     private static func bytes(of op: CollabOp) throws -> Int {
-        try JSONEncoder().encode(op).count + 1
+        try JSONEncoder().encode(op).count
     }
 
     private static func split(_ op: CollabOp) throws -> [CollabOp] {
@@ -67,9 +67,9 @@ public actor CollabOpSender {
 
     private func enqueue(_ op: CollabOp) throws {
         let bytes = try Self.bytes(of: op)
-        if pendingBytes + bytes > CollabOpBatch.byteLimit { flush() }
+        if pendingBytes + bytes + (pending.isEmpty ? 0 : 1) > CollabOpBatch.byteLimit { flush() }
+        pendingBytes += bytes + (pending.isEmpty ? 0 : 1)
         pending.append(op)
-        pendingBytes += bytes
         if pending.count == 20 { flush() }
         else if timer == nil {
             timerID += 1
@@ -124,7 +124,10 @@ public actor CollabOpSender {
                         try await send(batch)
                         break
                     } catch {
-                        if error as? CollabError == .roomEnded { throw error }
+                        switch error as? CollabError {
+                        case .unreachable, .server(status: 429), .server(status: 500...599): break
+                        default: throw error
+                        }
                         if isSealed { return }
                         if attempt == 2 { throw error }
                     }

@@ -9,7 +9,7 @@ struct CollabGeneration: Sendable {
     private let components: [CollabComponent]
     private var kind: CollabComponentKind?
     private var modelID: String?
-    private var items: [CollabOp.Collection: Set<String>] = [:]
+    private var items: [CollabOp.Collection: [String: [String: CollabJSON]]] = [:]
     private var changed = false
     private(set) var removed = false
     private(set) var target: String?
@@ -32,11 +32,14 @@ struct CollabGeneration: Sendable {
     }
 
     mutating func accept(_ op: CollabOp) throws -> CollabOp? {
-        let destination: String
-        if case .create = op, case .command(let newID, _) = mode { destination = newID }
-        else { destination = target ?? op.id }
+        let wireOp: CollabOp
+        if case .create(_, let kind, let title, _) = op, case .command(let newID, let source) = mode {
+            wireOp = .create(id: newID, kind: kind, title: title, source: source)
+        } else {
+            wireOp = op.targeting(target ?? op.id)
+        }
         if case .appendText = op { return route(op) }
-        guard try CollabOpSender.fits(op.targeting(destination)) else {
+        guard try CollabOpSender.fits(wireOp) else {
             rejected += 1
             return nil
         }
@@ -70,14 +73,12 @@ struct CollabGeneration: Sendable {
             finished = true
             return changed && !removed ? op.targeting(target) : nil
         case .upsertItem(_, let collection, let fields):
-            guard case .string(let itemID) = fields["id"],
-                  items[collection]?.contains(itemID) == true || collection.requiredFields.allSatisfy({ fields[$0] != nil }) else {
-                rejected += 1
-                return nil
-            }
-            items[collection, default: []].insert(itemID)
+            guard case .string(let itemID) = fields["id"] else { rejected += 1; return nil }
+            let merged = (items[collection]?[itemID] ?? [:]).merging(fields) { _, patch in patch }
+            guard collection.validates(merged) else { rejected += 1; return nil }
+            items[collection, default: [:]][itemID] = merged
         case .removeItem(_, let collection, let itemID):
-            items[collection]?.remove(itemID)
+            items[collection]?.removeValue(forKey: itemID)
         case .remove:
             removed = true
         case .set(_, .title, .string(let title)):
@@ -95,14 +96,10 @@ struct CollabGeneration: Sendable {
         title = component.title
         for key in component.fields.keys {
             guard let collection = CollabOp.Collection(rawValue: key) else { continue }
-            switch component.fields[key] {
-            case .object(let values): items[collection] = Set(values.keys)
-            case .array(let values):
-                items[collection] = Set(values.compactMap { value in
-                    guard case .object(let fields) = value, case .string(let id) = fields["id"] else { return nil }
-                    return id
-                })
-            default: break
+            guard case .object(let values) = component.fields[key] else { continue }
+            items[collection] = values.compactMapValues { value in
+                guard case .object(let fields) = value else { return nil }
+                return fields
             }
         }
     }
@@ -197,7 +194,11 @@ actor CollabModelWork {
             let ops = fragment.map { parser.feed($0) } ?? parser.finish()
             for op in ops {
                 try Task.checkCancellation()
-                if let approved = try route.accept(op), try await !sender.append(approved) { oversized += 1 }
+                let beforeAppend: CollabGeneration? = if case .appendText = op { route } else { nil }
+                if let approved = try route.accept(op), try await !sender.append(approved) {
+                    if let beforeAppend { route = beforeAppend }
+                    oversized += 1
+                }
                 if route.title != previousTitle {
                     previousTitle = route.title
                     await onTitle(route.title)
@@ -205,7 +206,9 @@ actor CollabModelWork {
             }
             if fragment == nil { break }
         }
-        guard route.finished else { throw Failure.invalidOutput }
+        guard route.finished, route.needsCleanup || parser.rejectedLines + route.rejected + oversized == 0 else {
+            throw Failure.invalidOutput
+        }
         try Task.checkCancellation()
         try await sender.finish()
         try Task.checkCancellation()

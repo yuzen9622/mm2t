@@ -223,6 +223,32 @@ import Testing
         await f.session.end()?.value
     }
 
+    @Test func rejectedUpdateKeepsCaptionCursor() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let doc = try #require(CollabBackend.document.get)
+        let originalOps = CollabBackend.ops.get
+        let originalPrompts = f.llm.answerInputs.get.count
+        let done = "{\"op\":\"done\",\"id\":\"\(doc.id)\"}"
+        let tooLarge = CollabOp.replaceText(id: doc.id, field: .markdown, text: String(repeating: "大", count: 90_000))
+        let line = String(decoding: try JSONEncoder().encode(tooLarge), as: UTF8.self)
+        f.llm.answerChunks.set([line + "\n" + done])
+        f.clock.update { $0.addTimeInterval(90) }
+        f.captions.receive(.final(String(repeating: "甲", count: 200)))
+        await f.session.waitForWork()
+        #expect(f.llm.answerInputs.get.count == originalPrompts + 1)
+        #expect(CollabBackend.ops.get == originalOps)
+        f.llm.answerChunks.set([done])
+        f.clock.update { $0.addTimeInterval(90) }
+        f.captions.receive(.final(String(repeating: "乙", count: 200)))
+        await f.session.waitForWork()
+        #expect(f.llm.answerInputs.get.count == originalPrompts + 2)
+        #expect(f.llm.answerInputs.get.last?.contains("甲") == true)
+        #expect(f.llm.answerInputs.get.last?.contains("乙") == true)
+        #expect(CollabBackend.ops.get == originalOps)
+        await f.session.end()?.value
+    }
+
     @Test func disabledCaptionsSuppressInFlightSuggestion() async throws {
         let f = try await Fixture()
         let gate = Gate<Bool>()
@@ -331,46 +357,69 @@ import Testing
         await f.session.end()?.value
     }
 
-    @Test(arguments: [CollabOp.Collection.nodes, .edges, .options, .tasks, .rows])
-    func missingNewItemFieldsAreRejectedButExistingItemsAllowPartialUpdates(_ collection: CollabOp.Collection) throws {
-        let kind: CollabComponentKind = switch collection {
-        case .nodes, .edges: .whiteboard
-        case .options: .poll
-        case .tasks: .gantt
-        case .rows: .actions
+    @Test(arguments: ["nodes", "edges", "options", "tasks", "rows"])
+    func itemSchemaFixturesDiscardInvalidLinesAndSendFollowingValidOps(_ collection: String) async throws {
+        let f = try await Fixture()
+        let (kind, complete, patch, invalid): (String, String, String, [String]) = switch collection {
+        case "nodes": ("whiteboard", #"{"id":"item","label":"A","shape":"box"}"#, #"{"id":"item","label":"B"}"#, [
+            #"{"id":"item","label":"A"}"#, #"{"id":"item","label":"A","shape":"box","unknown":true}"#,
+        ])
+        case "edges": ("whiteboard", #"{"id":"item","from":"a","to":"b"}"#, #"{"id":"item","label":"B"}"#, [
+            #"{"id":"item","from":"a"}"#, #"{"id":"item","from":"","to":"b"}"#,
+        ])
+        case "options": ("poll", #"{"id":"item","label":"A"}"#, #"{"id":"item"}"#, [
+            #"{"id":"","label":"A"}"#, #"{"id":"item","label":"A","unknown":true}"#,
+        ])
+        case "tasks": ("gantt", #"{"id":"item","name":"A","start":"2024-02-29","end":"2024-03-01","dependsOn":["a"],"progress":0.5}"#,
+                        #"{"id":"item","name":"B"}"#, [
+            #"{"id":"item","name":"A","start":"2024-02-29","end":"2024-03-01","progress":0}"#,
+            #"{"id":"item","name":"A","start":"2024-02-29","end":"2024-03-01","dependsOn":[]}"#,
+            #"{"id":"item","start":"1900-02-29"}"#, #"{"id":"item","dependsOn":[""]}"#,
+        ])
+        default: ("actions", #"{"id":"item","task":"A","status":"open"}"#, #"{"id":"item","task":"B"}"#, [
+            #"{"id":"item","task":"A"}"#, #"{"id":"item","due":"2026-04-31"}"#,
+        ])
         }
-        let required: [String] = switch collection {
-        case .nodes, .options: ["label"]
-        case .edges: ["from", "to"]
-        case .tasks: ["name", "start", "end"]
-        case .rows: ["task"]
+        func line(_ item: String) -> String {
+            """
+            {"op":"upsertItem","id":"model-id","collection":"\(collection)","item":\(item)}
+            """
         }
-        var generation = CollabGeneration(components: [], newID: "real", source: .command)
-        _ = try generation.accept(.create(id: "model", kind: kind, title: "Test", source: .command))
-        let partial: CollabOp = .upsertItem(id: "model", collection: collection, item: ["id": .string("item")])
-        #expect(try generation.accept(partial) == nil)
-        var complete: [String: CollabJSON] = ["id": .string("item")]
-        for field in required { complete[field] = .string("2026-11-20") }
-        #expect(try generation.accept(.upsertItem(id: "model", collection: collection, item: complete)) != nil)
-        #expect(try generation.accept(partial) == partial.targeting("real"))
-        _ = try generation.accept(.removeItem(id: "model", collection: collection, itemId: "item"))
-        #expect(try generation.accept(partial) == nil)
-        #expect(try generation.accept(.done(id: "model")) == .done(id: "real"))
-        #expect(generation.rejected == 2)
+        let create = """
+        {"op":"create","id":"model-id","kind":"\(kind)","title":"Test","source":"command"}
+        """
+        let remove = """
+        {"op":"removeItem","id":"model-id","collection":"\(collection)","itemId":"item"}
+        """
+        let emptyRemove = remove.replacingOccurrences(of: #""itemId":"item""#, with: #""itemId":"""#)
+        f.llm.answerChunks.set([([create, line(patch)] + invalid.map(line)
+            + [line(complete), line(patch), emptyRemove, remove, line(patch), Fixture.done]).joined(separator: "\n")])
+        f.begin()
+        try #require(await eventually { f.session.commandStatus == .completed("Test") })
+        let sent = CollabBackend.ops.get
+        let target = try #require(sent.first?.id)
+        let expected = try [create, line(complete), line(patch), remove, Fixture.done].map {
+            try JSONDecoder().decode(CollabOp.self, from: Data($0.utf8)).targeting(target)
+        }
+        #expect(sent == expected)
+        await f.session.end()?.value
     }
 
     @Test func invalidItemDoesNotSelectWrongTargetAndSnapshotItemsAllowPartialUpdates() throws {
         func component(_ id: String) throws -> CollabComponent {
             let json = """
             {"id":"\(id)","kind":"actions","title":"待辦","source":"command","building":false,
-             "updatedAt":"2026-11-20T12:00:00Z","rows":{"existing":{"id":"existing","task":"聯絡"}}}
+             "updatedAt":"2026-11-20T12:00:00Z","rows":{"existing":{"id":"existing","task":"聯絡","status":"open"}}}
             """
             return try JSONDecoder().decode(CollabComponent.self, from: Data(json.utf8))
         }
         var route = CollabGeneration(components: try [component("first"), component("second")], newID: "new", source: .command)
-        #expect(try route.accept(.upsertItem(id: "first", collection: .rows, item: ["id": .string("missing")])) == nil)
+        let invalid = try JSONDecoder().decode(CollabOp.self, from: Data(
+            #"{"op":"upsertItem","id":"first","collection":"rows","item":{"id":"missing"}}"#.utf8))
+        let valid = try JSONDecoder().decode(CollabOp.self, from: Data(
+            #"{"op":"upsertItem","id":"second","collection":"rows","item":{"id":"existing","status":"done"}}"#.utf8))
+        #expect(try route.accept(invalid) == nil)
         #expect(route.target == nil)
-        let valid: CollabOp = .upsertItem(id: "second", collection: .rows, item: ["id": .string("existing"), "status": .string("done")])
         #expect(try route.accept(valid) == valid)
         #expect(try route.accept(.done(id: "second")) == .done(id: "second"))
     }

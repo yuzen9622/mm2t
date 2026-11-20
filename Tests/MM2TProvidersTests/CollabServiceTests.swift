@@ -99,23 +99,30 @@ struct CollabServiceTests {
     }
 
     @Test func concurrentUnauthorizedRequestsShareOneRefresh() async throws {
-        let barrier = TwoRequests()
+        let gate = ResponseGate()
+        defer { gate.open() }
         let server = StubServer { call in
             switch call.url.path {
             case "/v1/auth/exchange": .status(200, Self.login)
-            case "/v1/auth/refresh": .status(200, Self.rotated)
+            case "/v1/auth/refresh": .after { await gate.wait() ? (200, Self.rotated) : (503, "") }
             case "/v1/rooms/r/components" where call.headers["Authorization"] == "Bearer a2":
                 .status(200, #"{"status":"live","components":[]}"#)
-            case "/v1/rooms/r/components": .after { await barrier.arrive(); return (401, "") }
+            case "/v1/rooms/r/components": .status(401, "")
             default: .status(500, "")
             }
         }
         let store = MemoryTokens()
         let service = store.service(using: server)
         _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
-        async let first = service.components(in: "r", owner: "u")
-        async let second = service.components(in: "r", owner: "u")
-        let results = try await [first, second]
+        let first = Task { try await service.components(in: "r", owner: "u") }
+        let second = Task { try await service.components(in: "r", owner: "u") }
+        defer { first.cancel(); second.cancel() }
+        try #require(await waitForRequests {
+            server.requests.filter { $0.url.path.hasSuffix("/components") }.count == 2
+                && server.requests.contains { $0.url.path == "/v1/auth/refresh" }
+        })
+        gate.open()
+        let results = try await [first.value, second.value]
         #expect(results.allSatisfy { $0.status == .live })
         let refresh = server.requests.filter { $0.url.path == "/v1/auth/refresh" }
         try #require(refresh.count == 1)
@@ -127,6 +134,63 @@ struct CollabServiceTests {
         #expect(value.tokens.refreshToken == "r2")
         #expect(value.user.name == "Updated Host")
         #expect(await service.signedInUser == value.user)
+    }
+
+    @Test func cancelledRefreshWaiterDoesNotRetryOrCancelSharedRotation() async throws {
+        let gate = ResponseGate()
+        defer { gate.open() }
+        let server = StubServer { call in
+            switch call.url.path {
+            case "/v1/auth/exchange": .status(200, Self.login)
+            case "/v1/auth/refresh": .after { await gate.wait() ? (200, Self.rotated) : (503, "") }
+            case "/v1/rooms/kept/components" where call.headers["Authorization"] == "Bearer a2":
+                .status(200, #"{"status":"live","components":[]}"#)
+            default: .status(401, "")
+            }
+        }
+        let store = MemoryTokens()
+        let service = store.service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let cancelled = Task { try await service.components(in: "cancelled", owner: "u") }
+        defer { cancelled.cancel() }
+        try #require(await waitForRequests { server.requests.contains { $0.url.path == "/v1/auth/refresh" } })
+        let kept = Task { try await service.components(in: "kept", owner: "u") }
+        defer { kept.cancel() }
+        try #require(await waitForRequests { server.requests.contains { $0.url.path == "/v1/rooms/kept/components" } })
+        cancelled.cancel()
+        gate.open()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(try await kept.value.status == .live)
+        #expect(server.requests.filter { $0.url.path == "/v1/auth/refresh" }.count == 1)
+        #expect(server.requests.filter { $0.url.path == "/v1/rooms/cancelled/components" }.map { $0.headers["Authorization"] } == ["Bearer a1"])
+        let stored = try #require(store.saved)
+        let value = try JSONDecoder().decode(StoredLogin.self, from: Data(stored.revealed.utf8))
+        #expect(value.tokens.refreshToken == "r2")
+    }
+
+    private func waitForRequests(_ event: () -> Bool) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(3)
+        while clock.now < deadline, !Task.isCancelled {
+            if event() { return true }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return false
+    }
+
+    private final class ResponseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+        func open() { lock.withLock { released = true } }
+        func wait() async -> Bool {
+            let clock = ContinuousClock()
+            let deadline = clock.now + .seconds(5)
+            while clock.now < deadline, !Task.isCancelled {
+                if lock.withLock({ released }) { return true }
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+            return false
+        }
     }
 
     @Test(arguments: [401, 503]) func logoutClearsLocalCredentialsOnFailure(status: Int) async throws {
@@ -148,19 +212,6 @@ struct CollabServiceTests {
         struct Tokens: Decodable { let refreshToken: String }
         let tokens: Tokens
         let user: CollabUser
-    }
-
-    private actor TwoRequests {
-        private var first: CheckedContinuation<Void, Never>?
-
-        func arrive() async {
-            if let first {
-                self.first = nil
-                first.resume()
-            } else {
-                await withCheckedContinuation { first = $0 }
-            }
-        }
     }
 
     @Test(arguments: [200, 401, 503]) func failedAuthenticationClearsStoredCredentials(refreshStatus: Int) async throws {
@@ -261,7 +312,59 @@ struct CollabServiceTests {
         #expect(applied.count == 1)
     }
 
-    @Test func credentialDeletionFailureIsReportedAfterRefreshInvalidatesSession() async throws {
+    @Test(arguments: [false, true])
+    func senderUsesExactWireByteLimit(includeSecondOp: Bool) async throws {
+        let server = StubServer { call in
+            if call.url.path == "/v1/auth/exchange" { return .status(200, Self.login) }
+            return call.body.count <= 262_144 ? .status(200, #"{"applied":1,"duplicate":false}"#) : .status(413, "")
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let done = CollabOp.done(id: "doc")
+        func replace(_ size: Int) -> CollabOp {
+            .replaceText(id: "doc", field: .markdown, text: String(repeating: "x", count: size))
+        }
+        func batch(_ op: CollabOp) -> [CollabOp] { includeSecondOp ? [op, done] : [op] }
+        let overhead = try JSONEncoder().encode(CollabOpBatch(batch(replace(0)))).count
+        let exact = replace(262_144 - overhead)
+        let over = replace(262_145 - overhead)
+        let sender = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(60)) }) { batch in
+            try await service.sendOps(batch, to: "r", owner: "u")
+        }
+        #expect(try await sender.append(exact))
+        if includeSecondOp { try await sender.append(done) }
+        try await sender.finish()
+        #expect(server.requests.filter { $0.url.path.hasSuffix("/ops") }.map { $0.body.count } == [262_144])
+
+        let next = CollabOpSender(sleep: { _ in try await Task.sleep(for: .seconds(60)) }) { batch in
+            try await service.sendOps(batch, to: "r", owner: "u")
+        }
+        #expect(try await next.append(over) == includeSecondOp)
+        if includeSecondOp { try await next.append(done) }
+        try await next.finish()
+        let sizes = server.requests.filter { $0.url.path.hasSuffix("/ops") }.map { $0.body.count }
+        if includeSecondOp {
+            #expect(sizes == [262_144, try JSONEncoder().encode(CollabOpBatch([over])).count,
+                              try JSONEncoder().encode(CollabOpBatch([done])).count])
+        } else { #expect(sizes == [262_144]) }
+    }
+
+    @Test(arguments: [400, 429, 503])
+    func senderOnlyRetriesRecoverableHTTPStatuses(status: Int) async throws {
+        let server = StubServer { call in
+            call.url.path == "/v1/auth/exchange" ? .status(200, Self.login) : .status(status, "")
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let sender = CollabOpSender { batch in try await service.sendOps(batch, to: "r", owner: "u") }
+        try await sender.append(.done(id: "doc"))
+        await #expect(throws: CollabError.server(status: status)) { try await sender.finish() }
+        let calls = server.requests.filter { $0.url.path.hasSuffix("/ops") }
+        #expect(calls.count == (status == 400 ? 1 : 3))
+        #expect(Set(calls.map(\.body)).count == 1)
+    }
+
+    @Test func senderPreservesCredentialDeletionFailureAfterRefreshInvalidatesSession() async throws {
         let server = StubServer { call in
             call.url.path == "/v1/auth/exchange" ? .status(200, Self.login) : .status(401, "")
         }
@@ -269,7 +372,10 @@ struct CollabServiceTests {
             if secret.isEmpty { throw CocoaError(.fileWriteNoPermission) }
         })
         _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
-        await #expect(throws: CollabError.credentialCleanup) { try await service.me() }
+        let sender = CollabOpSender { batch in try await service.sendOps(batch, to: "r", owner: "u") }
+        try await sender.append(.done(id: "doc"))
+        await #expect(throws: CollabError.credentialCleanup) { try await sender.finish() }
+        #expect(server.requests.filter { $0.url.path.hasSuffix("/ops") }.count == 1)
         #expect(await !service.isAuthenticated)
     }
 

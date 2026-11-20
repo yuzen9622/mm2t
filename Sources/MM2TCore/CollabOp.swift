@@ -68,36 +68,46 @@ public enum CollabOp: Codable, Equatable, Sendable {
     public enum Collection: String, Codable, Sendable {
         case nodes, edges, options, tasks, rows
 
-        public var requiredFields: [String] {
+        public func validates(_ item: [String: CollabJSON], partial: Bool = false) -> Bool {
+            typealias Check = (CollabJSON) -> Bool
+            func string(_ value: CollabJSON) -> Bool { if case .string = value { true } else { false } }
+            func identifier(_ value: CollabJSON) -> Bool { if case .string(let id) = value { !id.isEmpty } else { false } }
+            func choice(_ choices: [String]) -> Check {
+                { if case .string(let value) = $0 { choices.contains(value) } else { false } }
+            }
+            func date(_ value: CollabJSON) -> Bool {
+                guard case .string(let value) = value,
+                      let match = value.wholeMatch(of: /([0-9]{4})-([0-9]{2})-([0-9]{2})/),
+                      let year = Int(match.1), let month = Int(match.2), let day = Int(match.3),
+                      (1...12).contains(month) else { return false }
+                let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+                let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+                return (1...days[month - 1]).contains(day)
+            }
+            let required: [String: Check]
+            let optional: [String: Check]
             switch self {
-            case .nodes, .options: ["label"]
-            case .edges: ["from", "to"]
-            case .tasks: ["name", "start", "end"]
-            case .rows: ["task"]
-            }
-        }
-
-        fileprivate func validates(_ item: [String: CollabJSON]) -> Bool {
-            func check(_ field: String, _ valid: (CollabJSON) -> Bool) -> Bool { item[field].map(valid) ?? true }
-            func string(_ field: String) -> Bool { check(field) { if case .string = $0 { true } else { false } } }
-            func choice(_ field: String, _ choices: [String]) -> Bool {
-                check(field) { if case .string(let value) = $0 { choices.contains(value) } else { false } }
-            }
-            func date(_ field: String) -> Bool {
-                check(field) { if case .string(let value) = $0 { value.wholeMatch(of: /[0-9]{4}-[0-9]{2}-[0-9]{2}/) != nil } else { false } }
-            }
-            guard case .string(let id) = item["id"], !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-            switch self {
-            case .nodes: return string("label") && string("group") && choice("shape", ["box", "ellipse", "diamond", "note"])
-            case .edges: return string("from") && string("to") && string("label")
-            case .options: return string("label")
+            case .nodes:
+                required = ["label": string, "shape": choice(["box", "ellipse", "diamond", "note"])]
+                optional = ["group": string]
+            case .edges:
+                required = ["from": identifier, "to": identifier]
+                optional = ["label": string]
+            case .options:
+                required = ["label": string]
+                optional = [:]
             case .tasks:
-                return string("name") && string("owner") && date("start") && date("end") && check("dependsOn") {
+                required = ["name": string, "start": date, "end": date, "dependsOn": {
                     guard case .array(let values) = $0 else { return false }
-                    return values.allSatisfy { if case .string = $0 { true } else { false } }
-                } && check("progress") { if case .number(let value) = $0 { (0...1).contains(value) } else { false } }
-            case .rows: return string("task") && string("owner") && date("due") && choice("status", ["open", "done"])
+                    return values.allSatisfy(identifier)
+                }, "progress": { if case .number(let value) = $0 { (0...1).contains(value) } else { false } }]
+                optional = ["owner": string]
+            case .rows:
+                required = ["task": string, "status": choice(["open", "done"])]
+                optional = ["owner": string, "due": date]
             }
+            guard let id = item["id"], identifier(id), partial || required.keys.allSatisfy({ item[$0] != nil }) else { return false }
+            return item.allSatisfy { key, value in key == "id" || (required[key] ?? optional[key])?(value) == true }
         }
     }
 
@@ -154,10 +164,12 @@ public enum CollabOp: Codable, Equatable, Sendable {
         case .upsertItem:
             let collection = try c.decode(Collection.self, forKey: .collection)
             let item = try c.decode([String: CollabJSON].self, forKey: .item)
-            guard collection.validates(item) else { throw invalid(.item) }
+            guard collection.validates(item, partial: true) else { throw invalid(.item) }
             self = .upsertItem(id: id, collection: collection, item: item)
         case .removeItem:
-            self = try .removeItem(id: id, collection: c.decode(Collection.self, forKey: .collection), itemId: c.decode(String.self, forKey: .itemId))
+            let itemID = try c.decode(String.self, forKey: .itemId)
+            guard !itemID.isEmpty else { throw invalid(.itemId) }
+            self = try .removeItem(id: id, collection: c.decode(Collection.self, forKey: .collection), itemId: itemID)
         case .appendText, .replaceText:
             let field = try c.decode(TextField.self, forKey: .field)
             let text = try c.decode(String.self, forKey: .text)
