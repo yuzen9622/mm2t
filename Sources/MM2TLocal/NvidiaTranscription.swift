@@ -21,8 +21,8 @@ public enum LocalSpeechModel: String, CaseIterable, Codable, Sendable {
     public var name: String {
         switch self {
         case .whisperCPU: "Whisper Base (CPU)"
-        case .breezeCoreML: "Breeze-ASR-25 Core ML 4-bit"
-        case .breeze: "Breeze-ASR-25 MLX FP16"
+        case .breezeCoreML: "Breeze-ASR-25 Core ML"
+        case .breeze: "Breeze-ASR-25 MLX"
         case .parakeet: "Parakeet TDT v3"
         case .nemotron: "Nemotron 3.5 Multilingual"
         }
