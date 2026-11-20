@@ -465,7 +465,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func itemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
+    func modelPromptAndItemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
         let f = try await Fixture()
         try await f.makeRoom()
         let second = hasBothIDs ? #", "é":{"id":"é","label":"Second","shape":"ellipse"}"# : ""
@@ -481,6 +481,25 @@ import Testing
         """])
         f.session.run(command: "Update nodes")
         await f.session.waitForWork()
+        let prompt = try #require(f.llm.answerInputs.get.last)
+        let input = try JSONDecoder().decode([String: CollabJSON].self, from: Data(prompt.utf8))
+        guard case .array(let components) = input["components"],
+              case .object(let board) = components.first(where: {
+                  if case .object(let fields) = $0 { fields["id"] == .string("board") } else { false }
+              }), case .array(let nodes) = board["nodes"] else {
+            Issue.record("Missing whiteboard nodes in model input")
+            return
+        }
+        let labels = nodes.compactMap { node -> (Data, String)? in
+            guard case .object(let fields) = node, case .string(let id) = fields["id"],
+                  case .string(let label) = fields["label"] else { return nil }
+            return (Data(id.utf8), label)
+        }
+        let expected = hasBothIDs ? [Data("é".utf8): "First", Data("e\u{301}".utf8): "Second"] : [Data("é".utf8): "First"]
+        #expect(nodes.count == expected.count)
+        #expect(labels.count == expected.count)
+        #expect(labels.allSatisfy { expected[$0.0] == $0.1 })
+        #expect(Set(labels.map(\.0)) == Set(expected.keys))
         let ids = CollabBackend.ops.get.dropFirst(before).compactMap { op -> Data? in
             guard case .upsertItem(_, .nodes, let item) = op, case .string(let id) = item["id"] else { return nil }
             return Data(id.utf8)

@@ -145,7 +145,11 @@ actor CollabModelWork {
     }
 
     static func promptFields(_ component: CollabComponent) -> [String: CollabJSON] {
-        component.fields.filter { !["votes", "elements", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
+        var fields = component.fields.filter { !["votes", "elements", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
+        for (collection, items) in component.itemsByWireID {
+            fields[collection.rawValue] = .array(items.sorted { $0.key.lexicographicallyPrecedes($1.key) }.map { .object($0.value) })
+        }
+        return fields
     }
 
     private func provider() async throws -> any LLMProvider {
