@@ -194,6 +194,59 @@ import Testing
         await f.session.end()?.value
     }
 
+    @Test(arguments: [false, true])
+    func interruptedCommandCleanupBelongsToOriginalAccount(switchAccount: Bool) async throws {
+        let f = try await Fixture()
+        CollabBackend.holdOps.set(true)
+        defer {
+            CollabBackend.holdOps.set(false)
+            CollabBackend.releaseOps()
+        }
+        f.llm.answerChunks.set(Fixture.create + Array(repeating:
+            #"{"op":"appendText","id":"model-id","field":"markdown","text":"字"}"# + "\n", count: 19)
+            + [Fixture.done])
+        f.begin()
+        try #require(await waitForCollabEvent { CollabBackend.deferredReply.get != nil })
+        let partial = try #require(CollabBackend.document.get)
+        #expect(partial.building)
+        CollabBackend.expired.set(true)
+        CollabBackend.holdOps.set(false)
+        CollabBackend.releaseOps()
+        try #require(await eventually { f.account.user == nil && f.session.room == nil })
+        await f.session.waitForWork()
+        #expect(CollabBackend.requests.get.contains("/v1/auth/refresh"))
+        #expect(CollabBackend.document.get?.id == partial.id)
+        #expect(CollabBackend.document.get?.building == true)
+
+        if switchAccount {
+            try await f.account.completeSignIn(code: "other", verifier: Fixture.verifier)
+            await f.session.waitForRoomClosure()
+            await f.account.waitForPendingEnds()
+            #expect(f.session.room == nil)
+            #expect(CollabBackend.document.get?.id == partial.id)
+            #expect(!CollabBackend.ops.get.contains(.remove(id: partial.id)))
+            #expect(CollabBackend.endBearers.get.isEmpty)
+            return
+        }
+
+        CollabBackend.holdOps.set(true)
+        try await f.account.completeSignIn(code: "fixture", verifier: Fixture.verifier)
+        try #require(await waitForCollabEvent { CollabBackend.deferredReply.get != nil })
+        #expect(!f.session.showsCommandButton)
+        let prompts = f.llm.answerInputs.get.count
+        f.session.run(command: "收尾前不可接受新指令")
+        #expect(f.llm.answerInputs.get.count == prompts)
+        #expect(CollabBackend.ops.get.last == .remove(id: partial.id))
+        CollabBackend.holdOps.set(false)
+        CollabBackend.releaseOps()
+        await f.session.waitForWork()
+        #expect(CollabBackend.document.get == nil)
+        #expect(f.session.showsCommandButton)
+        f.session.toggleCommand()
+        #expect(f.session.commandStatus == .input)
+        await f.session.end()?.value
+    }
+
     @Test func signOutEndsRoomBeforeLogoutAndAllowsAnotherCommandInSameMeeting() async throws {
         let f = try await Fixture()
         try await f.makeRoom()
@@ -343,6 +396,14 @@ import Testing
         f.session.retry()
         await f.session.waitForWork()
         #expect(f.session.commandStatus == .failed(.service(.server(status: 503))))
+        #expect(!f.session.showsCommandButton)
+        CollabBackend.rejectDone.set(false)
+        let prompts = f.llm.answerInputs.get.count
+        f.session.retry()
+        await f.session.waitForWork()
+        #expect(f.session.showsCommandButton)
+        #expect(f.llm.answerInputs.get.count == prompts)
+        #expect(CollabBackend.ops.get.last == .done(id: previous))
         await f.session.end()?.value
     }
 

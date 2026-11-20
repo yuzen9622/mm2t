@@ -34,6 +34,13 @@ public final class CollabSession {
         let owner: String
     }
 
+    private struct CommandCleanup: Equatable {
+        let owner: String
+        let room: CollabRoom
+        let target: String
+        let created: Bool
+    }
+
     private struct Caption {
         let segment: LiveCaptions.Segment
         let position: Int
@@ -45,11 +52,13 @@ public final class CollabSession {
     public private(set) var commandStatus: CommandStatus = .hidden
     public private(set) var suggestion: CollabSuggestion?
     public private(set) var card: SuggestionPolicy.Card?
-    public var showsCommandButton: Bool { state != .ended }
+    public var showsCommandButton: Bool { state != .ended && pendingCleanup == nil }
     public var wantsKeyboard: Bool { commandStatus == .input || state == .confirmingStart }
     public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
     public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
     private var ownedRoom: OwnedRoom?
+    private var pendingCleanup: CommandCleanup?
+    @ObservationIgnored private var cleanupRequested = false
     @ObservationIgnored private(set) var sender: CollabOpSender?
     @ObservationIgnored private var draining: Task<Void, Never>?
     @ObservationIgnored private var closingRoom: Task<Void, Never>?
@@ -85,13 +94,14 @@ public final class CollabSession {
 
     public func toggleCommand() {
         if commandStatus == .input { dismissCommand(); return }
-        guard state != .ended, state != .starting, state != .confirmingStart, pendingCommand == nil else { return }
+        guard showsCommandButton, state != .starting, state != .confirmingStart, pendingCommand == nil else { return }
         if case .building = commandStatus { return }
         completion?.cancel()
         commandStatus = .input
     }
 
     public func dismissCommand() {
+        guard pendingCleanup == nil else { return }
         switch commandStatus {
         case .building: return
         default: break
@@ -126,6 +136,11 @@ public final class CollabSession {
     }
 
     public func retry() {
+        if pendingCleanup != nil {
+            cleanupRequested = true
+            pump()
+            return
+        }
         guard let retryCommand else { return }
         submit(retryCommand.text, source: retryCommand.source, retryTarget: retryCommand.retryTarget)
     }
@@ -143,6 +158,7 @@ public final class CollabSession {
         if let ownedRoom {
             if ownedRoom.owner == user.id {
                 state = .live(ownedRoom.room)
+                cleanupRequested = true
                 if pendingCommand != nil { commandStatus = .building(nil) }
                 pump()
                 return
@@ -167,6 +183,7 @@ public final class CollabSession {
 
     private func resetSharing() {
         if state != .ended { state = .idle }
+        cleanupRequested = false
         work?.cancel()
         completion?.cancel()
         clearSuggestion()
@@ -186,6 +203,8 @@ public final class CollabSession {
         let room = ownedRoom
         let creation = creation
         ownedRoom = nil
+        pendingCleanup = nil
+        cleanupRequested = false
         self.creation = nil
         creationOwner = nil
         knownComponents.removeAll()
@@ -288,7 +307,7 @@ public final class CollabSession {
 
     private func submit(_ text: String, source: CollabSource, retryTarget: String? = nil) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, state != .ended, pendingCommand == nil else { return }
+        guard !text.isEmpty, showsCommandButton, pendingCommand == nil else { return }
         if case .building = commandStatus { return }
         completion?.cancel()
         clearSuggestion()
@@ -307,6 +326,19 @@ public final class CollabSession {
 
     private func pump() {
         guard work == nil, draining == nil, state != .ended, !account.signingOut else { return }
+        if let cleanup = pendingCleanup {
+            guard cleanupRequested, room == cleanup.room, account.user?.id == cleanup.owner else { return }
+            cleanupRequested = false
+            launch { session in
+                do {
+                    try await session.cleanUpCommand(cleanup, checkingServer: true)
+                    if session.pendingCleanup == cleanup { session.pendingCleanup = nil }
+                    if !Task.isCancelled { session.commandStatus = .hidden }
+                } catch where !Task.isCancelled { session.fail(error) }
+                catch {}
+            }
+            return
+        }
         if let command = pendingCommand, case .live(let room) = state {
             pendingCommand = nil
             launch { session in
@@ -494,16 +526,17 @@ public final class CollabSession {
             }
         } catch {
             await sender.close()
-            let route = await model.generation
-            if !Task.isCancelled, showTitle, let command = retryCommand, let route, let target = route.target {
-                if !route.created { retryCommand = Command(text: command.text, source: command.source, retryTarget: target) }
+            if showTitle, let route = await model.generation, let target = route.target,
+               ownedRoom?.room == room, ownedRoom?.owner == binding.owner {
+                if !route.created, let command = retryCommand {
+                    retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
+                }
                 if route.needsCleanup {
-                    do { try await cleanUpCommand(route, target: target, binding: binding) }
-                    catch {
-                        if !Task.isCancelled {
-                            Self.logger.error("Could not clean up a failed collaboration command: \(String(describing: error), privacy: .private)")
-                        }
-                        throw error
+                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, created: route.created)
+                    pendingCleanup = cleanup
+                    if !Task.isCancelled, !Self.lostAuthorization(error) {
+                        try await cleanUpCommand(cleanup, checkingServer: route.created || route.removed)
+                        if pendingCleanup == cleanup { pendingCleanup = nil }
                     }
                 }
             }
@@ -511,15 +544,22 @@ public final class CollabSession {
         }
     }
 
-    private func cleanUpCommand(_ route: CollabGeneration, target: String, binding: OwnedRoom) async throws {
-        if route.created || route.removed {
-            let components = try await roomComponents(binding.room)
-            guard components.contains(where: { $0.id == target }) else { return }
+    private static func lostAuthorization(_ error: any Error) -> Bool {
+        let error = error as? CollabError
+        return error == .notSignedIn || error == .credentialCleanup
+    }
+
+    private func cleanUpCommand(_ intent: CommandCleanup, checkingServer: Bool) async throws {
+        guard account.user?.id == intent.owner else { throw CollabError.notSignedIn }
+        if checkingServer {
+            let components = try await roomComponents(intent.room)
+            guard components.contains(where: { $0.id == intent.target }) else { return }
         }
         try Task.checkCancellation()
-        let cleanup = makeSender(binding.room, owner: binding.owner)
+        let cleanup = makeSender(intent.room, owner: intent.owner)
         sender = cleanup
-        try await cleanup.append(route.created ? .remove(id: target) : .done(id: target))
+        defer { sender = nil }
+        try await cleanup.append(intent.created ? .remove(id: intent.target) : .done(id: intent.target))
         try await cleanup.finish()
     }
 
