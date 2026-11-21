@@ -7,9 +7,7 @@ import { cn } from "@/lib/utils";
 
 export const REPO = "https://github.com/yuzen9622/mm2t";
 export const DOWNLOAD = `${REPO}/releases/latest`;
-/** One content edge for the header, every section and the footer: 80px gutters at 1440. */
-export const wrap =
-  "wrap relative z-1 mx-auto w-[min(100%_-_48px,1280px)] md:w-[min(100%_-_96px,1280px)] xl:w-[min(100%_-_160px,1280px)]";
+export { wrap } from "@/lib/utils";
 /** One or two screens a section, the h2 120px under the section top (96 on a phone). */
 export const screen =
   "relative min-h-svh pt-24 pb-12 lg:h-svh lg:min-h-0 lg:pt-[120px] lg:pb-[72px]";

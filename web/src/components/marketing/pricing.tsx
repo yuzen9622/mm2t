@@ -6,17 +6,20 @@ import { cn } from "@/lib/utils";
 import { wrap } from "./shared";
 
 const plans = [
-  { name: "Free", fee: 0, minutes: 120, ai: 5, live: false, audience: "偶爾開會，先試一次完整的錄音與整理流程。" },
-  { name: "Standard", fee: 199, minutes: 240, ai: "unlimited", live: true, audience: "每週都有例會，需要更多雲端轉錄時數。" },
-  { name: "Pro", fee: 399, minutes: 540, ai: "unlimited", live: true, audience: "經常訪談或長時間開會，需要最多錄音時數。" },
+  { name: "Free", fee: 0, firstMonthFee: null, minutes: 120, ai: 30,
+    headline: "偶爾開會，會後整理重點",
+    features: ["基礎模型轉錄，逐字稿標示每位說話者", "回放原音核對細節", "從會議摘要找回決議"],
+  },
+  { name: "Standard", fee: 299, firstMonthFee: 199, minutes: 900, ai: "unlimited",
+    headline: "每週例會，開會當下就跟上討論",
+    features: ["進階模型提供更好的轉錄品質", "邊聽邊看即時字幕", "用即時翻譯跟上外語發言", "會後不限次數向 AI 追問"],
+  },
+  { name: "Pro", fee: 499, firstMonthFee: 449, minutes: 2400, ai: "unlimited",
+    headline: "長時間訪談，留足整月的處理時數",
+    features: ["使用與 Standard 相同的進階轉錄模型", "包含 Standard 的所有即時功能", "會後不限次數改寫訪談紀錄"],
+  },
 ] as const;
 type Plan = (typeof plans)[number];
-
-const featureGroups = [
-  { name: "錄音與會後整理", features: ["錄音", "會後逐字稿", "說話者辨識", "摘要", "待辦事項", "搜尋", "回放", "匯出"], liveOnly: false },
-  { name: "會議進行中", features: ["即時字幕", "即時轉錄", "即時翻譯"], liveOnly: true },
-  { name: "AI 助理", features: ["AI 提問", "AI 改寫"], liveOnly: false },
-] as const;
 
 function FeatureRow({ label, value }: { label: string; value: (plan: Plan) => ReactNode }) {
   const { t } = useCopy();
@@ -49,6 +52,9 @@ export function Pricing() {
   const minutes = (plan: Plan) => plan.minutes + " " + t("分鐘");
   const aiQuota = (plan: Plan) => plan.ai === "unlimited" ? t("無限") : plan.ai + " " + t("次");
 
+  const sharedAi = (plan: Plan) => (
+    <>{aiQuota(plan)}{plan.ai !== "unlimited" && <small className="mt-1 block text-stage-muted">{t("每月共用")}</small>}</>
+  );
   return (
     <div data-ground="stage" className="bg-stage py-8 text-stage-ink md:py-14">
       <div className={wrap}>
@@ -58,15 +64,40 @@ export function Pricing() {
               <h2 className={cn("border-b border-white/20 px-5 py-4 text-xl font-medium md:px-7",
                 plan.name === "Pro" && "bg-secondary text-foreground")}>{plan.name}</h2>
               <div className="flex flex-col px-5 pt-5 pb-6 md:px-7">
-                <p className="max-w-[24em] text-sm leading-relaxed text-stage-muted md:min-h-14">{t(plan.audience)}</p>
-                <p className="mt-6 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <strong className="text-4xl font-medium tracking-[-0.05em] xl:text-5xl">NT${plan.fee}</strong>
-                  <span className="text-sm text-stage-muted">{t("每人每月・含稅")}</span>
-                </p>
-                <dl className="mt-6 grid gap-3 border-t border-white/20 pt-5 text-sm">
+                {plan.firstMonthFee !== null ? (
+                  <>
+                    <p className="mb-2 text-base font-semibold text-primary">{t("首次訂購・首月優惠")}</p>
+                    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <strong className="text-5xl leading-none font-semibold tracking-[-0.05em] xl:text-6xl">NT${plan.firstMonthFee}</strong>
+                      <span className="text-lg text-stage-muted">
+                        <span className="sr-only">{t("原價")} </span><s>NT${plan.fee}</s>
+                      </span>
+                    </p>
+                    <p className="mt-3 text-sm leading-relaxed text-stage-muted">
+                      {t("次月起每人每月")} NT${plan.fee}{t("（含稅）")}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <strong className="text-4xl font-medium tracking-[-0.05em] xl:text-5xl">NT${plan.fee}</strong>
+                      <span className="text-sm text-stage-muted">{t("每人每月・含稅")}</span>
+                    </p>
+                    {plan.name === "Free" && <p className="mt-2 text-sm leading-relaxed text-stage-muted">{t("免費額度每月重置")}</p>}
+                  </>
+                )}
+                <h3 className="mt-6 border-t border-white/20 pt-5 text-lg font-medium">{t(plan.headline)}</h3>
+                <ul className="mt-3 mb-5 grid gap-2">
+                  {plan.features.map(feature => (
+                    <li key={feature} className="flex items-start gap-2 text-sm leading-relaxed">
+                      <Icon name="check" size={16} className="mt-1" />{t(feature)}
+                    </li>
+                  ))}
+                </ul>
+                <dl className="mt-auto grid gap-3 border-t border-white/20 pt-5 text-sm">
                   <div><dt className="text-stage-muted">{t("雲端會議處理")}</dt>
-                    <dd className="mt-1">{minutes(plan)} ({plan.minutes / 60} {t("小時")})</dd></div>
-                  <div><dt className="text-stage-muted">{t("額外 AI 共用額度")}</dt>
+                    <dd className="mt-1"><span className="text-xl font-medium">{plan.minutes / 60} {t("小時")}</span> ({minutes(plan)})</dd></div>
+                  <div><dt className="text-stage-muted">{t("AI 使用額度")}</dt>
                     <dd className="mt-1">{aiQuota(plan)}</dd></div>
                 </dl>
               </div>
@@ -75,6 +106,9 @@ export function Pricing() {
         </section>
         <section className="mt-12 md:mt-16" aria-labelledby="features">
           <h2 id="features" className="mb-5 text-2xl font-medium tracking-tight md:text-3xl">{t("各方案功能對照")}</h2>
+          <p className="mb-5 text-sm text-stage-muted">{t("Free 的單場 AI 助理與跨場會議整理合計每月可用 30 次。")}{" "}
+            <a className="underline underline-offset-4 hover:text-stage-ink" href="#own-key">{t("自備金鑰可使用全部功能")}</a>
+          </p>
           <table className="w-full table-fixed border-separate border-spacing-0 text-center text-xs sm:text-sm">
             <caption className="sr-only">{t("各方案功能對照")}</caption>
             <colgroup><col className="w-[38%] md:w-[34%]" /><col /><col /><col /></colgroup>
@@ -92,19 +126,30 @@ export function Pricing() {
             <tbody>
               <GroupTitle>{t("每月雲端額度")}</GroupTitle>
               <FeatureRow label="雲端會議處理" value={minutes} />
-              <FeatureRow label="額外 AI 共用額度" value={aiQuota} />
+              <FeatureRow label="AI 使用額度" value={aiQuota} />
             </tbody>
-            {featureGroups.map(group => (
-              <tbody key={group.name}>
-                <GroupTitle>{t(group.name)}</GroupTitle>
-                {group.features.map(feature => (
-                  <FeatureRow key={feature} label={feature} value={plan => !group.liveOnly || plan.live} />
-                ))}
-              </tbody>
-            ))}
+            <tbody>
+              <GroupTitle>{t("轉錄品質與即時功能")}</GroupTitle>
+              <FeatureRow label="轉錄模型" value={plan => t(plan.name === "Free" ? "基礎模型" : "進階模型")} />
+              {["即時字幕", "即時轉錄", "即時翻譯"].map(label => <FeatureRow key={label} label={label} value={plan => plan.name !== "Free"} />)}
+            </tbody>
+            <tbody>
+              <GroupTitle>{t("跨場會議整理")}</GroupTitle>
+              <FeatureRow label="向 AI 查詢多場會議的決議" value={sharedAi} />
+              <FeatureRow label="由 AI 建議會議資料夾分類" value={sharedAi} />
+            </tbody>
+            <tbody>
+              <GroupTitle>{t("錄音與會後整理")}</GroupTitle>
+              {["錄音", "會後逐字稿", "說話者辨識", "摘要", "待辦事項", "回放", "匯出"].map(label => <FeatureRow key={label} label={label} value={() => true} />)}
+            </tbody>
+            <tbody>
+              <GroupTitle>{t("單場會議 AI 助理")}</GroupTitle>
+              <FeatureRow label="AI 提問" value={sharedAi} />
+              <FeatureRow label="AI 改寫" value={sharedAi} />
+            </tbody>
           </table>
         </section>
-        <aside className="mt-6 flex items-start gap-4 py-2">
+        <aside id="own-key" className="scroll-mt-24 mt-6 flex items-start gap-4 py-2">
           <Icon name="key" size={22} className="mt-1 text-primary" />
           <div>
             <h3 className="font-medium">{t("使用自己的 API 金鑰")}</h3>

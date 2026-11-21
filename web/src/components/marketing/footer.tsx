@@ -1,16 +1,17 @@
 "use client";
 import { useCopy } from "@/components/i18n";
 import { Icon } from "@/components/icon";
+import { sitePath } from "@/lib/guide";
 import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
 /** The close and the footer as one dark screen: the ask, then the links and the legal row. */
 export function Footer() {
-  const { t } = useCopy();
+  const { t, locale } = useCopy();
   const links = [
     { label: "隱私權政策", href: `${REPO}/blob/main/PRIVACY.md` },
     { label: "使用條款", href: `${REPO}/blob/main/TERMS.md` },
-    { label: "版本紀錄", href: `${REPO}/releases` },
+    { label: "版本紀錄", href: sitePath(locale, "changelog") },
     { label: "原始碼", href: REPO },
   ];
   return (
@@ -48,8 +49,8 @@ export function Footer() {
               <a
                 key={link.label}
                 href={link.href}
-                target="_blank"
-                rel="noreferrer"
+                target={link.href.startsWith("/") ? undefined : "_blank"}
+                rel={link.href.startsWith("/") ? undefined : "noreferrer"}
                 className="link-draw inline-flex min-h-11 items-center text-sm text-stage-muted hover:text-stage-ink"
               >
                 {t(link.label)}

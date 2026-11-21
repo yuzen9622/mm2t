@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = fileURLToPath(new URL("../out/", import.meta.url));
+const changelogSource = fs.readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8");
+const guidePages = ["models", "pricing", "changelog"];
 for (const [route, lang] of [
   ["index.html", "zh-Hant"],
   ["en/index.html", "en"],
@@ -12,6 +14,8 @@ for (const [route, lang] of [
   ["en/models/index.html", "en"],
   ["pricing/index.html", "zh-Hant"],
   ["en/pricing/index.html", "en"],
+  ["changelog/index.html", "zh-Hant"],
+  ["en/changelog/index.html", "en"],
 ]) {
   const html = fs.readFileSync(path.join(root, route), "utf8");
   const ids = new Set(
@@ -49,10 +53,10 @@ for (const [route, lang] of [
     "The hero entrance must be gated by the m-enter head script",
   );
   const page = route.split("/").at(-2);
-  const guide = page === "models" || page === "pricing";
+  const guide = guidePages.includes(page);
   const localRoot = lang === "en" ? "/en/" : "/";
   const otherRoot = lang === "en" ? "/" : "/en/";
-  for (const name of ["models", "pricing"])
+  for (const name of guidePages)
     assert(html.includes(`href="${localRoot}${name}/"`), `${route}: missing ${name} navigation`);
   assert(
     html.includes(`href="${otherRoot}${guide ? page + "/" : ""}"`),
@@ -63,14 +67,41 @@ for (const [route, lang] of [
   } else if (page === "pricing") {
     const pricing = html.replaceAll("<!-- -->", "");
     assert(pricing.includes("<table"), `${route}: missing plan comparison`);
-    for (const fee of ["NT$0", "NT$199", "NT$399"])
+    for (const fee of ["NT$0", "NT$199", "NT$299", "NT$449", "NT$499"])
       assert(pricing.includes(fee), `${route}: missing price ${fee}`);
+    const cards = [...pricing.matchAll(/<article\b[^>]*>[\s\S]*?<\/article>/g)];
+    const standardCard = cards.find(([card]) => card.includes(">Standard</h2>"))?.[0] ?? "";
+    assert(/<strong\b[^>]*>NT\$199<\/strong>/.test(standardCard) && standardCard.includes("<s>NT$299</s>"),
+      `${route}: Standard must emphasize the introductory price and strike the regular price`);
+    const proCard = cards.find(([card]) => card.includes(">Pro</h2>"))?.[0] ?? "";
+    assert(proCard.includes("NT$499") && proCard.includes(lang === "en" ? "40 hours" : "40 小時"), `${route}: incorrect Pro price or allowance`);
+    assert(/<strong\b[^>]*>NT\$449<\/strong>/.test(proCard) && proCard.includes("<s>NT$499</s>"),
+      `${route}: Pro must emphasize the introductory price and strike the regular price`);
+  } else if (page === "changelog") {
+    const articles = [...html.matchAll(/<article id="release-([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)];
+    const sections = changelogSource.split(/^## (?=\[)/m).slice(1);
+    const versions = [];
+    for (const section of sections) {
+      const [, version, date] = /^\[([^\]]+)\](?: - ([\d-]+))?/.exec(section);
+      const entries = [...section.matchAll(/^- /gm)].length;
+      if (version.toLowerCase() === "unreleased" || !entries) continue;
+      versions.push(version.toLowerCase());
+      const article = articles.find(([, id]) => id === version.toLowerCase())?.[2] ?? "";
+      assert(article, `${route}: missing version ${version}`);
+      assert([...article.matchAll(/<li>/g)].length >= entries, `${route}: incomplete notes for ${version}`);
+      if (date) assert(article.includes(`dateTime="${date}"`), `${route}: incorrect date for ${version}`);
+    }
+    assert.deepEqual(articles.map(([, id]) => id), versions, `${route}: incorrect timeline order`);
   } else {
     for (const section of ["live", "translation", "transcription", "llm"])
       assert(ids.has(section), `${route}: missing model category ${section}`);
   }
   if (lang === "en") {
-    const visible = html
+    // The release document is authored in Traditional Chinese in both locales.
+    const localizedHtml = page === "changelog"
+      ? html.replace(/<div lang="zh-Hant" data-release-notes=""[^>]*>[\s\S]*?<\/div>/g, "")
+      : html;
+    const visible = localizedHtml
       .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/g, "")
       .replace(/<[^>]+>/g, "")
       .replaceAll("繁中", "");

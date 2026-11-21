@@ -21,6 +21,8 @@ pnpm build      # 輸出 out/
 pnpm preview    # 預覽 out/，支援影片 Range 請求
 ```
 
+版本紀錄位於 `/changelog/` 與 `/en/changelog/`。網站建置時直接匯入儲存庫根目錄的 [CHANGELOG.md](../CHANGELOG.md)，保留版本順序，只顯示已發布版本，略過 `[Unreleased]`。部署時建置環境需能讀取 `web/` 的上一層，文件更新後重新建置並部署即可同步。
+
 ## 架構
 
 | 路徑 | 用途 |

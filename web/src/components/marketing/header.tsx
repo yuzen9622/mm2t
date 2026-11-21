@@ -10,7 +10,7 @@ import {
   SheetDescription,
   SheetClose,
 } from "@/components/ui/sheet";
-import { guidePages, sitePath, type GuidePage } from "@/lib/guide";
+import { guidePageKeys, guidePages, sitePath, type GuidePage } from "@/lib/guide";
 import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
@@ -57,7 +57,7 @@ export function Header({ page }: { page?: GuidePage }) {
   const { t, locale } = useCopy();
   const links = [
     ...homeLinks.map(({ href, label }) => ({ label, href: (page ? sitePath(locale) : "") + href })),
-    ...(["models", "pricing"] as const).map((key) => ({
+    ...guidePageKeys.map((key) => ({
       label: guidePages[key].label,
       href: sitePath(locale, key),
     })),

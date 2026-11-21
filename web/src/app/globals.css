@@ -204,6 +204,157 @@
   }
 }
 
+/* Each stop has a major tick; the shorter ticks divide the space between releases. */
+.release-minimap {
+  overflow: auto;
+  scrollbar-width: thin;
+  padding: .25rem;
+}
+.release-minimap ul {
+  display: flex;
+  width: max-content;
+  margin-inline: auto;
+}
+.release-minimap a {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: .375rem;
+}
+.minimap-tick,
+.minimap-tick::after {
+  width: 2px;
+  height: 1.375rem;
+  border-radius: 2px;
+  background: currentColor;
+}
+.minimap-tick {
+  position: relative;
+  color: var(--muted-foreground);
+  transform: scaleY(.55);
+  transition: transform 180ms var(--ease), color 180ms var(--ease);
+}
+.release-minimap li:not(:last-child) .minimap-tick::after {
+  content: "";
+  position: absolute;
+  left: 1.375rem;
+  color: var(--border);
+  transform: scaleY(.65);
+}
+.release-minimap a[aria-current] .minimap-tick {
+  color: var(--primary);
+  transform: scaleY(1);
+}
+.minimap-label {
+  position: absolute;
+  bottom: 0;
+  color: var(--foreground);
+  font: .65rem/1 var(--font-mono);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 150ms var(--ease);
+}
+.release-minimap a:is([aria-current="location"], :hover, :focus-visible) .minimap-label {
+  opacity: 1;
+}
+@media (hover: none) {
+  .release-minimap .minimap-label { opacity: 1; }
+}
+
+@media (min-width: 64rem) {
+  .release-minimap {
+    position: sticky;
+    top: 50dvh;
+    transform: translateY(-50%);
+    max-height: calc(100dvh - 10rem);
+  }
+  .release-minimap ul {
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+  }
+  .release-minimap a { height: 2rem; }
+  .minimap-tick,
+  .minimap-tick::after {
+    width: 1.75rem;
+    height: 2px;
+    transform-origin: left;
+  }
+  .minimap-tick {
+    transform: scaleX(.58);
+  }
+  .release-minimap li:not(:last-child) .minimap-tick::after {
+    left: 0;
+    top: 1rem;
+    transform: scaleX(.55);
+  }
+  .release-minimap a:is(:hover, :focus-visible) .minimap-tick,
+  .release-minimap a[aria-current] .minimap-tick {
+    transform: scaleX(1);
+  }
+  .minimap-label {
+    left: 100%;
+    bottom: auto;
+    font-size: .75rem;
+    transform: translateX(-.25rem);
+    transition: opacity 150ms var(--ease), transform 150ms var(--ease);
+  }
+  .release-minimap a:is([aria-current="location"], :hover, :focus-visible) .minimap-label {
+    transform: translateX(0);
+  }
+}
+
+.changelog-timeline [data-reading] .release-dot {
+  background: var(--primary);
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+  .changelog-timeline {
+    --fade-height: clamp(2rem, 8vh, 4rem);
+    display: flow-root;
+    overflow: clip;
+    overflow-clip-margin: 5px;
+  }
+
+  .changelog-timeline .release-heading {
+    position: sticky;
+    top: 4.5rem;
+    z-index: 2;
+  }
+
+  /* Notes dissolve under their pinned version and enter through the lower edge. */
+  .release-heading::after {
+    content: "";
+    position: absolute;
+    inset: 100% 0 auto;
+    height: 1.25rem;
+    background: linear-gradient(to bottom, var(--background), transparent);
+    pointer-events: none;
+  }
+  .changelog-timeline::after {
+    content: "";
+    display: block;
+    position: sticky;
+    z-index: 1;
+    bottom: 0;
+    height: var(--fade-height);
+    margin-bottom: calc(-1 * var(--fade-height));
+    background: linear-gradient(to top, var(--background), transparent);
+    pointer-events: none;
+  }
+
+  .changelog-timeline [data-reading] .release-progress::before {
+    content: "";
+    display: block;
+    height: 100%;
+    background: var(--primary);
+    transform-origin: left;
+    transform: scaleX(var(--release-progress, 0));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
