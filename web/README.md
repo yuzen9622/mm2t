@@ -38,9 +38,9 @@ pnpm preview    # 預覽 out/，支援影片 Range 請求
 | `src/lib/utils.ts` | shadcn `cn()`，整合 clsx 與 tailwind-merge |
 | `src/components/native-waveform.tsx` | App 的 11 柱對稱波形與示範控制 |
 | `src/hooks/use-motion-scene.ts` | 螢幕尺寸、減少動態偏好、SSR 回退 |
-| `src/components/icon.tsx` | 顯示與 App 相同的 Tabler SVG 原檔 |
+| `src/components/icon.tsx` | 整合 Tabler React 圖示元件 |
 | `src/lib/messages.ts` | 中英共用文案 |
-| `scripts/check-export.mjs` | 兩種語言、素材、頁內錨點、圖示一致性檢查 |
+| `scripts/check-export.mjs` | 兩種語言、素材、頁內錨點、圖示輸出檢查 |
 
 shadcn 採手動安裝方式，元件原始碼位於 `src/components/ui/`；沒有以「安裝 shadcn 套件」替代實際元件。按鈕使用 CVA、Slot 與 Tailwind variants，Dialog／Sheet／Tabs／Accordion 由 Radix 提供鍵盤與焦點行為。`components.json` 可供之後的 shadcn CLI 使用。
 
@@ -48,7 +48,7 @@ shadcn 採手動安裝方式，元件原始碼位於 `src/components/ui/`；沒�
 
 ## 圖示與素材
 
-App 的 `App/MM2T/Design/Icon.swift` 使用內附的 **Tabler（MIT）SVG**。官網直接複用 `App/MM2T/Icons/*.svg` 至 `public/icons/tabler/`，以 CSS mask 顯示原始圖形並繼承文字顏色。沒有手畫 SVG path，也沒有混入 Lucide。檢查會逐檔比對兩邊內容；更新 App 圖示後，也應同步官網副本。授權位於 `public/icons/tabler/LICENSE.txt`。
+官網的共用 `Icon` 元件從 `@tabler/icons-react` 匯入使用到的圖示。新增圖示時，在 `src/components/icon.tsx` 登錄對應元件，頁面即可透過名稱指定圖示，並沿用文字顏色。
 
 頁面上的 App 介面以 HTML 依實際 App 畫面（`public/media/app/`）重建，可在任何尺寸保持清晰；版面與功能對照原畫面，示範內容來自同一場示範會議。`public/media/app/` 的實拍檔保留作為對照與檢查依據。
 

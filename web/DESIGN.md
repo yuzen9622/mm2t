@@ -7,7 +7,7 @@
 - Next.js App Router、React 19、TypeScript、Tailwind CSS 4。
 - shadcn/ui 手動安裝的 Radix 版本：Button、Dialog、Sheet、Tabs、Accordion、Card。
 - Motion 處理共享 layout、scroll progress、轉場與波形；元件自行管理生命週期。
-- Tabler 圖示直接共用 App 內附 SVG，逐檔檢查完全一致。
+- 官網透過 `@tabler/icons-react` 顯示與 App 同系列的圖示。
 - globals.css 僅保留 Tailwind 入口、App 色彩／shadcn tokens、字體和基礎規則。排版、響應式、hover 與元件狀態使用 Tailwind utilities。
 - 原本 public/assets 的獨立動畫 JS/CSS 已移除，沒有額外的 DOM 搬動腳本。
 
@@ -23,6 +23,6 @@
 
 ## 驗證
 
-ESLint、TypeScript、靜態建置、兩個語言的 HTML／錨點／資源／文案，以及 Tabler 與 App 原檔的逐檔比對通過。lockfile 通過 frozen offline 驗證。
+ESLint、TypeScript、靜態建置、兩個語言的 HTML／錨點／資源／文案，以及 Tabler React 圖示輸出檢查通過。lockfile 通過 frozen offline 驗證。
 
 瀏覽器畫面與互動尚未驗證：本執行環境無法連線 localhost:3000，先前截圖工具回報 Chrome did not start。沒有以建置成功宣稱視覺、焦點操作或效能測量通過。
