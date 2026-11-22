@@ -15,7 +15,7 @@ export const h2 =
   "text-[30px] leading-[1.2] font-medium tracking-[-0.02em] lg:text-[48px] lg:leading-[1.12]";
 export const lead = "text-base leading-[1.65] text-muted-foreground lg:text-lg";
 
-export function Brand({ tone = "ink" }: { tone?: "ink" | "stage" }) {
+export function Brand({ tone = "ink", wordmark = false }: { tone?: "ink" | "stage"; wordmark?: boolean }) {
   const { t, locale } = useCopy();
   return (
     <a
@@ -27,7 +27,14 @@ export function Brand({ tone = "ink" }: { tone?: "ink" | "stage" }) {
       aria-label={t("mm2t 首頁")}
     >
       <Image src="/media/icon.png" width={28} height={28} alt="" className="rounded-[7px]" />
-      mm2t
+      {wordmark ? (
+        <Image
+          src={tone === "stage" ? "/media/mm2t-wordmark-light.svg" : "/media/mm2t-wordmark.svg"}
+          width={76}
+          height={20}
+          alt=""
+        />
+      ) : "mm2t"}
     </a>
   );
 }

@@ -15,8 +15,6 @@ import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
 const homeLinks = [
-  { label: "使用流程", href: "#flow" },
-  { label: "四種讀法", href: "#views" },
   { label: "隱私", href: "#privacy" },
   { label: "常見問題", href: "#faq" },
 ];
@@ -56,6 +54,7 @@ function useGroundUnderHeader() {
 export function Header({ page }: { page?: GuidePage }) {
   const { t, locale } = useCopy();
   const links = [
+    { label: "首頁", href: sitePath(locale) },
     ...homeLinks.map(({ href, label }) => ({ label, href: (page ? sitePath(locale) : "") + href })),
     ...guidePageKeys.map((key) => ({
       label: guidePages[key].label,
@@ -80,13 +79,13 @@ export function Header({ page }: { page?: GuidePage }) {
         >
           {t("跳至主要內容")}
         </a>
-        <Brand tone={stage ? "stage" : "ink"} />
+        <Brand tone={stage ? "stage" : "ink"} wordmark />
         <nav className="ml-6 hidden items-center gap-5 lg:flex" aria-label={t("主要導覽")}>
           {links.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              aria-current={page && link.href === sitePath(locale, page) ? "page" : undefined}
+              aria-current={link.href === sitePath(locale, page) ? "page" : undefined}
               className={cn("link-draw inline-flex min-h-11 items-center text-sm aria-[current=page]:font-semibold", quiet)}
             >
               {t(link.label)}
@@ -127,7 +126,7 @@ export function Header({ page }: { page?: GuidePage }) {
               <SheetTitle className="sr-only">{t("網站導覽")}</SheetTitle>
               <SheetDescription className="sr-only">{t("選擇想查看的官網章節。")}</SheetDescription>
               <div className="flex items-center justify-between">
-                <Brand />
+                <Brand wordmark />
                 <SheetClose asChild>
                   <button
                     type="button"
@@ -143,7 +142,7 @@ export function Header({ page }: { page?: GuidePage }) {
                   <a
                     key={link.href}
                     href={link.href}
-                    aria-current={page && link.href === sitePath(locale, page) ? "page" : undefined}
+                    aria-current={link.href === sitePath(locale, page) ? "page" : undefined}
                     onClick={() => setOpen(false)}
                     className="flex min-h-16 items-center text-2xl tracking-[-0.02em]"
                   >

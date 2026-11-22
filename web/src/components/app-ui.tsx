@@ -1,5 +1,6 @@
 "use client";
-import type { CSSProperties, ReactNode } from "react";
+import Image from "next/image";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { useCopy } from "./i18n";
 import { Icon, type IconName } from "./icon";
 import { cn } from "@/lib/utils";
@@ -9,7 +10,6 @@ import {
   people,
   summary,
   transcript,
-  vocabulary,
   voiceprints,
 } from "@/lib/meeting";
 
@@ -19,7 +19,6 @@ import {
  */
 const nav: { icon: IconName; label: string }[] = [
   { icon: "home", label: "首頁" },
-  { icon: "messages", label: "會議" },
   { icon: "users", label: "人物" },
   { icon: "book", label: "詞彙" },
 ];
@@ -32,7 +31,7 @@ export function AppWindow({
   style,
   children,
 }: {
-  active?: string;
+  active?: "會議" | "人物" | "詞彙";
   sidebar?: boolean;
   theme?: "light" | "dark";
   className?: string;
@@ -42,41 +41,62 @@ export function AppWindow({
   const { t } = useCopy();
   return (
     <div
-      className={cn("app-ui app-frame @container flex overflow-hidden rounded-[14px]", className)}
+      className={cn("app-ui app-frame @container flex overflow-hidden rounded-[14px] bg-(--w-bg) text-(--w-text)", className)}
       data-theme={theme}
       data-ui=""
       style={style}
     >
       <aside
         className={cn(
-          "hidden w-[164px] shrink-0 flex-col bg-(--w-side) px-2.5 pt-3.5 pb-3",
+          "m-2 hidden w-[180px] @[900px]:w-[204px] shrink-0 flex-col overflow-hidden rounded-[18px] bg-(--w-panel) px-3 pt-2 pb-3 shadow-[0_2px_10px_#0000000a]",
           sidebar && "@[560px]:flex",
         )}
       >
-        <div className="mb-6 flex gap-2 pl-1.5" aria-hidden="true">
+        <div className="mb-5 flex gap-2 pl-1" aria-hidden="true">
           <i className="size-3 rounded-full bg-[#ff5f57]" />
           <i className="size-3 rounded-full bg-[#febc2e]" />
           <i className="size-3 rounded-full bg-[#28c840]" />
         </div>
-        <ul className="grid gap-1">
+        <div className="mb-4 flex items-center gap-2.5 px-1.5 text-[15px] font-semibold">
+          <Image src="/media/icon.png" width={30} height={30} alt="" /> mm2t
+        </div>
+        <div className="mb-4 flex h-[38px] shrink-0 items-center gap-2 rounded-[11px] bg-(--w-orange) px-3 text-[14px] font-medium text-white">
+          <Icon name="mic" size={16} />{t("開始記錄")}
+        </div>
+        <ul className="grid gap-0.5">
           {nav.map((item) => (
             <li
               key={item.label}
               className={cn(
-                "flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px]",
+                "flex h-9 items-center gap-2.5 rounded-[10px] px-2.5 text-[14px]",
                 active === item.label
-                  ? "bg-(--w-orange-soft) font-medium text-(--w-orange)"
-                  : "text-(--w-text)",
+                  ? "bg-(--w-selected) font-medium text-(--w-text)"
+                  : "text-(--w-secondary)",
               )}
             >
-              <Icon name={item.icon} size={15} />
+              <Icon name={item.icon} size={16} className={active === item.label ? "text-(--w-orange)" : undefined} />
               {t(item.label)}
             </li>
           ))}
         </ul>
-        <div className="mt-auto flex h-8 items-center gap-2.5 px-2.5 text-[13px] text-(--w-text)">
-          <Icon name="settings" size={15} />
-          {t("設定")}
+        <div className="mt-3 min-h-0 flex-1 overflow-hidden text-(--w-secondary)">
+          <div className="flex h-8 items-center gap-2 px-2 text-xs font-medium">
+            <Icon name="chevron" size={11} className="rotate-90" />{t("我的資料夾")}
+            <Icon name="plus" size={14} className="ml-auto" />
+          </div>
+          <div className={cn("flex h-[34px] items-center gap-2 rounded-[10px] px-2 text-sm", active === "會議" && "bg-(--w-selected) font-medium text-(--w-text)")}>
+            <Icon name="chevron" size={10} className={active === "會議" ? "rotate-90" : undefined} />
+            <Icon name="folder" size={16} className={active === "會議" ? "text-(--w-orange)" : undefined} />{t("未分類")}
+          </div>
+          {active === "會議" && (
+            <div className="mt-0.5 ml-5 flex h-7 items-center gap-2 rounded-lg bg-(--w-selected) px-2 text-xs text-(--w-text)">
+              <Icon name="file" size={13} className="text-(--w-orange)" /><span title={t(meetingTitle)} className="truncate">{t(meetingTitle)}</span>
+            </div>
+          )}
+        </div>
+        <div className="mt-3 flex gap-4 px-2 text-(--w-secondary)">
+          <span title={t("設定")}><Icon name="settings" size={16} /></span>
+          <span title={t("說明")}><Icon name="help" size={16} /></span>
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col bg-(--w-bg) text-(--w-text)">
@@ -120,7 +140,7 @@ export function Avatar({
 
 export function MeetingHeader({ tabs }: { tabs: ReactNode }) {
   const { t } = useCopy();
-  const actions: IconName[] = ["play", "pencil", "copy", "upload"];
+  const actions: IconName[] = ["pencil", "sparkles", "copy", "upload"];
   return (
     <div className="px-5 pt-3.5">
       <div className="flex h-8 items-center gap-3">
@@ -135,7 +155,7 @@ export function MeetingHeader({ tabs }: { tabs: ReactNode }) {
           </span>
         </div>
       </div>
-      <div className="mt-3">{tabs}</div>
+      <div className="@container/tabs mt-3">{tabs}</div>
     </div>
   );
 }
@@ -238,49 +258,55 @@ export function TranscriptRows({
   );
 }
 
-function RowList({ rows }: { rows: readonly (readonly [string, string])[] }) {
+function MeetingDocument({ title, sections, completed = [], children }: {
+  title: string;
+  sections: readonly { title: string; rows: readonly string[] }[];
+  completed?: readonly string[];
+  children?: ReactNode;
+}) {
   const { t } = useCopy();
   return (
-    <ul className="grid gap-2">
-      {rows.map(([text, at]) => (
-        <li key={at} className="grid grid-cols-[1fr_auto] gap-6 text-[13px] leading-[1.6]">
-          <span>{t(text)}</span>
-          <time className="font-mono text-[11px] leading-[21px] text-(--w-secondary) tabular-nums">{at}</time>
-        </li>
+    <article className="mx-auto max-w-[720px] space-y-5 px-2 pb-5 text-[16px] leading-[1.55]">
+      <header>
+        <h4 className="text-2xl font-semibold">{t(title)}</h4>
+        <p className="mt-1">{t(meetingTitle)}</p>
+      </header>
+      {sections.map((block) => (
+        <div key={block.title}>
+          <h5 className="mb-1.5 text-xl font-semibold">{t(block.title)}</h5>
+          <ul className="list-disc space-y-1 pl-6">
+            {block.rows.map((row) => <li key={row}>{completed.includes(row) ? <s>✓ {t(row)}</s> : t(row)}</li>)}
+          </ul>
+        </div>
       ))}
-    </ul>
+      {children}
+    </article>
   );
 }
 
 export function SummaryView() {
   const { t } = useCopy();
+  const [completed, setCompleted] = useState<string[]>([]);
   return (
-    <div className="grid gap-3">
-      {summary.map((block) => (
-        <section key={block.title} className="rounded-[14px] bg-(--w-card) px-4 py-3.5">
-          <h4 className="mb-2 text-[12px] font-medium text-(--w-secondary)">{t(block.title)}</h4>
-          <RowList rows={block.rows} />
-        </section>
-      ))}
-    </div>
+    <MeetingDocument title="摘要" sections={summary} completed={completed}>
+      <details className="border-t border-(--w-hairline) pt-3 text-sm">
+        <summary className="cursor-pointer py-2 font-medium">{t("管理待辦事項")}</summary>
+        <ul className="space-y-2 pt-1">
+          {summary.find((block) => block.title === "待辦事項")?.rows.map((task) => (
+            <li key={task}><label className="flex items-start gap-2">
+              <input type="checkbox" className="peer mt-1 accent-(--w-orange)" checked={completed.includes(task)}
+                onChange={(event) => setCompleted(event.target.checked ? [...completed, task] : completed.filter((text) => text !== task))} />
+              <span className="peer-checked:text-(--w-secondary) peer-checked:line-through">{t(task)}</span>
+            </label></li>
+          ))}
+        </ul>
+      </details>
+    </MeetingDocument>
   );
 }
 
 export function BySpeakerView() {
-  const { t } = useCopy();
-  return (
-    <div className="grid gap-3">
-      {bySpeaker.map((rows, who) => (
-        <section key={people[who].name} className="rounded-[14px] bg-(--w-card) px-4 py-3.5">
-          <h4 className="mb-2.5 flex items-center gap-2 text-[14px] font-medium">
-            <Avatar who={who} />
-            {t(people[who].name)}
-          </h4>
-          <RowList rows={rows} />
-        </section>
-      ))}
-    </div>
-  );
+  return <MeetingDocument title="依人彙整" sections={bySpeaker.map((rows, who) => ({ title: people[who].name, rows }))} />;
 }
 
 export function PeopleList() {
@@ -288,67 +314,25 @@ export function PeopleList() {
   return (
     <ul className="grid gap-2.5">
       {voiceprints.map((row) => (
-        <li key={row.who} className="flex items-center gap-3 rounded-[14px] bg-(--w-card) px-4 py-3">
-          <Avatar who={row.who} size={36} />
+        <li key={row.who} className="flex items-center gap-2 overflow-hidden rounded-[14px] bg-(--w-card) p-3 shadow-[0_2px_8px_#00000009] @sm:gap-3 @sm:p-4">
+          <Image src={`/media/people/sigil-${row.who}.webp`} width={48} height={48} alt="" className="shrink-0" />
           <div className="min-w-0">
-            <p className="text-[14px] font-medium">{t(people[row.who].name)}</p>
-            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-(--w-secondary)">
-              {t(`${row.count} 個聲紋`)}
+            <p className="text-sm font-medium">{t(people[row.who].name)}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--w-secondary)">
+              <span>{t(`${row.count} 個聲紋`)}</span>
               {row.tags.map((tag) => (
-                <span key={tag} className="rounded-md bg-(--w-orange-soft) px-1.5 py-px font-medium text-(--w-orange)">
-                  {t(tag)}
-                </span>
+                <span key={tag} className="rounded-full bg-(--w-orange-soft) px-2 py-px text-(--w-orange)">{t(tag)}</span>
               ))}
-            </p>
+            </div>
           </div>
-          <span className="ml-auto flex gap-4 text-(--w-text)">
-            <Icon name="pencil" size={15} />
-            <Icon name="trash" size={15} />
+          <div className="@container relative flex-1 self-stretch" aria-hidden="true">
+            <Image src={`/media/people/watermark-${row.who}.webp`} width={180} height={140} alt="" className="absolute top-1/2 right-0 hidden h-[140px] w-[180px] max-w-none -translate-y-1/2 @[160px]:block" />
+          </div>
+          <span className="flex shrink-0 items-center gap-3 text-(--w-secondary)">
+            <Icon name="pencil" size={15} /><Icon name="trash" size={15} />
           </span>
         </li>
       ))}
     </ul>
-  );
-}
-
-export function VocabularyView() {
-  const { t } = useCopy();
-  const auto = vocabulary.filter((word) => word.auto).length;
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <h3 className="text-[18px] font-semibold">{t("詞彙")}</h3>
-        <div className="ml-auto flex rounded-[10px] bg-(--w-tonal) p-0.5 text-[12px]">
-          <span className="rounded-lg bg-(--w-card) px-2.5 py-1 font-medium shadow-[0_1px_2px_#0000000f]">
-            {t("全部")} {vocabulary.length}
-          </span>
-          <span className="px-2.5 py-1 text-(--w-secondary)">
-            {t("自動新增")} {auto}
-          </span>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="flex h-9 min-w-0 flex-1 items-center rounded-[10px] bg-(--w-field) px-3 text-[13px]">
-          {t("新品發表會")}
-          <i className="ml-px h-4 w-px bg-[#2f6fe4]" aria-hidden="true" />
-        </span>
-        <span className="flex h-9 items-center gap-1.5 rounded-full bg-(--w-orange) px-3.5 text-[13px] font-medium text-white">
-          <Icon name="plus" size={13} />
-          {t("新增")}
-        </span>
-      </div>
-      <ul className="flex flex-wrap gap-2">
-        {vocabulary.map((word) => (
-          <li
-            key={word.term}
-            className="flex h-8 items-center gap-1.5 rounded-full bg-(--w-card) px-3 text-[13px] ring-1 ring-(--w-hairline)"
-          >
-            {word.auto && <Icon name="sparkles" size={12} className="text-(--w-orange)" />}
-            {t(word.term)}
-            <Icon name="close" size={11} className="text-(--w-muted)" />
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

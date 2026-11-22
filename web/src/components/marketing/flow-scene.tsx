@@ -187,7 +187,7 @@ function Stage({ p }: { p: MotionValue<number> }) {
 
   const pull = useTransform(p, (v) => span(v, PULL));
   // Zoom origin chosen so the left edge of the visible region lands just right of the sidebar.
-  const originX = box ? (ZOOM * 176) / (ZOOM - 1) : 0;
+  const originX = box ? (ZOOM * 208) / (ZOOM - 1) : 0;
   const originY = 150;
   const scale = useTransform(pull, (f) => ZOOM + (1 - ZOOM) * f);
   const windowClip = useTransform(pull, (f) => {

@@ -107,7 +107,8 @@
 /* The rebuilt App: Palette from App/MM2T/Design/Tokens.swift, light and dark. */
 .app-ui {
   --w-bg: #f6f5f1;
-  --w-side: #eeede8;
+  --w-panel: #fff;
+  --w-selected: #0000000f;
   --w-card: #ffffff;
   --w-field: #edece7;
   --w-tonal: #0000000b;
@@ -124,7 +125,8 @@
 }
 .app-ui[data-theme="dark"] {
   --w-bg: #1b1b1d;
-  --w-side: #151516;
+  --w-panel: #222224;
+  --w-selected: #ffffff17;
   --w-card: #262628;
   --w-field: #303033;
   --w-tonal: #ffffff0f;

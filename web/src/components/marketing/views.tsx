@@ -18,7 +18,7 @@ export function Views() {
   const { t } = useCopy();
   const [tab, setTab] = useState<string>("摘要");
   return (
-    <section id="views" aria-labelledby="views-title" className={screen}>
+    <section id="views" aria-labelledby="views-title" className={cn(screen, "h-svh min-h-[640px]")}>
       <div className={cn(wrap, "flex h-full flex-col")}>
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-6">
           <h2 id="views-title" className={cn(h2, "lg:col-span-6")}>
@@ -29,18 +29,18 @@ export function Views() {
           </p>
         </div>
         <Tabs.Root value={tab} onValueChange={setTab} className="mt-8 min-h-0 flex-1 lg:mt-10">
-          <AppWindow className="lg:h-full">
+          <AppWindow className="h-full">
             <MeetingHeader
               tabs={
                 <Tabs.List
                   aria-label={t("選擇會議紀錄格式")}
-                  className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-[10px] bg-(--w-tonal) p-0.5"
+                  className="grid max-w-full grid-cols-2 gap-0.5 rounded-[10px] bg-(--w-tonal) p-0.5 @[440px]/tabs:inline-flex"
                 >
                   {viewTabs.map((item) => (
                     <Tabs.Trigger
                       key={item}
                       value={item}
-                      className="min-h-9 rounded-lg px-3.5 text-[13px] whitespace-nowrap text-(--w-secondary) transition-colors duration-150 hover:text-(--w-text) data-[state=active]:bg-(--w-card) data-[state=active]:font-medium data-[state=active]:text-(--w-text) data-[state=active]:shadow-[0_1px_2px_#0000000f]"
+                      className="min-h-11 rounded-lg px-1 text-xs @[440px]/tabs:min-h-9 @[440px]/tabs:px-3.5 @[440px]/tabs:text-[13px] text-(--w-secondary) transition-colors duration-150 hover:text-(--w-text) data-[state=active]:bg-(--w-card) data-[state=active]:font-medium data-[state=active]:text-(--w-text) data-[state=active]:shadow-[0_1px_2px_#0000000f]"
                     >
                       {t(item)}
                     </Tabs.Trigger>
@@ -48,8 +48,8 @@ export function Views() {
                 </Tabs.List>
               }
             />
-            <div className="relative flex min-h-0 flex-1 gap-4 px-5 pt-5 pb-5 lg:overflow-hidden lg:pb-0">
-              <div className="min-w-0 flex-1">
+            <div className="flex min-h-0 flex-1 gap-4 px-5 pt-4 pb-5">
+              <div className="min-w-0 flex-1 overflow-y-auto">
                 <Tabs.Content value="逐字稿" className="outline-none">
                   <TranscriptRows mode="raw" />
                 </Tabs.Content>
@@ -59,16 +59,11 @@ export function Views() {
                 <Tabs.Content value="依人彙整" className="outline-none">
                   <BySpeakerView />
                 </Tabs.Content>
-                <Tabs.Content value="摘要" className="outline-none">
+                <Tabs.Content forceMount value="摘要" className="outline-none data-[state=inactive]:hidden">
                   <SummaryView />
                 </Tabs.Content>
               </div>
               <SpeakerPanel />
-              {/* The window's own color fading out the last rows, as the App does at a scroll edge. */}
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-16 bg-linear-to-t from-(--w-bg) to-transparent lg:block"
-              />
             </div>
           </AppWindow>
         </Tabs.Root>

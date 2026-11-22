@@ -98,8 +98,6 @@ export const english: Record<string, string> = {
   // Header and navigation
   跳至主要內容: "Skip to content",
   主要導覽: "Main navigation",
-  使用流程: "How it works",
-  四種讀法: "Four views",
   隱私: "Privacy",
   常見問題: "FAQ",
   "mm2t 首頁": "mm2t home",
@@ -161,8 +159,8 @@ export const english: Record<string, string> = {
 
   // Memory
   記住常見的與會者和團隊用語: "Remembers your regulars and your team's words",
-  "同一個人在會議室和線上通話各存一份聲紋。會議中聽到的專有名詞，以及你改過的字，會自動加進詞彙庫。":
-    "Each person keeps one voiceprint for the meeting room and one for calls. Names heard in meetings, and words you correct, join your vocabulary on their own.",
+  "人物卡會標出聲紋來自現場或線上通話。儲存逐字稿修正後，mm2t 會學習你改過的人名與術語，也可以手動新增詞彙。":
+    "People cards show whether a voiceprint came from the room or a call. Save a transcript correction to teach mm2t names and terms, or add them to your vocabulary by hand.",
 
   // Privacy
   隱私與資料: "Privacy and your data",
@@ -216,16 +214,33 @@ export const english: Record<string, string> = {
   詞彙: "Vocabulary",
   設定: "Settings",
   逐字稿: "Transcript",
-  整理版逐字稿: "Clean transcript",
-  依人彙整: "By speaker",
+  整理版逐字稿: "Cleaned transcript",
+  依人彙整: "By person",
   摘要: "Summary",
   說話者: "Speaker",
   全部: "All",
-  自動新增: "Auto-added",
-  新品發表會: "Launch event",
+  開始記錄: "Start Recording",
+  我的資料夾: "My Folders",
+  未分類: "Unfiled",
+  說明: "Help",
+  管理待辦事項: "Manage action items",
+  來源: "Source",
+  新增詞彙: "Add terms",
+  從修正學習: "Learned from corrections",
+  手動新增: "Manually added",
+  全選搜尋結果: "Select all results",
+  取消選取: "Deselect all",
+  刪除: "Delete",
+  儲存: "Save",
+  取消: "Cancel",
+  編輯詞彙: "Edit term",
+  "刪除選取的詞彙？": "Delete selected terms?",
+  沒有符合的結果: "No results",
+  "以逗號或換行分隔，一次新增多個詞彙。": "Separate terms with commas or new lines.",
+  "儲存逐字稿修正後，mm2t 會將修正的人名和術語加入詞彙庫。": "When you save a transcript correction, mm2t automatically adds the names and terms you corrected to your vocabulary.",
   新增: "Add",
-  會議室現場: "In person",
-  線上通話: "Online call",
+  現場: "In the room",
+  線上通話: "On calls",
   "1 個聲紋": "1 voiceprint",
   "2 個聲紋": "2 voiceprints",
   "3 個聲紋": "3 voiceprints",
@@ -272,7 +287,7 @@ export const english: Record<string, string> = {
   "建議贈品成本控制在 50 元以內，可洽談盲盒廠商合作。":
     "Suggested keeping each gift under 50 dollars and talking to blind-box makers.",
   決議: "Decisions",
-  討論重點: "Discussion",
+  討論重點: "Discussion points",
   待辦事項: "Action items",
   "目標客群鎖定為 18 至 45 歲的中青年與年輕族群，產品設計主推年輕化。":
     "Target buyers aged 18 to 45, with a design aimed at younger buyers.",
