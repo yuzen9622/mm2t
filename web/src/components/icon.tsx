@@ -1,41 +1,79 @@
+import {
+  IconBook2,
+  IconBrandGithub,
+  IconCalendarEvent,
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCopy,
+  IconDots,
+  IconDownload,
+  IconExternalLink,
+  IconFileText,
+  IconFolder,
+  IconHelpCircle,
+  IconHome,
+  IconInfoCircle,
+  IconKey,
+  IconMessages,
+  IconMicrophone,
+  IconPencil,
+  IconPlayerPauseFilled,
+  IconPlayerPlay,
+  IconPlayerPlayFilled,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+  IconShieldCheck,
+  IconSparkles,
+  IconStar,
+  IconTrash,
+  IconUpload,
+  IconUsers,
+  IconVideo,
+  IconX,
+} from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 
-/** These are the exact Tabler SVG files bundled by the macOS app, not redrawn paths. */
 const icons = {
-  arrow: "chevron-right",
-  diagonal: "external-link",
-  play: "player-play",
-  pause: "player-pause-filled",
-  download: "download",
-  mic: "microphone",
-  file: "file-text",
-  users: "users",
-  home: "home",
-  settings: "settings",
-  book: "book-2",
-  check: "check",
-  chevron: "chevron-right",
-  close: "x",
-  shield: "shield-check",
-  lock: "key",
-  laptop: "settings",
-  cloud: "upload",
-  sparkles: "sparkles",
-  calendar: "calendar-event",
-  github: "brand-github",
-  star: "star",
-  menu: "dots",
-  messages: "messages",
-  pencil: "pencil",
-  copy: "copy",
-  upload: "upload",
-  trash: "trash",
-  plus: "plus",
-  back: "chevron-left",
-  playFilled: "player-play-filled",
-  key: "key",
-  video: "video",
+  arrow: IconChevronRight,
+  diagonal: IconExternalLink,
+  play: IconPlayerPlay,
+  pause: IconPlayerPauseFilled,
+  download: IconDownload,
+  mic: IconMicrophone,
+  file: IconFileText,
+  users: IconUsers,
+  home: IconHome,
+  settings: IconSettings,
+  book: IconBook2,
+  check: IconCheck,
+  chevron: IconChevronRight,
+  close: IconX,
+  shield: IconShieldCheck,
+  lock: IconKey,
+  laptop: IconSettings,
+  cloud: IconUpload,
+  sparkles: IconSparkles,
+  calendar: IconCalendarEvent,
+  github: IconBrandGithub,
+  star: IconStar,
+  menu: IconDots,
+  messages: IconMessages,
+  folder: IconFolder,
+  help: IconHelpCircle,
+  info: IconInfoCircle,
+  search: IconSearch,
+  pencil: IconPencil,
+  copy: IconCopy,
+  upload: IconUpload,
+  trash: IconTrash,
+  plus: IconPlus,
+  back: IconChevronLeft,
+  playFilled: IconPlayerPlayFilled,
+  key: IconKey,
+  video: IconVideo,
 } as const;
 export type IconName = keyof typeof icons;
 export function Icon({
@@ -49,22 +87,14 @@ export function Icon({
   className?: string;
   style?: CSSProperties;
 }) {
-  const url = `url('/icons/tabler/${icons[name]}.svg')`;
+  const Glyph = icons[name];
   return (
-    <span
+    <Glyph
       aria-hidden="true"
-      data-icon={icons[name]}
-      className={cn("inline-block shrink-0 bg-current", className)}
-      style={{
-        width: size,
-        height: size,
-        maskImage: url,
-        WebkitMaskImage: url,
-        maskSize: "contain",
-        maskRepeat: "no-repeat",
-        maskPosition: "center",
-        ...style,
-      }}
+      focusable="false"
+      size={size}
+      className={cn("inline-block shrink-0", className)}
+      style={style}
     />
   );
 }

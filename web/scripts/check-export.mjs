@@ -18,6 +18,8 @@ for (const [route, lang] of [
   ["en/changelog/index.html", "en"],
 ]) {
   const html = fs.readFileSync(path.join(root, route), "utf8");
+  assert.match(html, /<svg\b[^>]*\btabler-icon\b/, `${route}: missing Tabler React icons`);
+  assert(!html.includes("/icons/tabler/"), `${route}: references a legacy icon file`);
   const ids = new Set(
     [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]),
   );
@@ -181,19 +183,6 @@ for (const prefix of ["media/app", "media/en/app"]) {
     );
   }
 }
-// Icons must stay byte-for-byte identical to the native app's Tabler library.
-const appIcons = fileURLToPath(
-  new URL("../../App/MM2T/Icons/", import.meta.url),
-);
-for (const icon of fs
-  .readdirSync(path.join(root, "icons/tabler"))
-  .filter((file) => file.endsWith(".svg"))) {
-  assert.equal(
-    fs.readFileSync(path.join(root, "icons/tabler", icon), "utf8"),
-    fs.readFileSync(path.join(appIcons, icon), "utf8"),
-    `Icon drifted from App: ${icon}`,
-  );
-}
 assert(
   !fs.existsSync(path.join(root, "assets/moments")),
   "Legacy browser animation scripts remain in the export",
@@ -203,5 +192,5 @@ assert(
   "Legacy scene scripts remain in the export",
 );
 console.log(
-  "Translation coverage, real App captures, native Tabler icon parity, and React-only animations passed.",
+  "Translation coverage, real App captures, Tabler React icons, and React-only animations passed.",
 );
