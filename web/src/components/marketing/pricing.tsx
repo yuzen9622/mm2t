@@ -6,17 +6,17 @@ import { cn } from "@/lib/utils";
 import { wrap } from "./shared";
 
 const plans = [
-  { name: "Free", fee: 0, firstMonthFee: null, minutes: 120, ai: 30,
+  { name: "Free", storedMeetings: null, fee: 0, firstMonthFee: null, minutes: 120, sessionMinutes: 30, ai: 30,
     headline: "偶爾開會，會後整理重點",
     features: ["基礎模型轉錄，逐字稿標示每位說話者", "回放原音核對細節", "從會議摘要找回決議"],
   },
-  { name: "Standard", fee: 299, firstMonthFee: 199, minutes: 900, ai: "unlimited",
+  { name: "Standard", storedMeetings: 200, fee: 299, firstMonthFee: 199, minutes: 900, sessionMinutes: 120, ai: "unlimited",
     headline: "每週例會，開會當下就跟上討論",
-    features: ["進階模型提供更好的轉錄品質", "邊聽邊看即時字幕", "用即時翻譯跟上外語發言", "會後不限次數向 AI 追問"],
+    features: ["進階模型提供更好的轉錄品質", "更快的轉錄速度", "邊聽邊看即時字幕", "用即時翻譯跟上外語發言", "會後不限次數向 AI 追問"],
   },
-  { name: "Pro", fee: 499, firstMonthFee: 449, minutes: 2400, ai: "unlimited",
+  { name: "Pro", storedMeetings: 1000, fee: 499, firstMonthFee: 449, minutes: 2400, sessionMinutes: 200, ai: "unlimited",
     headline: "長時間訪談，留足整月的處理時數",
-    features: ["使用與 Standard 相同的進階轉錄模型", "包含 Standard 的所有即時功能", "會後不限次數改寫訪談紀錄"],
+    features: ["使用與 Standard 相同的進階轉錄模型", "更快的轉錄速度", "包含 Standard 的所有即時功能", "會後不限次數改寫訪談紀錄"],
   },
 ] as const;
 type Plan = (typeof plans)[number];
@@ -50,7 +50,18 @@ function GroupTitle({ children }: { children: ReactNode }) {
 export function Pricing() {
   const { t } = useCopy();
   const minutes = (plan: Plan) => plan.minutes + " " + t("分鐘");
+  const comparisonDuration = (totalMinutes: number) => {
+    if (totalMinutes % 30 === 0) return `${totalMinutes / 60} ${t("小時")}`;
+    const hours = Math.floor(totalMinutes / 60);
+    const remainder = `${totalMinutes % 60} ${t("分鐘")}`;
+    return hours ? `${hours} ${t("小時")} ${remainder}` : remainder;
+  };
+  const sessionLimit = (plan: Plan) => plan.sessionMinutes + " " + t("分鐘");
   const aiQuota = (plan: Plan) => plan.ai === "unlimited" ? t("無限") : plan.ai + " " + t("次");
+
+  const storedMeetings = (plan: Plan) => plan.storedMeetings === null
+    ? "—"
+    : plan.storedMeetings.toLocaleString("en-US") + " " + t("場");
 
   const sharedAi = (plan: Plan) => (
     <>{aiQuota(plan)}{plan.ai !== "unlimited" && <small className="mt-1 block text-stage-muted">{t("每月共用")}</small>}</>
@@ -97,8 +108,12 @@ export function Pricing() {
                 <dl className="mt-auto grid gap-3 border-t border-white/20 pt-5 text-sm">
                   <div><dt className="text-stage-muted">{t("雲端會議處理")}</dt>
                     <dd className="mt-1"><span className="text-xl font-medium">{plan.minutes / 60} {t("小時")}</span> ({minutes(plan)})</dd></div>
+                  <div><dt className="text-stage-muted">{t("單次轉錄時限")}</dt>
+                    <dd className="mt-1">{sessionLimit(plan)}</dd></div>
                   <div><dt className="text-stage-muted">{t("AI 使用額度")}</dt>
                     <dd className="mt-1">{aiQuota(plan)}</dd></div>
+                  {plan.storedMeetings !== null && <div><dt className="text-stage-muted">{t("雲端可保存會議數")}</dt>
+                    <dd className="mt-1">{storedMeetings(plan)}</dd></div>}
                 </dl>
               </div>
             </article>
@@ -106,7 +121,7 @@ export function Pricing() {
         </section>
         <section className="mt-12 md:mt-16" aria-labelledby="features">
           <h2 id="features" className="mb-5 text-2xl font-medium tracking-tight md:text-3xl">{t("各方案功能對照")}</h2>
-          <p className="mb-5 text-sm text-stage-muted">{t("Free 的單場 AI 助理與跨場會議整理合計每月可用 30 次。")}{" "}
+          <p className="mb-5 text-sm text-stage-muted">{t("Free 方案的 AI 功能每月共用 30 次額度。")}{" "}
             <a className="underline underline-offset-4 hover:text-stage-ink" href="#own-key">{t("自備金鑰可使用全部功能")}</a>
           </p>
           <table className="w-full table-fixed border-separate border-spacing-0 text-center text-xs sm:text-sm">
@@ -124,28 +139,27 @@ export function Pricing() {
               </tr>
             </thead>
             <tbody>
-              <GroupTitle>{t("每月雲端額度")}</GroupTitle>
-              <FeatureRow label="雲端會議處理" value={minutes} />
-              <FeatureRow label="AI 使用額度" value={aiQuota} />
+              <GroupTitle>{t("雲端額度")}</GroupTitle>
+              <FeatureRow label="每月雲端會議處理" value={plan => comparisonDuration(plan.minutes)} />
+              <FeatureRow label="每月 AI 使用額度" value={aiQuota} />
+              <FeatureRow label="雲端可保存會議數" value={storedMeetings} />
             </tbody>
             <tbody>
-              <GroupTitle>{t("轉錄品質與即時功能")}</GroupTitle>
+              <GroupTitle>{t("轉錄模型與時限")}</GroupTitle>
+              <FeatureRow label="單次轉錄時限" value={sessionLimit} />
               <FeatureRow label="轉錄模型" value={plan => t(plan.name === "Free" ? "基礎模型" : "進階模型")} />
-              {["即時字幕", "即時轉錄", "即時翻譯"].map(label => <FeatureRow key={label} label={label} value={plan => plan.name !== "Free"} />)}
             </tbody>
             <tbody>
-              <GroupTitle>{t("跨場會議整理")}</GroupTitle>
-              <FeatureRow label="向 AI 查詢多場會議的決議" value={sharedAi} />
-              <FeatureRow label="由 AI 建議會議資料夾分類" value={sharedAi} />
+              <GroupTitle>{t("單場會議 AI 助理")}</GroupTitle>
+              <FeatureRow label="AI 提問" value={sharedAi} />
+              <FeatureRow label="AI 改寫" value={sharedAi} />
             </tbody>
             <tbody>
               <GroupTitle>{t("錄音與會後整理")}</GroupTitle>
               {["錄音", "會後逐字稿", "說話者辨識", "摘要", "待辦事項", "回放", "匯出"].map(label => <FeatureRow key={label} label={label} value={() => true} />)}
             </tbody>
             <tbody>
-              <GroupTitle>{t("單場會議 AI 助理")}</GroupTitle>
-              <FeatureRow label="AI 提問" value={sharedAi} />
-              <FeatureRow label="AI 改寫" value={sharedAi} />
+              {["更快的轉錄速度", "即時字幕", "即時轉錄", "即時翻譯"].map(label => <FeatureRow key={label} label={label} value={plan => plan.name !== "Free"} />)}
             </tbody>
           </table>
         </section>
