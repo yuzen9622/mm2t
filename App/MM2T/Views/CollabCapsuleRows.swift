@@ -141,6 +141,7 @@ private extension CollabSession.Failure {
     var message: String {
         switch self {
         case .service(let error): error.collabMessage
+        case .provider(let error): error.description
         case .modelNotConfigured: String(localized: "Set up a language model in Settings.")
         case .generation: String(localized: "Couldn’t finish building the component.")
         }

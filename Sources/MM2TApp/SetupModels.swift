@@ -208,6 +208,11 @@ public final class SetupModel {
     @ObservationIgnored private let translationInstaller: @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let runningBrowsers: @MainActor () -> [String]
+    @ObservationIgnored private let validator: any KeyValidating
+    @ObservationIgnored private let hostedChecks: @MainActor () -> [HostedPlanJob: KeyValidation]
+    @ObservationIgnored private var hostedRequests: [HostedPlanJob: KeyValidation] = [:]
+    @ObservationIgnored private var hostedTask: Task<Void, Never>?
+    private var hostedIssues: [SetupIssue] = []
     @ObservationIgnored private let checkSetup: @MainActor () -> [SetupIssue]
 
     public init(
@@ -221,6 +226,7 @@ public final class SetupModel {
         settings: SettingsStore,
         runningBrowsers: @escaping @MainActor () -> [String],
         prepareCoreML: @escaping @MainActor () async throws -> Void = {},
+        hostedChecks: @escaping @MainActor () -> [HostedPlanJob: KeyValidation] = { [:] },
         checkSetup: @escaping @MainActor () -> [SetupIssue]
     ) {
         self.settings = settings
@@ -233,6 +239,8 @@ public final class SetupModel {
         self.suitability = suitability
         self.runningBrowsers = runningBrowsers
         self.prepareCoreML = prepareCoreML
+        self.validator = validator
+        self.hostedChecks = hostedChecks
         self.checkSetup = checkSetup
         fields = [Credential.elevenLabsAPIKey, .geminiAPIKey, .selfHostedToken, .openAICompatibleAPIKey].map {
             CredentialField(credential: $0, store: credentials, validator: validator,
@@ -264,7 +272,7 @@ public final class SetupModel {
             }
         }
         refreshTranslation()
-        issues = checkSetup()
+        recheck()
     }
 
     /// Cheap enough to poll while a permissions list is on screen: the user flips these switches in
@@ -304,7 +312,7 @@ public final class SetupModel {
         } catch {
             models = .failed(String(describing: error))
         }
-        issues = checkSetup()
+        updateIssues()
     }
 
     /// After an update that changed a speaker model, fetches it when the rest was already set up,
@@ -361,7 +369,7 @@ public final class SetupModel {
         } catch {
             offlineModels[model] = .failed(String(describing: error))
         }
-        issues = checkSetup()
+        updateIssues()
     }
 
     public func prepareInstalledCoreML() async {
@@ -438,8 +446,35 @@ public final class SetupModel {
 
     /// Re-checks what processing still needs after the user changed keys or settings.
     public func recheck() {
-        issues = checkSetup()
+        let requests = hostedChecks()
+        if requests != hostedRequests {
+            hostedTask?.cancel()
+            hostedTask = nil
+            hostedRequests = requests
+            hostedIssues = []
+        }
+        updateIssues()
+        guard !requests.isEmpty, hostedTask == nil else { return }
+        hostedTask = Task { [weak self, validator] in
+            var results: [SetupIssue] = []
+            for job in HostedPlanJob.allCases {
+                guard let request = requests[job] else { continue }
+                let result = await validator.validate(request)
+                guard !Task.isCancelled else { return }
+                switch result {
+                case .valid: break
+                case .rejected(let message), .inconclusive(let message): results.append(.hostedPlanCheck(job, message))
+                }
+            }
+            self?.hostedTask = nil
+            self?.hostedIssues = results
+            self?.updateIssues()
+        }
     }
+
+    func waitForHostedChecks() async { await hostedTask?.value }
+
+    private func updateIssues() { issues = checkSetup() + hostedIssues }
 
     public static func openSettings(_ pane: SettingsPane) {
         NSWorkspace.shared.open(pane.url)

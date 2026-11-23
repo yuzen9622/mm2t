@@ -110,7 +110,7 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
             var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 30))
             request.httpMethod = "GET"
             var response = try await session.send(request, for: service)
-            if response.status == 404 || response.status == 405 {
+            if service != .mm2tPlan, response.status == 404 || response.status == 405 {
                 let body = Self.object([
                     ("model", JSON.text(model).serialized()),
                     ("messages", JSON.list([Self.message("user", "ping")]).serialized()),

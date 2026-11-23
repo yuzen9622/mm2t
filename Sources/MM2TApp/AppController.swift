@@ -251,6 +251,7 @@ public final class AppController {
                 }
                 try await engine.prepare()
             },
+            hostedChecks: { pipelineSetup.hostedChecks(settings.settings, accountURL: accountURL) },
             checkSetup: {
                 switch (try? pipelineSetup.build(settings.settings, accountURL: accountURL)) {
                 case .needsSetup(let issues): issues

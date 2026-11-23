@@ -16,7 +16,7 @@ import Testing
                 let events = parser.append(Data(data.prefix(split))) + parser.append(Data(data.dropFirst(split)))
                 var text = ""
                 for event in events {
-                    if case .text(let delta) = try TextStreaming.decode(event, format: format) { text += delta }
+                    if case .text(let delta) = try TextStreaming.decode(event, format: format, service: format == .gemini ? .gemini : .openAICompatible) { text += delta }
                 }
                 #expect(text == "你好世界")
             }
@@ -69,12 +69,23 @@ import Testing
         #expect(server.requests.count == 1)
     }
 
+    @Test(arguments: ["not JSON", #"{"error":"bad event"}"#, #"{"choices":[{"delta":{"refusal":"No"}}]}"#])
+    func hostedStreamingFailuresNameThePlan(event: String) async throws {
+        let server = StubServer(status: 200, body: "data: \(event)\n\n")
+        let provider = OpenAICompatibleLLM(baseURL: URL(string: "https://example.test/v1/hosted/llm")!,
+                                           apiKey: "test", model: "mm2t", session: server.session, hostedPlan: true)
+        let kind: ProviderError.Kind = event.contains("refusal") ? .blocked : .malformedResponse
+        await #expect(throws: ProviderError(.mm2tPlan, kind)) {
+            for try await _ in provider.streamText(system: "", input: "") {}
+        }
+    }
+
     @Test func rejectsBlockedAndTruncatedChunks() throws {
         #expect(throws: (any Error).self) {
-            try TextStreaming.decode(#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#, format: .gemini)
+            try TextStreaming.decode(#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#, format: .gemini, service: .gemini)
         }
         #expect(throws: (any Error).self) {
-            try TextStreaming.decode(#"{"choices":[{"delta":{"refusal":"No"}}]}"#, format: .openAI)
+            try TextStreaming.decode(#"{"choices":[{"delta":{"refusal":"No"}}]}"#, format: .openAI, service: .openAICompatible)
         }
     }
 

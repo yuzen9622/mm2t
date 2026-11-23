@@ -15,7 +15,7 @@ public final class CollabSession {
     }
 
     public enum Failure: Equatable {
-        case service(CollabError), modelNotConfigured, generation
+        case service(CollabError), provider(ProviderError), modelNotConfigured, generation
     }
 
     private struct Command: Sendable {
@@ -417,6 +417,7 @@ public final class CollabSession {
         if !preservingPendingCommand { pendingCommand = nil }
         let failure: Failure
         if let error = error as? CollabError { failure = .service(error) }
+        else if let error = error as? ProviderError { failure = .provider(error) }
         else if case CollabModelWork.Failure.modelNotConfigured = error { failure = .modelNotConfigured }
         else { failure = .generation }
         commandStatus = .failed(failure)

@@ -76,6 +76,7 @@ enum Copy {
         case .summaryServiceNotConfigured(.gemini): String(localized: "Add your Gemini API key.")
         case .transcriptionServiceNotConfigured(.server): String(localized: "Set up your transcription server.")
         case .summaryServiceNotConfigured(.openAICompatible): String(localized: "Set the OpenAI-compatible server URL and model name.")
+        case .hostedPlanCheck(_, let message): message
         case .diarizationModelsMissing: String(localized: "Download the speaker separation model.")
         }
     }

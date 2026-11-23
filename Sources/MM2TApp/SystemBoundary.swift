@@ -195,6 +195,8 @@ public final class LiveProviderCatalog: ProviderCatalog {
 
 /// One "verify" press; the self-hosted token can only be checked against a configured server.
 public enum KeyValidation: Hashable, Sendable {
+    case hostedTranscription(url: URL, token: Secret)
+    case hostedSummaries(url: URL, token: Secret)
     case elevenLabs(Secret)
     case gemini(Secret)
     case selfHosted(url: URL, token: Secret)
@@ -207,9 +209,15 @@ public protocol KeyValidating: Sendable {
 }
 
 public struct LiveKeyValidator: KeyValidating {
-    public init() {}
+    private let session: URLSession
+
+    public init(session: URLSession = .shared) { self.session = session }
     public func validate(_ request: KeyValidation) async -> KeyCheck {
         switch request {
+        case .hostedTranscription(let url, let token):
+            await SelfHostedTranscription(baseURL: url, token: token, session: session, hostedPlan: true).validateKey()
+        case .hostedSummaries(let url, let token):
+            await OpenAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t", session: session, hostedPlan: true).validateKey()
         case .elevenLabs(let key): await ElevenLabsScribe(apiKey: key).validateKey()
         case .gemini(let key): await GeminiLLM(apiKey: key).validateKey()
         case .selfHosted(let url, let token): await SelfHostedTranscription(baseURL: url, token: token).validateKey()

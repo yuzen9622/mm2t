@@ -714,6 +714,18 @@ import Testing
         }
     }
 
+    @Test func foregroundGenerationExposesTheHostedPlanQuotaError() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let error = ProviderError(.mm2tPlan, .outOfCredit)
+        f.llm.answerChunks.set([])
+        f.llm.providerStreamError.set(error)
+        f.session.run(command: "新增結論")
+        await f.session.waitForWork()
+        #expect(f.session.commandStatus == .failed(.provider(error)))
+        #expect(error.description == "Your mm2t plan has no minutes left this month.")
+    }
+
     @Test func retryResumesTheForegroundCommandAfterARejectedBackgroundReplay() async throws {
         let f = try await Fixture()
         try await f.makeRoom()

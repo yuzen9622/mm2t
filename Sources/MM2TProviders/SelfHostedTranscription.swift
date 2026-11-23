@@ -76,13 +76,13 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: probeTimeout))
             request.httpMethod = "GET"
             let response = try await session.send(request, for: service)
-            if response.status == 401 {
+            if response.status == 401 && service != .mm2tPlan {
                 return .rejected(token == nil
                     ? String(localized: "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.", bundle: .main)
                     : ProviderError(service, .invalidCredential).description)
             }
             if (200..<300).contains(response.status) || response.status == 405 { return .valid }
-            return .from(ProviderError(service, Self.failure(response)))
+            return .from(ProviderError(service, service == .mm2tPlan ? response.commonFailure : Self.failure(response)))
         } catch let error as ProviderError {
             if error.kind == .unreachable { return .inconclusive(transcriptionError(error).description) }
             return .from(error)

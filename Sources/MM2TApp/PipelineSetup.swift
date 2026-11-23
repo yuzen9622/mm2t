@@ -9,15 +9,22 @@ import MM2TSystem
 public enum SetupIssue: Hashable, Sendable {
     case transcriptionServiceNotConfigured(TranscriptionService)
     case summaryServiceNotConfigured(SummaryService)
+    case hostedPlanCheck(HostedPlanJob, String)
     case diarizationModelsMissing
 
     public var service: ModelService? {
         switch self {
         case .transcriptionServiceNotConfigured(let source): source.connection
         case .summaryServiceNotConfigured(let source): source.connection
+        case .hostedPlanCheck: .mm2t
         case .diarizationModelsMissing: nil
         }
     }
+}
+
+public enum HostedPlanJob: String, CaseIterable, Sendable {
+    case transcription = "stt"
+    case summaries = "llm"
 }
 
 public enum OfflineModel: String, Hashable, Sendable, CaseIterable {
@@ -179,6 +186,18 @@ public struct PipelineSetup: Sendable {
         }
         guard let llm else { return .needsSetup([.summaryServiceNotConfigured(settings.summaryService)]) }
         return .ready(llm)
+    }
+
+    func hostedChecks(_ settings: AppSettings, accountURL: URL?) -> [HostedPlanJob: KeyValidation] {
+        guard let accountURL, let token = try? accountToken(for: accountURL) else { return [:] }
+        var checks: [HostedPlanJob: KeyValidation] = [:]
+        if settings.transcriptionService == .mm2t {
+            checks[.transcription] = .hostedTranscription(url: Self.hostedURL(accountURL, job: HostedPlanJob.transcription.rawValue), token: token)
+        }
+        if settings.summaryService == .mm2t {
+            checks[.summaries] = .hostedSummaries(url: Self.hostedURL(accountURL, job: HostedPlanJob.summaries.rawValue), token: token)
+        }
+        return checks
     }
 
     private func accountToken(for url: URL) throws -> Secret? {

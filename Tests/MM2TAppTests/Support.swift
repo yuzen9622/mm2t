@@ -174,6 +174,7 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let streamCancelled = Box(false)
     let holdsStream = Box(false)
     let failsStream = Box(false)
+    let providerStreamError = Box<ProviderError?>(nil)
     let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
@@ -198,7 +199,8 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
                         streamCancelled.set(true)
                     }
                 }
-                if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
+                if let error = providerStreamError.get { continuation.finish(throwing: error) }
+                else if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
                 else { continuation.finish() }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -579,7 +581,8 @@ struct World {
 
     /// `endCountdown` is zero unless a test is about the countdown, so a meeting ending stops at once.
     init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
-         endCountdown: Duration = .zero) throws {
+         endCountdown: Duration = .zero, setupValidator: (any KeyValidating)? = nil,
+         collabConfiguration: CollabConfiguration? = nil) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
         if keys {
@@ -597,7 +600,8 @@ struct World {
             recorder: recorder, permissions: permissions, installer: speakerInstaller,
             offlineInstallers: offlineInstallers,
             translationInstaller: { _, _ in translation },
-            machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
+            machine: machine, validator: setupValidator ?? validator, now: { now.get }, endCountdown: endCountdown,
+            collabConfiguration: collabConfiguration)
         app.settings.settings.translationEnabled = true
         app.settings.settings.captionEngine = .firefox
     }
