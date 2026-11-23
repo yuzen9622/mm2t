@@ -516,7 +516,7 @@ import Testing
     @Test func settingsSurviveARelaunchAndOldBlobsStillLoad() throws {
         let defaults = UserDefaults(suiteName: "mm2t-settings-\(UUID().uuidString)")!
         let first = SettingsStore(defaults: defaults)
-        first.settings.transcriptionOrder = [.selfHosted, .cloud]
+        first.settings.transcriptionService = .server
         first.settings.addVocabulary("mm2t", source: .manual)
         first.settings.hasCompletedOnboarding = true
         #expect(SettingsStore(defaults: defaults).settings == first.settings)
@@ -524,7 +524,7 @@ import Testing
         defaults.set(Data(#"{"vocabulary":["舊"]}"#.utf8), forKey: SettingsStore.key)
         let migrated = SettingsStore(defaults: defaults).settings
         #expect(migrated.vocabulary == ["舊"])
-        #expect(migrated.transcriptionOrder == [.cloud])
+        #expect(migrated.transcriptionService == .elevenLabs)
         #expect(AppSettings.diarizationOrder == [.local])
         #expect(migrated.hidesFromScreenCapture)
 

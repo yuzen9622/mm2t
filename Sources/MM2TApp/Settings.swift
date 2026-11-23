@@ -4,17 +4,12 @@ import MM2TProviders
 import MM2TLocal
 import Observation
 
-/// Where the four LLM tasks run. `.local` needs the on-device model downloaded first.
-public enum LLMLocation: String, Codable, Sendable, CaseIterable {
-    case cloud
-    case local
+public enum TranscriptionService: String, Codable, Sendable, CaseIterable {
+    case mm2t, elevenLabs, server
 }
 
-/// Which hosted service runs the LLM tasks when `llmLocation` is `.cloud`.
-public enum CloudLLM: String, Codable, Sendable, CaseIterable {
-    case gemini
-    /// The user's own OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp).
-    case openAICompatible
+public enum SummaryService: String, Codable, Sendable, CaseIterable {
+    case mm2t, gemini, openAICompatible
 }
 
 /// Live captions translated on this Mac into one language, or not at all. Stored as the
@@ -46,9 +41,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// `diarizationOrder` that preferred the transcription service's speaker labels; it is ignored.
     public static let diarizationOrder: [DiarizationSource] = [.local]
 
-    /// Tried in order; each one listed must be configured. The chain falls through only when a
-    /// source is unreachable, as `TranscriptionChain` defines.
-    public var transcriptionOrder: [TranscriptionSource] = [.cloud]
+    public var transcriptionService: TranscriptionService = .elevenLabs {
+        didSet { if oldValue != transcriptionService { captionSourceOrder = nil } }
+    }
+    public var summaryService: SummaryService = .gemini
     public var selfHostedURL: URL?
     /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
     public private(set) var vocabulary: [String] = []
@@ -56,8 +52,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public private(set) var learnedVocabulary: [String] = []
     /// Learned terms the user deleted, so they are not learned again.
     public private(set) var dismissedVocabulary: [String] = []
-    public var llmLocation: LLMLocation = .cloud
-    public var cloudLLM: CloudLLM = .gemini
     /// API root of the OpenAI-compatible server, e.g. `http://host:8000/v1`.
     public var openAIBaseURL: URL?
     public var openAIModel = ""
@@ -66,7 +60,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var transcript: LocalSpeechModel?
     }
     private var speechModels = SpeechModels()
-    /// An explicit caption selection. With no override, captions follow the transcript model.
+    private var captionSourceOrder: [TranscriptionSource]?
+    var captionSources: [TranscriptionSource] {
+        if let captionSourceOrder { return captionSourceOrder }
+        let local: [TranscriptionSource] = effectiveCaptionModel == nil ? [] : [.local]
+        switch transcriptionService {
+        case .elevenLabs: return local + [.cloud]
+        case .server: return local + [.selfHosted]
+        case .mm2t: return local
+        }
+    }
     public var localCaptionModel: LocalSpeechModel? {
         get { speechModels.captions }
         set { speechModels.captions = newValue }
@@ -75,14 +78,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         get { speechModels.transcript }
         set { speechModels.transcript = newValue }
     }
+    fileprivate mutating func useSelectedCaptionSource() { captionSourceOrder = nil }
+
     public var effectiveCaptionModel: LocalSpeechModel? { localCaptionModel ?? localSpeechModel }
-    public var hasChosenSpeechModel: Bool { localSpeechModel != nil }
     public var transcriptionLanguage: TranscriptionLanguage = .auto
     public var hasCompletedOnboarding = false
     /// Story 21: mm2t's windows stay out of screen shares, recordings and screenshots unless the
     /// user turns this off.
     public var hidesFromScreenCapture = true
-    /// Live captions while recording, streamed to ElevenLabs; usable only with an ElevenLabs key.
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
     /// Translates live captions on this Mac with the downloaded models; never saved.
@@ -107,24 +110,38 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AppSettings()
-        transcriptionOrder = try c.decodeIfPresent([TranscriptionSource].self, forKey: .transcriptionOrder) ?? defaults.transcriptionOrder
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        let oldOrder = try legacy.decodeIfPresent([TranscriptionSource].self, forKey: .transcriptionOrder)
         selfHostedURL = try c.decodeIfPresent(URL.self, forKey: .selfHostedURL)
         vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? defaults.vocabulary
         learnedVocabulary = try c.decodeIfPresent([String].self, forKey: .learnedVocabulary) ?? []
         dismissedVocabulary = try c.decodeIfPresent([String].self, forKey: .dismissedVocabulary) ?? []
-        llmLocation = try c.decodeIfPresent(LLMLocation.self, forKey: .llmLocation) ?? defaults.llmLocation
-        cloudLLM = try c.decodeIfPresent(CloudLLM.self, forKey: .cloudLLM) ?? defaults.cloudLLM
         openAIBaseURL = try c.decodeIfPresent(URL.self, forKey: .openAIBaseURL)
         openAIModel = try c.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
+        if let service = try c.decodeIfPresent(TranscriptionService.self, forKey: .transcriptionService) {
+            transcriptionService = service
+        } else {
+            switch oldOrder?.first {
+            case .selfHosted: transcriptionService = .server
+            case .local: transcriptionService = selfHostedURL == nil ? .elevenLabs : .server
+            case .cloud, nil: transcriptionService = .elevenLabs
+            }
+        }
+        if let service = try c.decodeIfPresent(SummaryService.self, forKey: .summaryService) {
+            summaryService = service
+        } else if try legacy.decodeIfPresent(String.self, forKey: .llmLocation) == "local" {
+            summaryService = openAIBaseURL == nil ? .gemini : .openAICompatible
+        } else {
+            summaryService = try legacy.decodeIfPresent(SummaryService.self, forKey: .cloudLLM) ?? .gemini
+        }
         if let choices = try c.decodeIfPresent(SpeechModels.self, forKey: .speechModels) {
             speechModels = choices
         } else {
-            let legacy = try decoder.container(keyedBy: LegacyModelKeys.self)
             let chose = try legacy.decodeIfPresent(Bool.self, forKey: .hasChosenSpeechModel)
             if chose != false {
                 let transcript = try legacy.decodeIfPresent(LocalSpeechModel.self, forKey: .localSpeechModel)
                 let caption = try legacy.decodeIfPresent(LocalSpeechModel.self, forKey: .localCaptionModel)
-                let oldLocal = transcript == nil && caption == nil && chose == nil && transcriptionOrder.contains(.local)
+                let oldLocal = transcript == nil && caption == nil && chose == nil && oldOrder?.contains(.local) == true
                 localSpeechModel = transcript ?? (oldLocal ? .breezeCoreML : nil)
                 localCaptionModel = caption
                 // With the shared flag, choosing one model also exposed the other field's MLX default.
@@ -138,6 +155,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
+        captionSourceOrder = try c.decodeIfPresent([TranscriptionSource].self, forKey: .captionSourceOrder) ?? oldOrder
         captionEngine = (try? c.decode(CaptionEngine.self, forKey: .captionEngine)) ?? .firefox
         captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
         translationEnabled = try c.decodeIfPresent(Bool.self, forKey: .translationEnabled) ?? (captionTranslation != .off)
@@ -147,14 +165,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     fileprivate static let installedMLX = CodingUserInfoKey(rawValue: "mm2t.installedMLX")!
-    private enum LegacyModelKeys: CodingKey { case hasChosenSpeechModel, localSpeechModel, localCaptionModel }
+    private enum LegacyKeys: CodingKey {
+        case transcriptionOrder, llmLocation, cloudLLM
+        case hasChosenSpeechModel, localSpeechModel, localCaptionModel
+    }
 
     private enum CodingKeys: String, CodingKey {
-        case transcriptionOrder, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
-        case llmLocation, hasCompletedOnboarding, hidesFromScreenCapture
-        case cloudLLM, openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
+        case transcriptionService, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
+        case summaryService, hasCompletedOnboarding, hidesFromScreenCapture
+        case openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
         case detectionRules
-        case liveCaptions, captionBarOffsets, captionEngine, captionTranslation, translationEnabled
+        case liveCaptions, captionSourceOrder, captionBarOffsets, captionEngine, captionTranslation, translationEnabled
     }
 
     /// These settings with the ones that only change what is shown while recording set aside, so
@@ -162,7 +183,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var forProcessing: AppSettings {
         var settings = self
         settings.liveCaptions = false
-        settings.localCaptionModel = nil
+        settings.speechModels = SpeechModels()
+        settings.captionSourceOrder = nil
         settings.translationEnabled = false
         settings.captionEngine = .initial
         settings.captionTranslation = .off
@@ -184,20 +206,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     public enum TermSource: Sendable { case manual, learned }
-
-    public mutating func setTranscriptionSource(_ source: TranscriptionSource, enabled: Bool) {
-        guard enabled else {
-            transcriptionOrder.removeAll { $0 == source }
-            return
-        }
-        guard !transcriptionOrder.contains(source) else { return }
-        if source != .cloud, transcriptionOrder.first != .cloud,
-           let fallback = transcriptionOrder.firstIndex(of: .cloud) {
-            transcriptionOrder.insert(source, at: fallback)
-        } else {
-            transcriptionOrder.append(source)
-        }
-    }
 
     public func source(of term: String) -> TermSource {
         learnedVocabulary.contains(term) ? .learned : .manual
@@ -327,14 +335,16 @@ public final class SettingsStore {
             compatible[keyPath: field] = .whisperCPU
         }
         settings = compatible
-        if stored != nil { save() }
     }
 
     func chooseSpeechModel(_ choice: LocalSpeechModel, for field: WritableKeyPath<AppSettings, LocalSpeechModel?>) {
         nativeSelections.removeValue(forKey: field)
         // Selecting the transcript model again restores the default link between the pickers.
         let transcript = nativeSelections[\.localSpeechModel] ?? settings.localSpeechModel
-        settings[keyPath: field] = field == \.localCaptionModel && choice == transcript ? nil : choice
+        var updated = settings
+        if field == \.localCaptionModel { updated.useSelectedCaptionSource() }
+        updated[keyPath: field] = field == \.localCaptionModel && choice == transcript ? nil : choice
+        settings = updated
     }
 
     private func save() {
