@@ -104,6 +104,30 @@ import Testing
         #expect(llm.answerInputs.get.count == 3)
     }
 
+    @Test func oneQuestionSharesItsGroupAcrossRetrievalAndAnswer() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting(title: "預算")
+        try await world.app.searchIndex.rebuild(from: [meeting])
+        let llm = FakeLLM()
+        llm.decisions.set(plan(queries: ["大家好"]))
+        let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
+        let model = AssistantModel(engine: engine, build: { .ready(llm) })
+        model.send("What happened?")
+        #expect(await eventually { model.turns.last?.state == .finished })
+        let requests = llm.requestGroups.get
+        #expect(requests.count == 4)
+        let group = try #require(requests.compactMap { $0 }.first)
+        #expect(requests.allSatisfy { $0 == group })
+        llm.requestGroups.set([])
+        llm.decisions.set(plan(queries: [], lookup: false))
+        model.send("What else?")
+        #expect(await eventually { model.turns.count == 2 && model.turns.last?.state == .finished })
+        let next = llm.requestGroups.get
+        let nextGroup = try #require(next.compactMap { $0 }.first)
+        #expect(nextGroup != group)
+        #expect(next.allSatisfy { $0 == nextGroup })
+    }
+
     @Test func stopSetupAndRetry() async throws {
         let world = try World()
         let llm = FakeLLM()

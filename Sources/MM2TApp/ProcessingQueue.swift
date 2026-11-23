@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 /// Where one meeting stands in this app session. The meeting document's own `status` is the
@@ -101,30 +102,32 @@ public final class ProcessingQueue {
         let previous = tail
         let token = UUID()
         let task = Task { @MainActor in
-            defer {
-                if self.tasks[id]?.token == token {
-                    self.tasks[id] = nil
-                    if Task.isCancelled, self.jobs[id]?.isActive == true { self.jobs[id] = nil }
-                    self.revision += 1
-                }
-            }
-            if let finalize {
-                await finalize()
-                if Task.isCancelled {
+            await HostedRequestGroup.$current.withValue(token) {
+                defer {
                     if self.tasks[id]?.token == token {
                         self.tasks[id] = nil
-                        self.jobs[id] = nil
+                        if Task.isCancelled, self.jobs[id]?.isActive == true { self.jobs[id] = nil }
+                        self.revision += 1
                     }
-                } else {
-                    self.jobs[id] = .queued
                 }
-                self.revision += 1
+                if let finalize {
+                    await finalize()
+                    if Task.isCancelled {
+                        if self.tasks[id]?.token == token {
+                            self.tasks[id] = nil
+                            self.jobs[id] = nil
+                        }
+                    } else {
+                        self.jobs[id] = .queued
+                    }
+                    self.revision += 1
+                }
+                await previous?.value
+                guard !Task.isCancelled else { return }
+                let current = await whileValid()
+                guard !Task.isCancelled else { return }
+                await self.execute(operation, on: id, using: current ? prepared : nil)
             }
-            await previous?.value
-            guard !Task.isCancelled else { return }
-            let current = await whileValid()
-            guard !Task.isCancelled else { return }
-            await self.execute(operation, on: id, using: current ? prepared : nil)
         }
         tasks[id] = (token, task)
         tail = task

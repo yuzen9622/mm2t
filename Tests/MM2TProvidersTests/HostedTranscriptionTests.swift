@@ -340,6 +340,38 @@ import Testing
         #expect(server.requests.allSatisfy { $0.headers["X-MM2T-Purpose"] == "auto" })
     }
 
+    @Test func hostedRequestsShareOnlyTheirCurrentActionGroup() async throws {
+        let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"text":"好"}"#))
+        let provider = llm(server)
+        let first = UUID()
+        let second = UUID()
+        try await HostedRequestGroup.$current.withValue(first) {
+            async let a = provider.generateText(system: "s", input: "搜尋")
+            async let b = provider.rewrite("原文", instruction: "改短")
+            _ = try await (a, b)
+        }
+        #expect(server.requests.count >= 2)
+        #expect(server.requests.allSatisfy { $0.headers["X-MM2T-Request"] == first.uuidString })
+        try await HostedRequestGroup.$current.withValue(second) {
+            _ = try await provider.generateText(system: "s", input: "下一題")
+        }
+        #expect(server.requests.last?.headers["X-MM2T-Request"] == second.uuidString)
+        _ = try await provider.generateText(system: "s", input: "沒有群組")
+        #expect(server.requests.last?.headers["X-MM2T-Request"] == nil)
+    }
+
+    @Test func ownKeyNeverSendsHostedRequestGroup() async throws {
+        let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"text":"好"}"#))
+        let provider = OpenAICompatibleLLM(baseURL: URL(string: "https://llm.example.test/v1")!, apiKey: "own-key",
+                                           model: "custom", session: server.session)
+        try await HostedRequestGroup.$current.withValue(UUID()) {
+            _ = try await provider.generateText(system: "s", input: "問")
+        }
+        let request = try #require(server.requests.last)
+        #expect(request.headers["Authorization"] == "Bearer own-key")
+        #expect(request.headers["X-MM2T-Request"] == nil)
+    }
+
     @Test func aiLimitIsItsOwnFailure() async throws {
         let server = StubServer(status: 402, body: #"{"error":{"code":"ai_quota_exceeded","scope":"asks"}}"#)
         do {

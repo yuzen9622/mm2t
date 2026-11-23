@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 public struct SpeakerRow: Hashable, Sendable, Identifiable {
@@ -455,7 +456,9 @@ public final class MeetingDetailModel {
 
     /// A cleaned paragraph rewritten the way `instruction` asks, for the user to review and save.
     public func rewrite(_ text: String, instruction: String) async throws -> String {
-        try await queue.rewrite(text, instruction: instruction)
+        try await HostedRequestGroup.$current.withValue(UUID()) {
+            try await queue.rewrite(text, instruction: instruction)
+        }
     }
 
     public func rename(to title: String) async {

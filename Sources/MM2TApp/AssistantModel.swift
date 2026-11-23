@@ -214,35 +214,37 @@ public final class AssistantModel {
             let preferenceContext = preferences?.context(for: question) ?? ""
             let currentLedger = ledger
             task = Task { [weak self] in
-                if shouldPropose {
-                    let proposal = try? await assistantTimeout(seconds: 30) {
-                        try await AssistantGeneration.memoryProposal(provider: provider, question: question)
+                await HostedRequestGroup.$current.withValue(UUID()) {
+                    if shouldPropose {
+                        let proposal = try? await assistantTimeout(seconds: 30) {
+                            try await AssistantGeneration.memoryProposal(provider: provider, question: question)
+                        }
+                        guard !Task.isCancelled, let self, self.preferences?.revision == revision,
+                              self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
+                        if let proposal {
+                            self.turns[position].memoryProposal = proposal
+                            self.turns[position].memoryManagement = true
+                            self.save()
+                        }
                     }
-                    guard !Task.isCancelled, let self, self.preferences?.revision == revision,
-                          self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
-                    if let proposal {
-                        self.turns[position].memoryProposal = proposal
-                        self.turns[position].memoryManagement = true
-                        self.save()
+                    guard !Task.isCancelled, let self else { return }
+                    var effectiveScope = scope
+                    let mergeRequested = question.range(of: #"(?:也算上|也包含|加上|合併|連同|一起比較|也納入).{0,12}(?:先前|之前|剛才|前面|上次|前.{0,2}場)|(?:include|combine|along with).{0,24}(?:previous|earlier|prior)"#, options: [.regularExpression, .caseInsensitive]) != nil
+                    let widerSearchRequested = question.range(of: #"(?:再找|搜[尋索]?|擴大|也查|找找|查一下).{0,16}(?:更早|其他|其它|全部|所有|範圍)|(?:search|look|find).{0,30}(?:other|earlier|all meetings|outside)"#, options: [.regularExpression, .caseInsensitive]) != nil
+                    if let previousScope, (mergeRequested || widerSearchRequested), let rule = try? await AssistantGeneration.userDirective(provider: provider, question: question, rule: "Scope of referenced meetings: keep unless the user explicitly asks to search outside, earlier or other meetings (expand); merge only when the user explicitly asks to include previously referenced meetings along with new references. A generic follow-up never expands scope.", choices: ["keep", "expand", "merge"]) {
+                        if widerSearchRequested && rule == "expand" { effectiveScope = nil }
+                        if mergeRequested && rule == "merge" { effectiveScope = previousScope.union(references) }
                     }
-                }
-                guard !Task.isCancelled, let self else { return }
-                var effectiveScope = scope
-                let mergeRequested = question.range(of: #"(?:也算上|也包含|加上|合併|連同|一起比較|也納入).{0,12}(?:先前|之前|剛才|前面|上次|前.{0,2}場)|(?:include|combine|along with).{0,24}(?:previous|earlier|prior)"#, options: [.regularExpression, .caseInsensitive]) != nil
-                let widerSearchRequested = question.range(of: #"(?:再找|搜[尋索]?|擴大|也查|找找|查一下).{0,16}(?:更早|其他|其它|全部|所有|範圍)|(?:search|look|find).{0,30}(?:other|earlier|all meetings|outside)"#, options: [.regularExpression, .caseInsensitive]) != nil
-                if let previousScope, (mergeRequested || widerSearchRequested), let rule = try? await AssistantGeneration.userDirective(provider: provider, question: question, rule: "Scope of referenced meetings: keep unless the user explicitly asks to search outside, earlier or other meetings (expand); merge only when the user explicitly asks to include previously referenced meetings along with new references. A generic follow-up never expands scope.", choices: ["keep", "expand", "merge"]) {
-                    if widerSearchRequested && rule == "expand" { effectiveScope = nil }
-                    if mergeRequested && rule == "merge" { effectiveScope = previousScope.union(references) }
-                }
-                guard !Task.isCancelled, self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
-                self.turns[position].scope = effectiveScope
-                let events = self.engine.events(question: question, provider: provider, history: history,
-                    preferences: preferenceContext, ledger: currentLedger, scope: effectiveScope, explicitReferences: references)
-                for await event in events {
-                    guard !Task.isCancelled, self.turns.indices.contains(position),
-                          self.turns[position].id == turnID, self.preferences?.revision == revision,
-                          self.turns[position].state == .running else { break }
-                    self.receive(event, at: position)
+                    guard !Task.isCancelled, self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
+                    self.turns[position].scope = effectiveScope
+                    let events = self.engine.events(question: question, provider: provider, history: history,
+                        preferences: preferenceContext, ledger: currentLedger, scope: effectiveScope, explicitReferences: references)
+                    for await event in events {
+                        guard !Task.isCancelled, self.turns.indices.contains(position),
+                              self.turns[position].id == turnID, self.preferences?.revision == revision,
+                              self.turns[position].state == .running else { break }
+                        self.receive(event, at: position)
+                    }
                 }
             }
         } catch { turns[position].state = .failed(String(describing: error)); save() }

@@ -15,6 +15,33 @@ import Testing
         }
     }
 
+    @Test func listProcessingSharesOneGroupAcrossOutputs() async throws {
+        let world = try World()
+        let meeting = try await world.library.create(Recording(
+            micTrack: try silentTrack(in: world.root, "list-mic.wav"), remoteTrack: try silentTrack(in: world.root, "list-remote.wav"),
+            highlights: [], metadata: MeetingMetadata(title: "List processing", startedAt: Date(), duration: 1)))
+        await world.app.meetings.process(meeting.id)
+        #expect(world.queue.jobs[meeting.id] == .completed)
+        let requests = world.catalog.llm.requestGroups.get
+        #expect(requests.count >= 3)
+        let group = try #require(requests.compactMap { $0 }.first)
+        #expect(requests.allSatisfy { $0 == group })
+    }
+
+    @Test func eachRewriteGetsItsOwnGroup() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        let llm = world.catalog.llm
+        llm.requestGroups.set([])
+        #expect(try await detail.rewrite("passage", instruction: "Shorten") == "Shorten: passage")
+        #expect(try await detail.rewrite("passage", instruction: "Expand") == "Expand: passage")
+        let groups = llm.requestGroups.get
+        #expect(groups.count == 2)
+        #expect(groups.compactMap { $0 }.count == 2)
+        #expect(Set(groups).count == 2)
+    }
+
     @Test func missingKeysRouteToSetupBeforeAnyStepRuns() async throws {
         let world = try World(keys: false)
         let meeting = try await world.recordedMeeting()
@@ -185,7 +212,10 @@ import Testing
         } else {
             #expect(meeting.status == .completed)
             #expect(meeting.outputs.summary?.headline == "Summary with the rotated token")
-            #expect(!requests.isEmpty)
+            #expect(requests.count >= 3)
+            let group = try #require(requests.first?.value(forHTTPHeaderField: "X-MM2T-Request"))
+            #expect(UUID(uuidString: group) != nil)
+            #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-MM2T-Request") == group })
             #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer new-token" })
             #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-MM2T-Purpose") == "auto" })
         }

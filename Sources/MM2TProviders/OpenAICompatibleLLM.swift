@@ -270,7 +270,12 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     private func bearer(_ token: Secret, _ request: URLRequest) -> URLRequest {
         var request = request
         request.setValue("Bearer \(token.revealed)", forHTTPHeaderField: "Authorization")
-        if hosted != nil { request.setValue(purpose.rawValue, forHTTPHeaderField: "X-MM2T-Purpose") }
+        if hosted != nil {
+            request.setValue(purpose.rawValue, forHTTPHeaderField: "X-MM2T-Purpose")
+            if let group = HostedRequestGroup.current {
+                request.setValue(group.uuidString, forHTTPHeaderField: "X-MM2T-Request")
+            }
+        }
         return request
     }
 

@@ -166,6 +166,7 @@ struct FakeLLMError: Error, CustomStringConvertible {
 struct FakeLLM: LLMProvider, StructuredGenerator {
     let decisions = Box([assistantDecision("search_meetings", query: "預算"), assistantDecision("read_meeting"), assistantDecision("answer")])
     let generationInputs = Box<[String]>([])
+    let requestGroups = Box<[UUID?]>([])
     let scopeDirective = Box("keep")
     let memoryJSON = Box(#"{"preference":null}"#)
     let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
@@ -178,6 +179,7 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
+        requestGroups.update { $0.append(HostedRequestGroup.current) }
         if system.hasPrefix("Scope of referenced meetings:") { return "{\"choice\":\"\(scopeDirective.get)\"}" }
         if system.hasPrefix("Memory intent:") { return memoryJSON.get }
         generationInputs.update { $0.append(input) }
@@ -187,6 +189,7 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
         return result
     }
     func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
+        requestGroups.update { $0.append(HostedRequestGroup.current) }
         answerInputs.update { $0.append(input) }
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -215,12 +218,18 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let holds = Box<[String: Gate<Bool>]>([:])
 
     private func record(_ task: String) async throws {
+        if task != "plan" { requestGroups.update { $0.append(HostedRequestGroup.current) } }
         calls.update { $0.append(task) }
         if let gate = holds.get[task] { _ = await gate.wait() }
         if failNext.get.contains(task) {
             failNext.update { $0.remove(task) }
             throw FakeLLMError()
         }
+    }
+
+    func rewrite(_ text: String, instruction: String) async throws -> String {
+        try await record("rewrite")
+        return "\(instruction): \(text)"
     }
 
     func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {

@@ -59,3 +59,8 @@ public struct HostedAuthorization: Sendable {
 public enum HostedPurpose: String, Sendable {
     case ask, rewrite, auto
 }
+
+/// One user action (`X-MM2T-Request`): every hosted AI call made inside it counts as a single ask.
+public enum HostedRequestGroup {
+    @TaskLocal public static var current: UUID?
+}

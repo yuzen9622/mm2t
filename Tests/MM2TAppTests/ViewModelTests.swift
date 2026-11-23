@@ -208,7 +208,15 @@ import Testing
         #expect(detail.isStale, "story 42: the banner shows after a merge")
         #expect(detail.presentation?.raw.filter { $0.speakerName == "小明" }.count == 3)
 
+        let llm = world.catalog.llm
+        let recordingGroups = Set(llm.requestGroups.get)
+        llm.requestGroups.set([])
         await detail.regenerate()
+        let requests = llm.requestGroups.get
+        #expect(requests.count >= 3)
+        let group = try #require(requests.compactMap { $0 }.first)
+        #expect(!recordingGroups.contains(group))
+        #expect(requests.allSatisfy { $0 == group })
         #expect(!detail.isStale)
         #expect(detail.presentation?.digests?.map(\.speakerName) == ["小明", "我"])
     }
