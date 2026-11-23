@@ -1,9 +1,0 @@
-{"at": 0, "segment": 0, "final": false, "source": "如果單一登入失敗", "queue_ms": 0.3, "lag_ms": 43.7, "ms": 43.218666, "output": "If the single login fails"}
-{"at": 0.4, "segment": 0, "final": true, "source": "如果單一登入失敗，請使用備用帳號。", "queue_ms": 3.5, "lag_ms": 48.3, "ms": 44.612417, "output": "If a single login fails, please use an alternate account."}
-{"at": 1.8, "segment": 1, "final": false, "source": "不是週三", "queue_ms": 5.1, "lag_ms": 69.5, "ms": 64.071041, "output": "It's not Wednesday"}
-{"at": 2.15, "segment": 1, "final": true, "source": "不是週三，是週四下午三點半。", "queue_ms": 9.1, "lag_ms": 71.3, "ms": 61.825209, "output": "It's not Wednesday, but 3:30 p.m. on Thursday."}
-{"at": 3.6, "segment": 2, "final": false, "source": "測試環境可以", "queue_ms": 3.2, "lag_ms": 33.5, "ms": 30.182958, "output": "The test environment can"}
-{"at": 3.9, "segment": 2, "final": false, "source": "測試環境可以重啟", "queue_ms": 2.9, "lag_ms": 39.1, "ms": 36.112875, "output": "The test environment can be restarted."}
-{"at": 4.2, "segment": 2, "final": true, "source": "測試環境可以重啟，正式環境不行。", "queue_ms": 1.2, "lag_ms": 40.0, "ms": 38.679792, "output": "The test environment can be restarted, but the official environment is not."}
-{"at": 5.4, "segment": 3, "final": false, "source": "第一批是十五台", "queue_ms": 3.2, "lag_ms": 37.4, "ms": 33.985334, "output": "The first batch is fifteen."}
-{"at": 5.75, "segment": 3, "final": true, "source": "第一批是十五台，不是五十台。", "queue_ms": 3.5, "lag_ms": 42.8, "ms": 39.205541, "output": "The first batch is fifteen, not fifty."}

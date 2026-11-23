@@ -24,3 +24,6 @@ promo/
 
 # Output of App/Tools/build-bergamot.sh; the package downloads the published build instead.
 /Vendor/Bergamot.xcframework/
+
+# Local evaluation data, scripts, and reports
+/Evaluation/
