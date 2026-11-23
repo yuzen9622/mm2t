@@ -80,8 +80,8 @@ public final class CredentialField: Identifiable {
                 return
             }
             request = .openAICompatible(baseURL: endpoint.baseURL, apiKey: secret, model: endpoint.model)
-        case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken:
-            return  // Written by calendar sign-in, never typed into a key field.
+        case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken, .collabAccount:
+            return  // Written by account sign-in, never typed into a key field.
         }
         state = .validating
         state = .checked(await validator.validate(request))

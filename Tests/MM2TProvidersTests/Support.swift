@@ -33,6 +33,7 @@ final class StubServer: @unchecked Sendable {
     enum Reply {
         case status(Int, String)
         case failure(URLError.Code)
+        case after(@Sendable () async -> (Int, String))
     }
 
     typealias Handler = @Sendable (Request) -> Reply
@@ -93,13 +94,22 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         case .failure(let code):
             client?.urlProtocol(self, didFailWithError: URLError(code))
         case .status(let status, let body):
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/json"])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data(body.utf8))
-            client?.urlProtocolDidFinishLoading(self)
+            respond(status, body)
+        case .after(let reply):
+            Task { @Sendable [stub = self, reply] in
+                let (status, body) = await reply()
+                stub.respond(status, body)
+            }
         }
+    }
+
+    private func respond(_ status: Int, _ body: String) {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     private static func body(of request: URLRequest) -> Data {

@@ -113,6 +113,7 @@ public final class CaptureController {
     public let meters = RecordingMeters()
     /// Live captions for the recording in progress; `.off` unless the user turned them on.
     public let captions = LiveCaptions()
+    public private(set) var collaboration: CollabSession?
 
     @ObservationIgnored private let recorder: any Recorder
     @ObservationIgnored private let permissions: any PermissionsProviding
@@ -123,7 +124,9 @@ public final class CaptureController {
     @ObservationIgnored private let makeLive: @MainActor (URL) async -> LiveTranscriber?
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private let makeCollaboration: @MainActor (String) -> CollabSession?
     @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions) async -> CaptionStream?
+    @ObservationIgnored private var closingCollaboration: Task<Void, Never>?
     @ObservationIgnored private var captionStream: CaptionStream?
     @ObservationIgnored private var captionTask: Task<Void, Never>?
     @ObservationIgnored private var detected: DetectedMeeting?
@@ -149,6 +152,7 @@ public final class CaptureController {
         saveRules: @escaping @MainActor (DetectionRules) -> Void = { _ in },
         appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
+        makeCollaboration: @escaping @MainActor (String) -> CollabSession? = { _ in nil },
         makeCaptions: @escaping @MainActor (LiveCaptions) async -> CaptionStream? = { _ in nil },
         enqueueRecording: (@MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?)? = nil,
         onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void = { _, _ in }
@@ -158,6 +162,7 @@ public final class CaptureController {
         self.appName = appName
         self.makeLive = makeLive
         self.makeCaptions = makeCaptions
+        self.makeCollaboration = makeCollaboration
         self.endCountdown = endCountdown
         self.recorder = recorder
         self.permissions = permissions
@@ -317,6 +322,11 @@ public final class CaptureController {
             let session = try await recorder.start(configuration)
             self.session = session
             meters.reset()
+            collaboration = makeCollaboration(target.name)
+            if let collaboration {
+                collaboration.captionsActive = { [weak captions] in captions?.isActive == true }
+                captions.onFinalized = { [weak collaboration] segment in collaboration?.finalized(segment) }
+            }
             state = .recording(target)
             liveTask = Task { [weak self] in
                 guard let live = await self?.makeLive(configuration.directory), !Task.isCancelled else { return }
@@ -417,6 +427,21 @@ public final class CaptureController {
 
     public private(set) var lastSavedMeeting: MeetingID?
 
+    func signOutOfCollaboration() async {
+        await collaboration?.signOut()
+        await closingCollaboration?.value
+    }
+
+    func endCollaboration() -> Task<Void, Never>? {
+        captions.onFinalized = nil
+        if let ending = collaboration?.end() {
+            let previous = closingCollaboration
+            closingCollaboration = Task { await previous?.value; await ending.value }
+        }
+        collaboration = nil
+        return closingCollaboration
+    }
+
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
         guard state.isCapturing, let target = state.target, let session else { return }
@@ -424,6 +449,7 @@ public final class CaptureController {
         countdown?.task.cancel()
         countdown = nil
         state = .stopping(target)
+        let closingCollaboration = endCollaboration()
         eventTask?.cancel()
         eventTask = nil
         liveTask?.cancel()
@@ -445,6 +471,7 @@ public final class CaptureController {
         let job = enqueueRecording(id, live)
         lastSavedMeeting = id
         state = .idle
+        await closingCollaboration?.value
         await job?.value
         let elapsed = started.duration(to: .now).components
         let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18

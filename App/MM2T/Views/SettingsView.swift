@@ -22,6 +22,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case assistant
     case privacy
+    case collaboration
     case about
 
     var id: String { rawValue }
@@ -31,6 +32,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: String(localized: "General")
         case .assistant: String(localized: "Personalization")
         case .privacy: String(localized: "Privacy")
+        case .collaboration: String(localized: "Collaboration")
         case .about: String(localized: "About")
         }
     }
@@ -39,6 +41,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general, .assistant: "adjustments-horizontal"
         case .privacy: "shield-check"
+        case .collaboration: "link"
         case .about: "info-circle"
         }
     }
@@ -54,7 +57,7 @@ enum SettingsRow: Hashable {
     case hideFromCapture
     case recordShortcut
     case promptApps, promptSites
-    case systemPermissions, calendars, reminders
+    case systemPermissions, calendars, reminders, collaboration
     case version, sourceCode, author, buyMeACoffee
     case privacyPolicy, terms, licenses
 
@@ -83,6 +86,7 @@ enum SettingsRow: Hashable {
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
                                   String(localized: "Accessibility"), String(localized: "Automation")]
         case .calendars: ["Apple", "Google", "Outlook"]
+        case .collaboration: [String(localized: "Sign in with Google"), String(localized: "Sign in with Apple"), String(localized: "Sign Out")]
         case .reminders: [String(localized: "Reminders"), String(localized: "To-dos")]
         case .version: [String(localized: "Version")]
         case .sourceCode: [String(localized: "Source code"), "GitHub"]
@@ -121,16 +125,18 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "system", section: .privacy, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
             SettingsGroup(id: "calendars", section: .privacy, title: String(localized: "Calendars"), rows: [.calendars]),
             SettingsGroup(id: "reminders", section: .privacy, title: String(localized: "Reminders"), rows: [.reminders]),
+            SettingsGroup(id: "collaboration", section: .collaboration, title: SettingsSection.collaboration.title, rows: [.collaboration]),
             SettingsGroup(id: "app", section: .about, title: "mm2t", rows: [.version, .sourceCode, .author, .buyMeACoffee]),
             SettingsGroup(id: "legal", section: .about, title: String(localized: "Legal"), rows: [.privacyPolicy, .terms, .licenses]),
         ]
     }
 
     /// The groups `section` shows, or, while searching, every group's matching rows across sections.
-    static func visible(in section: SettingsSection, query: String) -> [SettingsGroup] {
+    static func visible(in section: SettingsSection, query: String, collaborationAvailable: Bool = false) -> [SettingsGroup] {
         let query = query.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return all.filter { $0.section == section } }
-        return all.compactMap { group in
+        let available = all.filter { collaborationAvailable || $0.section != .collaboration }
+        guard !query.isEmpty else { return available.filter { $0.section == section } }
+        return available.compactMap { group in
             if group.title.localizedStandardContains(query) || group.section.title.localizedStandardContains(query) { return group }
             let rows = group.rows.filter { $0.terms.contains { $0.localizedStandardContains(query) } }
             return rows.isEmpty ? nil : SettingsGroup(id: group.id, section: group.section, title: group.title, rows: rows)
@@ -195,7 +201,7 @@ struct SettingsDialog: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Settings").font(Typo.heading).padding(.horizontal, 6).padding(.top, 8)
             SearchField(text: $query).padding(.top, 14).padding(.bottom, 16)
-            ForEach(SettingsSection.allCases) { section in
+            ForEach(SettingsSection.allCases.filter { app.collabAccount != nil || $0 != .collaboration }) { section in
                 SettingsSectionRow(section: section, isSelected: !searching && !showLicenses && navigation.settingsSection == section) {
                     query = ""
                     showLicenses = false
@@ -251,7 +257,7 @@ struct SettingsPage: View {
 
     var body: some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        let groups = SettingsGroup.visible(in: section, query: query)
+        let groups = SettingsGroup.visible(in: section, query: query, collaborationAvailable: app.collabAccount != nil)
         VStack(alignment: .leading, spacing: 24) {
             if !searching {
                 Text(section.title).font(Typo.title)
@@ -304,6 +310,8 @@ struct SettingsRowView: View {
     @ViewBuilder private var controls: some View {
         @Bindable var store = app.settings
         switch row {
+        case .collaboration:
+            if let account = app.collabAccount { CollabAccountSettings(account: account) }
         case .assistantMemory:
             AssistantMemorySettings(preferences: app.assistantPreferences, conversations: app.assistantConversations)
         case .transcriptionLanguage:

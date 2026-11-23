@@ -68,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         floating = FloatingPanelController(app: app)
         captionBar = CaptionBarController(app: app)
+        if app.collabAccount != nil {
+            observeChanges { [weak app] in
+                let collaboration = app?.capture.collaboration
+                CollabHostPage.shared.prepare(for: collaboration?.room?.hostUrl, retaining: collaboration?.retainedHostURL)
+            }
+        }
         var fixture = false
         #if DEBUG
         fixture = AssistantScenarioRunner.fixtureRoot != nil
@@ -92,6 +98,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let account = app?.collabAccount, account.hasPendingRoomEndWrites else { return .terminateNow }
+        Task {
+            await account.waitForRoomEndWrites()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         app?.setup.refresh()
