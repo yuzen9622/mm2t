@@ -168,6 +168,52 @@ import Testing
         #expect(settings.llmLocation == .cloud && settings.cloudLLM == .gemini)
     }
 
+    @Test(arguments: [
+        ([.local, .cloud], [.cloud, .local], [.local, .cloud]),
+        ([.selfHosted, .local, .cloud], [.cloud, .selfHosted, .local], [.selfHosted, .cloud, .local]),
+        ([.local], [.cloud, .local], [.local, .cloud]),
+    ] as [([TranscriptionSource], [TranscriptionSource], [TranscriptionSource])])
+    func switchingUsagePreservesFallbacksAndOtherSettings(
+        originalOrder: [TranscriptionSource], keysOrder: [TranscriptionSource], serverOrder: [TranscriptionSource]
+    ) {
+        var settings = AppSettings()
+        settings.transcriptionOrder = originalOrder
+        settings.llmLocation = .local
+        settings.cloudLLM = .openAICompatible
+        let original = settings
+
+        #expect(OnboardingFlow.switchMode(.ownKeys, in: &settings))
+        var expected = original
+        expected.transcriptionOrder = keysOrder
+        #expect(settings == expected)
+        #expect(!OnboardingFlow.switchMode(.ownKeys, in: &settings))
+        #expect(!OnboardingFlow.switchMode(.signIn, in: &settings))
+        #expect(settings == expected)
+
+        #expect(OnboardingFlow.switchMode(.ownServer, in: &settings))
+        expected.transcriptionOrder = serverOrder
+        #expect(settings == expected)
+    }
+
+    @Test func switchingFromCloudOnlyAddsTheSelfHostedSource() {
+        var settings = AppSettings()
+        settings.transcriptionOrder = [.cloud]
+        #expect(OnboardingFlow.switchMode(.ownServer, in: &settings))
+        #expect(settings.transcriptionOrder == [.selfHosted, .cloud])
+    }
+
+    @Test func ownKeysUsageShowsLocalSummariesWhenEnabled() {
+        var settings = AppSettings()
+        settings.transcriptionOrder = [.cloud, .local]
+        settings.llmLocation = .local
+        #expect(OnboardingFlow.choice(in: settings) == .ownKeys)
+        #expect(OnboardingFlow.showsLocalSummaries(in: settings))
+        settings.llmLocation = .cloud
+        #expect(!OnboardingFlow.showsLocalSummaries(in: settings))
+        settings.transcriptionOrder = [.local, .cloud]
+        #expect(OnboardingFlow.showsLocalSummaries(in: settings))
+    }
+
     @Test func enablingFallbackKeepsThePrimarySourceAndUsageMode() {
         var settings = AppSettings()
         settings.setTranscriptionSource(.selfHosted, enabled: true)

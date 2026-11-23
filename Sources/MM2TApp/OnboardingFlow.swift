@@ -205,7 +205,22 @@ public final class OnboardingFlow {
         return true
     }
 
-    public static func choice(in settings: AppSettings) -> UsageChoice {
+    public static func switchMode(_ choice: UsageChoice, in settings: inout AppSettings) -> Bool {
+        guard choice.isAvailable, choice != Self.choice(in: settings) else { return false }
+        let index = settings.transcriptionOrder.firstIndex { source in
+            choice == .ownKeys ? source == .cloud : source != .cloud
+        }
+        let primary = index.map { settings.transcriptionOrder.remove(at: $0) }
+            ?? (choice == .ownKeys ? .cloud : .selfHosted)
+        settings.transcriptionOrder.insert(primary, at: 0)
+        return true
+    }
+
+    public nonisolated static func showsLocalSummaries(in settings: AppSettings) -> Bool {
+        choice(in: settings) == .ownServer || settings.llmLocation == .local
+    }
+
+    public nonisolated static func choice(in settings: AppSettings) -> UsageChoice {
         switch settings.transcriptionOrder.first {
         case .selfHosted, .local: .ownServer
         case .cloud, nil: .ownKeys

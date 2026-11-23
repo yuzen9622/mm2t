@@ -110,8 +110,10 @@ struct SettingsGroup: Identifiable {
     let rows: [SettingsRow]
     var mode: UsageChoice? = nil
 
-    static var all: [SettingsGroup] {
-        [
+    static func all(settings: AppSettings) -> [SettingsGroup] {
+        let summaryRows: [SettingsRow] = [.summaryBackend, .geminiKey]
+            + (OnboardingFlow.showsLocalSummaries(in: settings) ? [.localSummaries] : [])
+        return [
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .liveCaptions]),
@@ -121,13 +123,13 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "usage-keys-transcription", section: .usage, title: String(localized: "Transcription"),
                           rows: [.cloudTranscription], mode: .ownKeys),
             SettingsGroup(id: "usage-keys-summaries", section: .usage, title: String(localized: "Summaries"),
-                          rows: [.summaryBackend, .geminiKey], mode: .ownKeys),
+                          rows: summaryRows, mode: .ownKeys),
             SettingsGroup(id: "usage-keys-fallback", section: .usage, title: String(localized: "Fallback"),
                           rows: [.selfHostedTranscription, .localTranscription], mode: .ownKeys),
             SettingsGroup(id: "usage-server-transcription", section: .usage, title: String(localized: "Transcription"),
                           rows: [.selfHostedTranscription, .localTranscription], mode: .ownServer),
             SettingsGroup(id: "usage-server-summaries", section: .usage, title: String(localized: "Summaries"),
-                          rows: [.summaryBackend, .geminiKey, .localSummaries], mode: .ownServer),
+                          rows: summaryRows, mode: .ownServer),
             SettingsGroup(id: "usage-server-fallback", section: .usage, title: String(localized: "Fallback"),
                           rows: [.cloudTranscription], mode: .ownServer),
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
@@ -145,9 +147,10 @@ struct SettingsGroup: Identifiable {
     }
 
     /// The groups `section` shows, or, while searching, every group's matching rows across sections.
-    static func visible(in section: SettingsSection, query: String, mode: UsageChoice, accountAvailable: Bool) -> [SettingsGroup] {
+    static func visible(in section: SettingsSection, query: String, settings: AppSettings, accountAvailable: Bool) -> [SettingsGroup] {
         let query = query.trimmingCharacters(in: .whitespaces)
-        let available = all.filter {
+        let mode = OnboardingFlow.choice(in: settings)
+        let available = all(settings: settings).filter {
             (accountAvailable || $0.section != .account) && ($0.mode == nil || $0.mode == mode)
         }
         guard !query.isEmpty else { return available.filter { $0.section == section } }
@@ -273,14 +276,14 @@ struct SettingsPage: View {
     var body: some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         let mode = OnboardingFlow.choice(in: app.settings.settings)
-        let groups = SettingsGroup.visible(in: section, query: query, mode: mode, accountAvailable: app.collabAccount != nil)
+        let groups = SettingsGroup.visible(in: section, query: query, settings: app.settings.settings, accountAvailable: app.collabAccount != nil)
         VStack(alignment: .leading, spacing: 24) {
             if !searching {
                 Text(section.title).font(Typo.title)
                 if section == .usage {
                     UsageModePicker(selection: mode) { choice in
                         var updated = app.settings.settings
-                        guard OnboardingFlow.apply(choice, to: &updated) else { return }
+                        guard OnboardingFlow.switchMode(choice, in: &updated) else { return }
                         app.settings.settings = updated
                         app.setup.recheck()
                     }
