@@ -12,6 +12,22 @@ public enum ModelService: String, CaseIterable, Identifiable, Sendable {
     public var id: Self { self }
 }
 
+public struct OpenAIModelChoices {
+    public let selectable: [String]
+    public let unavailable: String?
+
+    public init(serverModels: [String]?, savedModel: String) {
+        let saved = savedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let serverModels {
+            selectable = serverModels
+            unavailable = !saved.isEmpty && !serverModels.contains(saved) ? saved : nil
+        } else {
+            selectable = saved.isEmpty ? [] : [saved]
+            unavailable = nil
+        }
+    }
+}
+
 extension TranscriptionService {
     public var connection: ModelService {
         switch self {

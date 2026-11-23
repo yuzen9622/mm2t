@@ -3,6 +3,7 @@
   "strings": {
     "%@ · %lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 已分享 %lld / %lld 場會議"}}}},
     "%@ · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · %lld 個模型"}}}},
+    "%@ · Unavailable": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 無法使用"}}}},
     "API key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "API 金鑰"}}}},
     "API key (optional)": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "API 金鑰（選填）"}}}},
     "Add key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "新增金鑰"}}}},

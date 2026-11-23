@@ -160,7 +160,9 @@ struct ModelsServicesPage: View {
 
     private func menuHeight(_ job: Job) -> CGFloat {
         guard job == .summaries else { return 190 }
-        return min(360, 170 + CGFloat(max(1, openAIChoices.count)) * 30 + (loadingModels || listingFailed ? 28 : 0))
+        let choices = openAIChoices
+        let rows = choices.selectable.count + (choices.unavailable == nil ? 0 : 1)
+        return min(360, 170 + CGFloat(max(1, rows)) * 30 + (loadingModels || listingFailed ? 28 : 0))
     }
 
     private var transcriptionChoices: some View {
@@ -184,7 +186,12 @@ struct ModelsServicesPage: View {
                 case .mm2t: option("mm2t", selected: settings.summaryService == source) { choose(source) }
                 case .gemini: option("Gemini", selected: settings.summaryService == source) { choose(source) }
                 case .openAICompatible:
-                    ForEach(openAIChoices, id: \.self) { model in
+                    let choices = openAIChoices
+                    if let unavailable = choices.unavailable {
+                        menuButton(Text("\(unavailable) · Unavailable"), selected: false, secondary: true) {}
+                            .disabled(true)
+                    }
+                    ForEach(choices.selectable, id: \.self) { model in
                         option(model, selected: settings.summaryService == source && settings.openAIModel == model) {
                             var updated = settings
                             updated.openAIModel = model
@@ -194,17 +201,16 @@ struct ModelsServicesPage: View {
                         }
                     }
                     if loadingModels { ProgressView().controlSize(.mini).padding(.horizontal, 8) }
-                    if listingFailed || (!loadingModels && openAIChoices.isEmpty) { setupOption(source.connection) }
+                    if listingFailed || (!loadingModels && choices.selectable.isEmpty) { setupOption(source.connection) }
                 }
             }
         }
     }
 
-    private var openAIChoices: [String] {
-        var choices = cachedModels ?? []
-        let saved = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !saved.isEmpty, !choices.contains(saved) { choices.insert(saved, at: 0) }
-        return choices
+    private var openAIChoices: OpenAIModelChoices {
+        let knownModels = listingFailed ? nil : cachedModels
+        return OpenAIModelChoices(serverModels: knownModels,
+            savedModel: listingFailed || knownModels != nil ? settings.openAIModel : "")
     }
 
     private func menuGroup<Content: View>(_ service: ModelService, @ViewBuilder content: () -> Content) -> some View {
