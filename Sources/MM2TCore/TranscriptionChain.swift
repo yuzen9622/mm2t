@@ -32,4 +32,8 @@ public struct TranscriptionChain: Sendable {
         }
         throw lastError
     }
+
+    public func finishSession(meeting: String) async {
+        for route in routes { await route.provider.finishSession(meeting: meeting) }
+    }
 }

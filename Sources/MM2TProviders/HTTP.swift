@@ -45,6 +45,38 @@ extension HTTPResponse {
         default: .serviceError
         }
     }
+
+    private struct HostedErrorBody: Decodable {
+        struct Detail: Decodable {
+            let code: String
+            let scope: String?
+        }
+        let error: Detail
+    }
+
+    /// The mm2t backend's `{error:{code}}`, when it sent one.
+    var hostedCode: String? {
+        (try? JSONDecoder().decode(HostedErrorBody.self, from: body))?.error.code
+    }
+
+    /// The mm2t plan backend names each refusal; status codes alone don't tell minutes from AI quota.
+    var hostedFailure: ProviderError.Kind {
+        if status == 401 { return .invalidCredential }
+        let detail = (try? JSONDecoder().decode(HostedErrorBody.self, from: body))?.error
+        switch detail?.code {
+        case "quota_exceeded": return .outOfCredit
+        case "session_limit_reached": return .sessionLimitReached
+        case "session_active": return .sessionActive
+        case "ai_quota_exceeded": return .aiQuotaExceeded(detail?.scope.flatMap(ProviderError.AIQuotaScope.init) ?? .monthly)
+        case "billing_blocked": return .permissionDenied
+        case "invalid_audio": return .audioUnreadable
+        case "payload_too_large": return .audioTooLarge
+        case "input_too_large": return .meetingTooLong
+        case "rate_limited": return .rateLimited
+        case "unauthorized", "invalid_token": return .invalidCredential
+        default: return commonFailure
+        }
+    }
 }
 
 struct MultipartForm {

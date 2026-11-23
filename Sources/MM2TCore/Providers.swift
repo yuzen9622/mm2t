@@ -246,6 +246,25 @@ public protocol TranscriptionProvider: Sendable {
     /// Throws `TranscriptionError.unreachable` on connection failure so the chain can fall through.
     /// `labelSpeakers` is true only for the remote track; a provider that cannot diarize ignores it.
     func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords
+    /// The meeting's tracks are both transcribed; a metered provider closes what it held open for them.
+    func finishSession(meeting: String) async
+}
+
+extension TranscriptionProvider {
+    public func finishSession(meeting: String) async {}
+}
+
+/// Which meeting and track a `transcribe` call belongs to, for providers that meter per meeting.
+/// Absent for one-off transcriptions such as voiceprint enrollment.
+public struct TranscriptionContext: Sendable, Hashable {
+    public let meeting: String
+    public let track: Track
+    public init(meeting: String, track: Track) {
+        self.meeting = meeting
+        self.track = track
+    }
+
+    @TaskLocal public static var current: TranscriptionContext?
 }
 
 // MARK: LLM

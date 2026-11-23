@@ -4,7 +4,6 @@ import MM2TCore
 /// The user's own faster-whisper server (`server/` in this repo), over LAN or Tailscale.
 /// It never labels speakers, so `labelSpeakers` is ignored.
 public struct SelfHostedTranscription: TranscriptionProvider {
-    private let service: Service
     let baseURL: URL
     let token: Secret?
     let languageCode: String?
@@ -17,9 +16,8 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     /// stall the fallback chain for its full length.
     public init(
         baseURL: URL, token: Secret?, languageCode: String? = nil, session: URLSession = .shared,
-        probeTimeout: TimeInterval = 5, timeout: TimeInterval = 3600, hostedPlan: Bool = false
+        probeTimeout: TimeInterval = 5, timeout: TimeInterval = 3600
     ) {
-        self.service = hostedPlan ? .mm2tPlan : .selfHosted
         self.baseURL = baseURL
         self.token = token.flatMap { $0.isEmpty ? nil : $0 }
         self.languageCode = languageCode
@@ -30,8 +28,8 @@ public struct SelfHostedTranscription: TranscriptionProvider {
 
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         do {
-            if service != .mm2tPlan { try await checkHealth() }
-            let upload = try AudioFile.upload(audio, for: service)
+            try await checkHealth()
+            let upload = try AudioFile.upload(audio, for: .selfHosted)
             return .unlabeled(try await post(upload.data, filename: upload.filename, mimeType: upload.mimeType,
                                              hints: hints, languageCode: languageCode))
         } catch let error as ProviderError {
@@ -40,7 +38,7 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     }
 
     private func transcriptionError(_ error: ProviderError) -> TranscriptionError {
-        if service == .selfHosted, error.kind == .unreachable, let host = baseURL.host() {
+        if error.kind == .unreachable, let host = baseURL.host() {
             return .unreachable(String(localized: "Couldn't reach your transcription server (\(host)).", bundle: .main))
         }
         return error.asTranscriptionError
@@ -60,12 +58,11 @@ public struct SelfHostedTranscription: TranscriptionProvider {
         request.httpMethod = "POST"
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finished()
-        let response = try await session.send(request, for: service)
+        let response = try await session.send(request, for: .selfHosted)
         guard response.status == 200 else {
-            let failure = service == .mm2tPlan ? response.commonFailure : Self.failure(response)
-            throw ProviderError(service, failure)
+            throw ProviderError(.selfHosted, Self.failure(response))
         }
-        return try Self.parse(response.body, service: service)
+        return try Self.parse(response.body)
     }
 
     /// `/v1/*` checks the token before routing, so a GET on the POST-only transcription route
@@ -75,26 +72,26 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             try await checkHealth()
             var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: probeTimeout))
             request.httpMethod = "GET"
-            let response = try await session.send(request, for: service)
-            if response.status == 401 && service != .mm2tPlan {
+            let response = try await session.send(request, for: .selfHosted)
+            if response.status == 401 {
                 return .rejected(token == nil
                     ? String(localized: "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.", bundle: .main)
-                    : ProviderError(service, .invalidCredential).description)
+                    : ProviderError(.selfHosted, .invalidCredential).description)
             }
             if (200..<300).contains(response.status) || response.status == 405 { return .valid }
-            return .from(ProviderError(service, service == .mm2tPlan ? response.commonFailure : Self.failure(response)))
+            return .from(ProviderError(.selfHosted, Self.failure(response)))
         } catch let error as ProviderError {
             if error.kind == .unreachable { return .inconclusive(transcriptionError(error).description) }
             return .from(error)
         } catch {
-            return .inconclusive(ProviderError(service, .unreachable).description)
+            return .inconclusive(ProviderError(.selfHosted, .unreachable).description)
         }
     }
 
     private func checkHealth() async throws {
-        let response = try await session.send(URLRequest(url: url("healthz"), timeoutInterval: probeTimeout), for: service)
+        let response = try await session.send(URLRequest(url: url("healthz"), timeoutInterval: probeTimeout), for: .selfHosted)
         guard response.status == 200 else {
-            throw ProviderError(service, response.status >= 500 ? .unavailable : .unreachable)
+            throw ProviderError(.selfHosted, response.status >= 500 ? .unavailable : .unreachable)
         }
     }
 

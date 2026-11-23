@@ -111,7 +111,7 @@ public final class AppController {
         offlineInstallers: [OfflineModel: any ModelInstalling],
         translationInstaller: @escaping @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?,
         machine: MachineProfile = .current,
-        validator: any KeyValidating,
+        validator: (any KeyValidating)? = nil,
         calendars: [any CalendarSource] = [],
         reminders: any ReminderStore = SystemReminders(),
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
@@ -119,7 +119,8 @@ public final class AppController {
         widgetFile: URL? = nil,
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
-        recordingTitle: String = "Recording", collabConfiguration: CollabConfiguration? = nil
+        recordingTitle: String = "Recording", collabConfiguration: CollabConfiguration? = nil,
+        collabSession: URLSession = .shared
     ) throws {
         let folders = try MeetingFolders(file: paths.root.appending(path: "folders.json"))
         self.folders = folders
@@ -130,10 +131,14 @@ public final class AppController {
         let settings = SettingsStore(defaults: defaults, machine: machine, installedMLX: offlineInstallers[.transcription]?.isDownloaded)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
-        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials, pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json")) }
+        let account = collabConfiguration.map {
+            CollabAccount(configuration: $0, credentials: credentials,
+                          pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json"), session: collabSession)
+        }
         collabAccount = account
         let accountURL = collabConfiguration?.apiURL
-        let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
+        let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog,
+                                          account: account?.service)
         migrateVoiceprints = { progress in
             guard let models = catalog.localSpeakerModels() else { return }
             let migration = VoiceprintMigration(library: library, voiceprints: voiceprints, embedder: models.embedder)
@@ -256,7 +261,8 @@ public final class AppController {
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
             translationInstaller: translationInstaller,
-            suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
+            suitability: OfflineSuitability(machine), credentials: credentials,
+            validator: validator ?? LiveKeyValidator(account: account?.service),
             settings: settings, runningBrowsers: runningBrowsers,
             prepareCoreML: {
                 guard let engine = catalog.localTranscription(model: .breezeCoreML, language: .auto) as? any ClipTranscriber else {
@@ -335,7 +341,7 @@ public final class AppController {
                 case .apple: nil // System-owned; prepared with the system consent sheet.
                 }
             },
-            machine: machine, validator: LiveKeyValidator(),
+            machine: machine,
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
                 OnlineCalendar.google(clientID: info("MM2TGoogleClientID"), credentials: credentials),

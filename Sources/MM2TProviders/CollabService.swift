@@ -177,6 +177,33 @@ public actor CollabService {
         _ = try await renew(after: currentTokens(), generation: generation)
     }
 
+    /// The access token for hosted-plan requests, renewed first when it expires within a minute.
+    public func accessToken(now: Date = Date()) async throws -> Secret {
+        let current = try currentTokens()
+        guard let expiry = Self.expiry(of: current.accessToken), expiry.timeIntervalSince(now) < 60 else {
+            return Secret(current.accessToken)
+        }
+        return Secret(try await renew(after: current, generation: generation).accessToken)
+    }
+
+    /// A replacement for a token the server rejected; a token already replaced is not renewed twice.
+    public func renewAccessToken(after rejected: Secret) async throws -> Secret {
+        let current = try currentTokens()
+        guard current.accessToken == rejected.revealed else { return Secret(current.accessToken) }
+        return Secret(try await renew(after: current, generation: generation).accessToken)
+    }
+
+    /// The JWT `exp` claim, read without verifying: only the server decides validity.
+    nonisolated static func expiry(of token: String) -> Date? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        struct Claims: Decodable { let exp: Double }
+        guard let data = Data(base64Encoded: payload), let claims = try? JSONDecoder().decode(Claims.self, from: data) else { return nil }
+        return Date(timeIntervalSince1970: claims.exp)
+    }
+
     public func logout() async throws {
         let version = generation
         if let refreshing { _ = try await refreshing.value }

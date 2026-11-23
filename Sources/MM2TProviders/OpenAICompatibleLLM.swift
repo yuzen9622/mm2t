@@ -19,6 +19,9 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     package let service: Service
     let baseURL: URL
     let apiKey: Secret?
+    /// Hosted plan only: per-request account tokens and the purpose header.
+    let hosted: HostedAuthorization?
+    private var purpose = HostedPurpose.ask
     let model: String
     let session: URLSession
     var limits: Limits
@@ -33,11 +36,12 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     /// `baseURL` is the API root the user copies from their server, e.g. `http://host:8000/v1`.
     public init(
         baseURL: URL, apiKey: Secret?, model: String, session: URLSession = .shared,
-        limits: Limits = Limits(), timeout: TimeInterval = 900, hostedPlan: Bool = false
+        limits: Limits = Limits(), timeout: TimeInterval = 900, authorization: HostedAuthorization? = nil
     ) {
-        self.service = hostedPlan ? .mm2tPlan : .openAICompatible
+        self.hosted = authorization
+        self.service = authorization == nil ? .openAICompatible : .mm2tPlan
         self.baseURL = Self.apiRoot(baseURL)
-        self.apiKey = apiKey.flatMap { $0.isEmpty ? nil : $0 }
+        self.apiKey = authorization == nil ? apiKey.flatMap { $0.isEmpty ? nil : $0 } : nil
         self.model = model
         self.session = session
         self.limits = limits
@@ -54,11 +58,11 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
 
     /// Lists exact model IDs without running inference. The optional key stays in the header.
     public func availableModels() async throws -> [String] {
-        var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 15))
+        var request = URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 15)
         request.httpMethod = "GET"
-        let response = try await session.send(request, for: service)
+        let response = try await perform(request)
         if response.status == 404 || response.status == 405 { throw ModelListingError.unsupported }
-        guard response.status == 200 else { throw ProviderError(service, Self.failure(response)) }
+        guard response.status == 200 else { throw ProviderError(service, failure(response)) }
         struct Listing: Decodable {
             struct Model: Decodable { let id: String }
             let data: [Model]
@@ -88,8 +92,13 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         return generation
     }
 
-    private var tasks: LLMTasks {
-        LLMTasks(self, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters,
+    /// Meeting processing; `rewrite` switches to its own purpose.
+    private var tasks: LLMTasks { tasks(for: .auto) }
+
+    private func tasks(for purpose: HostedPurpose) -> LLMTasks {
+        var generator = self
+        generator.purpose = purpose
+        return LLMTasks(generator, cleanChunkCharacters: limits.cleanChunkCharacters, maxInputCharacters: limits.maxInputCharacters,
                  cleanConcurrency: 4, responseCache: responseCache, summaryUpdates: summaryUpdates, digestUpdates: digestUpdates,
                  cleanedCheckpoints: cleanedCheckpoints, normalizationSnapshot: normalizationSnapshot)
     }
@@ -98,7 +107,11 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     public func cleanTranscript(_ transcript: LLMTranscript) async throws -> CleanedTranscript { try await tasks.cleanTranscript(transcript) }
     public func digestPerPerson(_ transcript: LLMTranscript) async throws -> [PersonDigest] { try await tasks.digestPerPerson(transcript) }
     public func summarize(_ request: SummaryRequest) async throws -> Summary { try await tasks.summarize(request) }
-    public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks.rewrite(text, instruction: instruction) }
+    public func rewrite(_ text: String, instruction: String) async throws -> String { try await tasks(for: .rewrite).rewrite(text, instruction: instruction) }
+    /// The assistant's own questions, which count as asks rather than rewrites.
+    public func generateText(system: String, input: String) async throws -> String {
+        try await tasks(for: .ask).rewrite(input, instruction: system)
+    }
     public func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
         try await tasks.vocabularyCorrections(from: old, to: new)
     }
@@ -107,19 +120,19 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     /// 405, so those get a one-token completion instead, which also proves the model name works.
     public func validateKey() async -> KeyCheck {
         do {
-            var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 30))
+            var request = URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 30)
             request.httpMethod = "GET"
-            var response = try await session.send(request, for: service)
+            var response = try await perform(request)
             if service != .mm2tPlan, response.status == 404 || response.status == 405 {
                 let body = Self.object([
                     ("model", JSON.text(model).serialized()),
                     ("messages", JSON.list([Self.message("user", "ping")]).serialized()),
                     ("max_completion_tokens", "1"),
                 ])
-                response = try await session.send(completionRequest(body, timeout: 30), for: service)
+                response = try await perform(completionRequest(body, timeout: 30))
             }
             if (200..<300).contains(response.status) { return .valid }
-            return .from(ProviderError(service, Self.failure(response)))
+            return .from(ProviderError(service, failure(response)))
         } catch let error as ProviderError {
             return .from(error)
         } catch {
@@ -136,10 +149,10 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
             // with the schema spelled out in the prompt instead.
             let hint = "\(system)\n\nReply with one JSON object that matches this JSON Schema:\n\(schema.serialized())"
             let fallback = try await send(system: hint, input: input, format: #"{"type":"json_object"}"#)
-            guard fallback.status == 200 else { throw ProviderError(service, Self.failure(fallback)) }
+            guard fallback.status == 200 else { throw ProviderError(service, failure(fallback)) }
             return try Self.messageText(fallback.body, service: service)
         }
-        guard preferred.status == 200 else { throw ProviderError(service, Self.failure(preferred)) }
+        guard preferred.status == 200 else { throw ProviderError(service, failure(preferred)) }
         return try Self.messageText(preferred.body, service: service)
     }
 
@@ -153,15 +166,13 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
 
     private func send(system: String, input: String, format: String) async throws -> HTTPResponse {
         var fields = chatFields(system: system, input: input, format: format)
-        var response = try await session.send(
-            completionRequest(Self.object(fields), timeout: timeout), for: service)
+        var response = try await perform(completionRequest(Self.object(fields), timeout: timeout))
         // Optional extensions are not universal. Remove only explicitly rejected fields,
         // at most once each; never retry authentication, rate limits or server failures.
         for _ in 0..<3 {
             guard let accepted = withoutRejectedFields(fields, response) else { return response }
             fields = accepted
-            response = try await session.send(
-                completionRequest(Self.object(fields), timeout: timeout), for: service)
+            response = try await perform(completionRequest(Self.object(fields), timeout: timeout))
         }
         return response
     }
@@ -204,12 +215,16 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     func openStream(system: String, input: String) async throws -> URLSession.AsyncBytes {
         var fields = chatFields(system: system, input: input, format: nil)
         for attempt in 0...3 {
-            let (bytes, status) = try await TextStreaming.connect(
-                completionRequest(Self.object(fields), timeout: timeout), session: session, service: service)
+            let request = completionRequest(Self.object(fields), timeout: timeout)
+            let (bytes, status) = if let hosted {
+                try await hosted.connect(session) { bearer($0, request) }
+            } else {
+                try await TextStreaming.connect(authorized(request), session: session, service: service)
+            }
             if status == 200 { return bytes }
-            let failure = HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))
-            guard attempt < 3, let accepted = withoutRejectedFields(fields, failure) else {
-                throw ProviderError(service, Self.failure(failure))
+            let refused = HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))
+            guard attempt < 3, let accepted = withoutRejectedFields(fields, refused) else {
+                throw ProviderError(service, failure(refused))
             }
             fields = accepted
         }
@@ -236,16 +251,26 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     }
 
     private func completionRequest(_ body: String, timeout: TimeInterval) -> URLRequest {
-        var request = authorized(URLRequest(url: baseURL.appending(path: "chat/completions"), timeoutInterval: timeout))
+        var request = URLRequest(url: baseURL.appending(path: "chat/completions"), timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(body.utf8)
         return request
     }
 
+    private func perform(_ request: URLRequest) async throws -> HTTPResponse {
+        guard let hosted else { return try await session.send(authorized(request), for: service) }
+        return try await hosted.send(session) { bearer($0, request) }
+    }
+
     private func authorized(_ request: URLRequest) -> URLRequest {
+        apiKey.map { bearer($0, request) } ?? request
+    }
+
+    private func bearer(_ token: Secret, _ request: URLRequest) -> URLRequest {
         var request = request
-        if let apiKey { request.setValue("Bearer \(apiKey.revealed)", forHTTPHeaderField: "Authorization") }
+        request.setValue("Bearer \(token.revealed)", forHTTPHeaderField: "Authorization")
+        if hosted != nil { request.setValue(purpose.rawValue, forHTTPHeaderField: "X-MM2T-Purpose") }
         return request
     }
 
@@ -290,6 +315,10 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     /// A wrong base URL or model name answers 404; the model name is the usual culprit.
     static func failure(_ response: HTTPResponse) -> ProviderError.Kind {
         response.status == 404 ? .rejectedInput : response.commonFailure
+    }
+
+    private func failure(_ response: HTTPResponse) -> ProviderError.Kind {
+        hosted == nil ? Self.failure(response) : response.hostedFailure
     }
 }
 

@@ -106,6 +106,10 @@ public final class LiveProviderCatalog: ProviderCatalog {
     private let coreML: LocalTranscription
     private let machine: MachineProfile
     private let transcription: BreezeMLX
+    /// One for the app's lifetime, so a retried meeting reuses its lease and the pieces already sent.
+    private let hostedLeases = HostedLeases(
+        recall: { UserDefaults.standard.stringArray(forKey: "hostedPlanLeases") ?? [] },
+        keep: { UserDefaults.standard.set($0, forKey: "hostedPlanLeases") })
 
     public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel,
                 translationModels: TranslationModels, machine: MachineProfile = .current) {
@@ -128,11 +132,11 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
     }
-    public func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
-        SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code, hostedPlan: true)
+    public func hostedTranscription(url: URL, authorization: HostedAuthorization, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        HostedTranscription(baseURL: url, authorization: authorization, languageCode: language.code, leases: hostedLeases)
     }
-    public func hostedLLM(url: URL, token: Secret) -> any LLMProvider {
-        OpenAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t", hostedPlan: true)
+    public func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider {
+        OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", authorization: authorization)
     }
     public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
         ElevenLabsRealtime(apiKey: apiKey)
@@ -210,14 +214,24 @@ public protocol KeyValidating: Sendable {
 
 public struct LiveKeyValidator: KeyValidating {
     private let session: URLSession
+    private let account: CollabService?
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = .shared, account: CollabService? = nil) {
+        self.session = session
+        self.account = account
+    }
+
+    private func authorization(_ token: Secret) -> HostedAuthorization {
+        account.map { HostedAuthorization(stored: token, account: $0) } ?? .fixed(token)
+    }
+
     public func validate(_ request: KeyValidation) async -> KeyCheck {
         switch request {
         case .hostedTranscription(let url, let token):
-            await SelfHostedTranscription(baseURL: url, token: token, session: session, hostedPlan: true).validateKey()
+            await HostedTranscription.validateKey(baseURL: url, authorization: authorization(token), session: session)
         case .hostedSummaries(let url, let token):
-            await OpenAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t", session: session, hostedPlan: true).validateKey()
+            await OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", session: session,
+                                      authorization: authorization(token)).validateKey()
         case .elevenLabs(let key): await ElevenLabsScribe(apiKey: key).validateKey()
         case .gemini(let key): await GeminiLLM(apiKey: key).validateKey()
         case .selfHosted(let url, let token): await SelfHostedTranscription(baseURL: url, token: token).validateKey()

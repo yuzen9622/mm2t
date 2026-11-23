@@ -73,7 +73,7 @@ import Testing
     func hostedStreamingFailuresNameThePlan(event: String) async throws {
         let server = StubServer(status: 200, body: "data: \(event)\n\n")
         let provider = OpenAICompatibleLLM(baseURL: URL(string: "https://example.test/v1/hosted/llm")!,
-                                           apiKey: "test", model: "mm2t", session: server.session, hostedPlan: true)
+                                           apiKey: nil, model: "mm2t", session: server.session, authorization: .fixed("test"))
         let kind: ProviderError.Kind = event.contains("refusal") ? .blocked : .malformedResponse
         await #expect(throws: ProviderError(.mm2tPlan, kind)) {
             for try await _ in provider.streamText(system: "", input: "") {}

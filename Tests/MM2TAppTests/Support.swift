@@ -300,6 +300,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let selfHostedURLs = Box<[URL]>([])
     let languagesUsed = Box<[TranscriptionLanguage]>([])
     let openAIEndpoints = Box<[String]>([])
+    let hostedLLMSession = Box<URLSession?>(nil)
 
     func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
         keysUsed.update { $0.append("stt:" + apiKey.revealed) }
@@ -349,13 +350,16 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return offlineDownloaded[OfflineModel(model)]!.get ? onDeviceSTT : nil
     }
 
-    func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
-        keysUsed.update { $0.append("hosted-stt:" + token.revealed) }
-        return selfHostedTranscription(url: url, token: token, language: language)
+    func hostedTranscription(url: URL, authorization: HostedAuthorization, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        keysUsed.update { $0.append("hosted-stt:" + authorization.stored.revealed) }
+        return selfHostedTranscription(url: url, token: authorization.stored, language: language)
     }
 
-    func hostedLLM(url: URL, token: Secret) -> any LLMProvider {
-        openAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t")
+    func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider {
+        if let session = hostedLLMSession.get {
+            return OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", session: session, authorization: authorization)
+        }
+        return openAICompatibleLLM(baseURL: url, apiKey: authorization.stored, model: "mm2t")
     }
 
     let translator = FakeTranslator()
@@ -505,21 +509,26 @@ actor FakeSession: RecordingSession {
         return highlight
     }
 
+    private var suppliedTrackDuration: TimeInterval?
+    func useSuppliedTracks(duration: TimeInterval) { suppliedTrackDuration = duration }
+
     func stop() throws -> Recording {
         continuation.finish()
         audio?.finish()
         let directory = configuration.directory
-        for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
-            let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)
-            writer.appendSilence(frames: 16_000)
-            try writer.close()
+        if suppliedTrackDuration == nil {
+            for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
+                let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)
+                writer.appendSilence(frames: 16_000)
+                try writer.close()
+            }
         }
         return Recording(
             micTrack: directory.appending(path: RecordingManifest.micFile),
             remoteTrack: directory.appending(path: RecordingManifest.remoteFile),
             highlights: highlights,
             metadata: MeetingMetadata(title: configuration.title, startedAt: Date(timeIntervalSince1970: 1_800_000_000),
-                                      duration: 35, platform: configuration.platform))
+                                      duration: suppliedTrackDuration ?? 35, platform: configuration.platform))
     }
 }
 
@@ -584,7 +593,7 @@ struct World {
     /// `endCountdown` is zero unless a test is about the countdown, so a meeting ending stops at once.
     init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
          endCountdown: Duration = .zero, setupValidator: (any KeyValidating)? = nil,
-         collabConfiguration: CollabConfiguration? = nil) throws {
+         collabConfiguration: CollabConfiguration? = nil, collabSession: URLSession = .shared) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
         if keys {
@@ -603,7 +612,7 @@ struct World {
             offlineInstallers: offlineInstallers,
             translationInstaller: { _, _ in translation },
             machine: machine, validator: setupValidator ?? validator, now: { now.get }, endCountdown: endCountdown,
-            collabConfiguration: collabConfiguration)
+            collabConfiguration: collabConfiguration, collabSession: collabSession)
         app.settings.settings.translationEnabled = true
         app.settings.settings.captionEngine = .firefox
     }

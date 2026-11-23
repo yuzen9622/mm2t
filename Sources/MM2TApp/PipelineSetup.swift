@@ -72,8 +72,8 @@ public protocol ProviderCatalog: Sendable {
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
     func localSpeakerModels() -> LocalSpeakerModels?
-    func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider
-    func hostedLLM(url: URL, token: Secret) -> any LLMProvider
+    func hostedTranscription(url: URL, authorization: HostedAuthorization, language: TranscriptionLanguage) -> any TranscriptionProvider
+    func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider
     func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)?
     /// Live caption translation into `target` on this Mac; nil until the models it needs are on disk.
     func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) async -> (any CaptionTranslator)?
@@ -96,12 +96,16 @@ public struct PipelineSetup: Sendable {
     public let voiceprints: VoiceprintStore
     public let credentials: any CredentialStoring
     public let catalog: any ProviderCatalog
+    /// Renews the hosted token before it expires and after a 401; without it the stored token is used as is.
+    public let account: CollabService?
 
-    public init(library: MeetingLibrary, voiceprints: VoiceprintStore, credentials: any CredentialStoring, catalog: any ProviderCatalog) {
+    public init(library: MeetingLibrary, voiceprints: VoiceprintStore, credentials: any CredentialStoring,
+                catalog: any ProviderCatalog, account: CollabService? = nil) {
         self.library = library
         self.voiceprints = voiceprints
         self.credentials = credentials
         self.catalog = catalog
+        self.account = account
     }
 
     public static func hostedURL(_ apiURL: URL, job: String) -> URL {
@@ -144,7 +148,8 @@ public struct PipelineSetup: Sendable {
             return .init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken), language: language))
         case .mm2t:
             guard let accountURL, let token = try accountToken(for: accountURL) else { return nil }
-            return .init(.selfHosted, catalog.hostedTranscription(url: Self.hostedURL(accountURL, job: "stt"), token: token, language: language))
+            return .init(.selfHosted, catalog.hostedTranscription(url: Self.hostedURL(accountURL, job: "stt"),
+                                                                  authorization: authorization(token), language: language))
         }
     }
 
@@ -181,7 +186,7 @@ public struct PipelineSetup: Sendable {
             llm = catalog.openAICompatibleLLM(baseURL: url, apiKey: try nonEmpty(.openAICompatibleAPIKey), model: model)
         case .mm2t:
             if let accountURL, let token = try accountToken(for: accountURL) {
-                llm = catalog.hostedLLM(url: Self.hostedURL(accountURL, job: "llm"), token: token)
+                llm = catalog.hostedLLM(url: Self.hostedURL(accountURL, job: "llm"), authorization: authorization(token))
             } else { llm = nil }
         }
         guard let llm else { return .needsSetup([.summaryServiceNotConfigured(settings.summaryService)]) }
@@ -198,6 +203,10 @@ public struct PipelineSetup: Sendable {
             checks[.summaries] = .hostedSummaries(url: Self.hostedURL(accountURL, job: HostedPlanJob.summaries.rawValue), token: token)
         }
         return checks
+    }
+
+    private func authorization(_ token: Secret) -> HostedAuthorization {
+        account.map { HostedAuthorization(stored: token, account: $0) } ?? .fixed(token)
     }
 
     private func accountToken(for url: URL) throws -> Secret? {

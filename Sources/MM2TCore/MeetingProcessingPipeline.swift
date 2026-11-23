@@ -258,17 +258,25 @@ public struct MeetingProcessingPipeline: Sendable {
             var me: TrackTranscript
             // Speaker labels serve only the separation that falls back on them.
             let labels = diarizationOrder.contains(.transcription)
+            let id = meeting.id.description, transcription = transcription
+            @Sendable func transcribe(_ track: Track, _ audio: URL, labelSpeakers: Bool) async throws -> TrackTranscript {
+                try await TranscriptionContext.$current.withValue(TranscriptionContext(meeting: id, track: track)) {
+                    try await transcription.transcribe(audio: audio, hints: hints, labelSpeakers: labelSpeakers)
+                }
+            }
             if transcribesConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
-                async let remoteTask = transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
-                async let meTask = transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels)
+                async let remoteTask = transcribe(.remote, remoteURL, labelSpeakers: labels)
+                async let meTask = transcribe(.me, heardURL, labelSpeakers: labels)
                 (remote, me) = try await (remoteTask, meTask)
             } else {
-                remote = try await transcription.transcribe(audio: remoteURL, hints: hints, labelSpeakers: labels)
+                remote = try await transcribe(.remote, remoteURL, labelSpeakers: labels)
                 // A silent remote track means the meeting happened in the room, so the mic holds every
                 // voice and is the track whose speakers need telling apart.
-                me = try await transcription.transcribe(audio: heardURL, hints: hints, labelSpeakers: labels && remote.words.isEmpty)
+                me = try await transcribe(.me, heardURL, labelSpeakers: labels && remote.words.isEmpty)
             }
+            // Only after both tracks: a failed stage keeps the plan's session, so a retry reuses its pieces.
+            await transcription.finishSession(meeting: id)
             if let echo = cleaned?.echo { me = me.dropping(echo) }
             meeting.transcription = Transcription(me: me.inTraditionalChinese, remote: remote.inTraditionalChinese)
 
