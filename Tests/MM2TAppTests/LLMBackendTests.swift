@@ -8,7 +8,7 @@ import Testing
     func build(_ world: World, _ change: (inout AppSettings) -> Void) throws -> PipelineBuild {
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
                                   credentials: world.credentials, catalog: world.catalog)
-        var settings = AppSettings()
+        var settings = world.app.settings.settings
         change(&settings)
         return try setup.build(settings)
     }
@@ -66,6 +66,7 @@ import Testing
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.catalog.languagesUsed.set([])
         _ = try build(world) {
+            $0.transcriptionService = .mm2t
             $0.localSpeechModel = .breeze
         }
         #expect(world.catalog.languagesUsed.get == [.auto])

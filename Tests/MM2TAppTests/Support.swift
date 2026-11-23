@@ -605,6 +605,10 @@ struct World {
          collabConfiguration: CollabConfiguration? = nil, collabSession: URLSession = .shared) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
+        var settings = AppSettings()
+        settings.transcriptionService = .elevenLabs
+        settings.summaryService = .gemini
+        defaults.set(try JSONEncoder().encode(settings), forKey: SettingsStore.key)
         if keys {
             try credentials.save("eleven-key", for: .elevenLabsAPIKey)
             try credentials.save("gemini-key", for: .geminiAPIKey)

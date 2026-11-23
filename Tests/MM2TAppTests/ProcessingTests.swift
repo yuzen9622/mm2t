@@ -75,8 +75,50 @@ import Testing
         #expect(issues == [.transcriptionServiceNotConfigured(.server), .summaryServiceNotConfigured(.openAICompatible)])
         #expect(issues.compactMap(\.service) == [.transcriptionServer, .openAICompatible])
         world.catalog.modelsDownloaded.set(false)
-        guard case .needsSetup(let missing) = try setup.build(AppSettings()) else { Issue.record("Expected speaker models issue"); return }
+        guard case .needsSetup(let missing) = try setup.build(world.app.settings.settings) else { Issue.record("Expected speaker models issue"); return }
         #expect(missing == [.diarizationModelsMissing])
+    }
+
+    @Test(arguments: [false, true])
+    func signedOutMM2TRecordsLocallyAndCanGenerateAfterSignIn(hasAccountURL: Bool) async throws {
+        let api = URL(string: "https://collab.example")!
+        let world = try World(keys: false, collabConfiguration: hasAccountURL ? .init(apiURL: api, webURL: api) : nil)
+        world.app.settings.settings = AppSettings()
+        world.app.settings.settings.localSpeechModel = .breezeCoreML
+        world.catalog.offlineDownloaded[.breezeCoreML]?.set(true)
+        world.app.setup.recheck()
+        #expect(world.app.setup.issues.isEmpty)
+
+        let meeting = try await world.recordedMeeting()
+        #expect(meeting.status == .completed)
+        #expect(meeting.transcription?.me.source == .local)
+        #expect(!meeting.utterances.isEmpty && !meeting.speakers.isEmpty)
+        #expect(meeting.outputs.cleaned == nil)
+        #expect(meeting.outputs.digests == nil)
+        #expect(meeting.outputs.summary == nil)
+        #expect(world.catalog.onDeviceSTT.calls.get.count == 2)
+        #expect(world.catalog.llm.calls.get.isEmpty)
+        #expect(world.catalog.openAIEndpoints.get.isEmpty)
+
+        if hasAccountURL {
+            try world.credentials.save(Secret(#"{"apiURL":"https://collab.example","tokens":{"accessToken":"plan-token","refreshToken":"refresh"}}"#), for: .collabAccount)
+            await world.detail(meeting.id).regenerate()
+            let summarized = try await world.library.meeting(meeting.id)
+            #expect(summarized.status == .completed)
+            #expect(summarized.outputs.summary != nil)
+            #expect(world.catalog.onDeviceSTT.calls.get.count == 2)
+            #expect(world.catalog.selfHosted.calls.get.isEmpty)
+        }
+    }
+
+    @Test func signedOutMM2TWithoutTheDownloadedModelReportsOnlyTheTranscriptionIssue() async throws {
+        let world = try World(keys: false)
+        world.app.settings.settings = AppSettings()
+        world.app.settings.settings.localSpeechModel = .breezeCoreML
+        let meeting = try await world.recordedMeeting()
+        #expect(world.queue.jobs[meeting.id] == .needsSetup([.transcriptionServiceNotConfigured(.mm2t)]))
+        #expect(meeting.status == .pending(next: .transcribe))
+        #expect(world.catalog.providerCalls == 0)
     }
 
     @Test func hostedJobsUseOnlyTheTokenForTheConfiguredCollaborationAPI() throws {
@@ -95,7 +137,7 @@ import Testing
         guard case .needsSetup(let issues) = try setup.build(settings, accountURL: URL(string: "https://other.example")) else {
             Issue.record("Wrong account origin must not receive the token"); return
         }
-        #expect(issues == [.transcriptionServiceNotConfigured(.mm2t), .summaryServiceNotConfigured(.mm2t)])
+        #expect(issues == [.transcriptionServiceNotConfigured(.mm2t)])
         guard case .ready(let pipeline) = try setup.build(settings, accountURL: api) else { Issue.record("Expected hosted plan"); return }
         #expect(pipeline.transcription.routes.count == 1)
         #expect(world.catalog.selfHostedURLs.get.map(\.absoluteString) == ["https://collab.example/proxy/v1/hosted/stt"])
@@ -203,11 +245,8 @@ import Testing
         #expect(meeting.transcription?.me.source == .selfHosted)
         let requests = RecordingTokenProbe.summaryRequests.get
         if signOut {
-            guard case .failed(_, let reason) = meeting.status else {
-                Issue.record("Expected summary generation to require sign-in after logout")
-                return
-            }
-            #expect(reason == "Sign in to use your mm2t plan.")
+            #expect(meeting.status == .completed)
+            #expect(meeting.outputs.summary == nil)
             #expect(requests.isEmpty, "no hosted request should use the signed-out token")
         } else {
             #expect(meeting.status == .completed)
@@ -360,8 +399,8 @@ import Testing
         }
         let world = try World()
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints, credentials: Locked(), catalog: world.catalog)
-        let queue = ProcessingQueue(makePipeline: { try setup.build(AppSettings()) },
-                                    makeLLM: { try setup.buildLLM(AppSettings()) })
+        let queue = ProcessingQueue(makePipeline: { try setup.build(world.app.settings.settings) },
+                                    makeLLM: { try setup.buildLLM(world.app.settings.settings) })
         let meeting = try await world.library.create(Recording(
             micTrack: try silentTrack(in: world.root, "a.wav"), remoteTrack: try silentTrack(in: world.root, "b.wav"),
             highlights: [], metadata: MeetingMetadata(title: "x", startedAt: Date(), duration: 1)))

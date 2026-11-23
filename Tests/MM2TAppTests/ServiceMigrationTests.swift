@@ -47,6 +47,23 @@ import Testing
         #expect(settings.captionSources == [.cloud, .selfHosted, .local])
     }
 
+    @MainActor @Test func anEmptySettingsStoreUsesTheMM2TPlan() throws {
+        let defaults = try #require(UserDefaults(suiteName: "mm2t-tests-\(UUID())"))
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.settings.transcriptionService == .mm2t)
+        #expect(store.settings.summaryService == .mm2t)
+        #expect(defaults.object(forKey: SettingsStore.key) == nil)
+    }
+
+    @MainActor @Test func persistedServiceChoicesTakePrecedenceOverNewDefaults() throws {
+        let defaults = try #require(UserDefaults(suiteName: "mm2t-tests-\(UUID())"))
+        defaults.set(Data(#"{"transcriptionService":"server","summaryService":"openAICompatible"}"#.utf8),
+                     forKey: SettingsStore.key)
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.settings.transcriptionService == .server)
+        #expect(store.settings.summaryService == .openAICompatible)
+    }
+
     @MainActor @Test func decodingLegacyPreferencesDoesNotWriteOnLaunch() throws {
         let defaults = try #require(UserDefaults(suiteName: "mm2t-tests-\(UUID())"))
         let legacy = Data(#"{"transcriptionOrder":["local"],"llmLocation":"local"}"#.utf8)

@@ -13,6 +13,7 @@ import MM2TCore
         #expect(AppSettings().captionEngine == CaptionEngine.initial)
         let defaults = try #require(UserDefaults(suiteName: "mm2t-tests-\(UUID())"))
         let store = SettingsStore(defaults: defaults)
+        let processing = store.settings.forProcessing
         for engine in CaptionEngine.allCases {
             store.settings.captionEngine = engine
             store.settings.captionTranslation = CaptionTranslation(engine == .firefox ? .japanese : CaptionTarget(languageCode: "vi"))
@@ -20,7 +21,7 @@ import MM2TCore
             #expect(!reloaded.translationEnabled)
             #expect(reloaded.captionEngine == engine)
             #expect(reloaded.captionTranslation == store.settings.captionTranslation)
-            #expect(reloaded.forProcessing == legacy.forProcessing)
+            #expect(reloaded.forProcessing == processing)
         }
     }
 

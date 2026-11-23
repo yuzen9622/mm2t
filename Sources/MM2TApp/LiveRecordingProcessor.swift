@@ -29,6 +29,7 @@ public struct LiveProcessingProgress: Sendable {
 public actor LiveRecordingProcessor {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
     public let pipeline: MeetingProcessingPipeline?
+    nonisolated var checkpointPipeline: MeetingProcessingPipeline? { checkpointsEnabled ? pipeline : nil }
     private let checkpointsEnabled: Bool
     private let session: any StreamingDiarizationSession
     private let scratch: URL

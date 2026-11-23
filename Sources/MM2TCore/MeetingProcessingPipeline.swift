@@ -17,7 +17,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Sources tried in order for the remote track's speaker turns.
     public let diarizationOrder: [DiarizationSource]
     public let transcription: TranscriptionChain
-    public let llm: any LLMProvider
+    public let llm: (any LLMProvider)?
     public let thresholds: MatchThresholds
     public let vocabulary: [String]
     /// Whether name inference and the three generated views run at once. Hosted LLMs can do so
@@ -36,7 +36,7 @@ public struct MeetingProcessingPipeline: Sendable {
         embedder: (any SpeakerEmbedder)?,
         diarizationOrder: [DiarizationSource] = [.local, .transcription],
         transcription: TranscriptionChain,
-        llm: any LLMProvider,
+        llm: (any LLMProvider)?,
         thresholds: MatchThresholds,
         vocabulary: [String],
         runsConcurrently: Bool = false,
@@ -84,7 +84,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Speculative generation only warms successful, exact-input responses. A final changed
     /// transcript, speaker assignment, highlight or date necessarily requests a fresh result.
     public func precomputeRecording(_ draft: Meeting) async -> Bool {
-        guard runsConcurrently else { return false }
+        guard runsConcurrently, let llm else { return false }
         guard !draft.utterances.isEmpty else { return true }
         let generation = withLLM(await llm.forGeneration())
         return await withTaskGroup(of: Bool.self) { group in
@@ -135,11 +135,19 @@ public struct MeetingProcessingPipeline: Sendable {
             try await library.save(meeting)
         }
         while let step = meeting.status.resumeStep {
-            if runsConcurrently, step >= .inferNames {
-                // One label for the group: the summary is the part the user is waiting for.
-                progress(.summarize)
-                try await generate(from: step, on: &meeting)
-                return meeting
+            if step >= .inferNames {
+                guard let llm else {
+                    try Task.checkCancellation()
+                    meeting.status = .completed
+                    try await library.save(meeting)
+                    return meeting
+                }
+                if runsConcurrently {
+                    // One label for the group: the summary is the part the user is waiting for.
+                    progress(.summarize)
+                    try await generate(from: step, using: llm, on: &meeting)
+                    return meeting
+                }
             }
             progress(step)
             do {
@@ -162,7 +170,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Runs `first` and every step after it at once. None of them reads another's result, so the
     /// wait is the slowest one rather than their sum. Each result is saved as it arrives; a failure
     /// leaves the meeting failed at the earliest step that failed, and a retry runs from there.
-    private func generate(from first: ProcessingStep, on meeting: inout Meeting) async throws {
+    private func generate(from first: ProcessingStep, using llm: any LLMProvider, on meeting: inout Meeting) async throws {
         let steps = ProcessingStep.allCases.filter { $0 >= first }
         let start = meeting
         let generation = withLLM(await llm.forGeneration())
@@ -290,6 +298,7 @@ public struct MeetingProcessingPipeline: Sendable {
             align(&meeting)
 
         case .inferNames:
+            guard let llm else { return }
             let speaking = Set(meeting.utterances.map(\.speaker))
             let unnamed = meeting.speakers.filter { $0.person == nil && speaking.contains($0.id) }.map(\.id)
             let voiceprintSuggestions = meeting.suggestions.items.filter {
@@ -314,18 +323,21 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.suggestions = NameSuggestions(items: voiceprintSuggestions + inferred)
 
         case .cleanTranscript:
+            guard let llm else { return }
             var transcript = llmTranscript(meeting)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             meeting.outputs.cleaned = try await llm.cleanTranscript(transcript).inTraditionalChinese
 
         case .digestPerPerson:
+            guard let llm else { return }
             var transcript = llmTranscript(meeting)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             meeting.outputs.digests = try await llm.digestPerPerson(transcript).map(\.inTraditionalChinese)
 
         case .summarize:
+            guard let llm else { return }
             var transcript = llmTranscript(meeting)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }

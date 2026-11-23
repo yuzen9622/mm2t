@@ -78,8 +78,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// `diarizationOrder` that preferred the transcription service's speaker labels; it is ignored.
     public static let diarizationOrder: [DiarizationSource] = [.local]
 
-    public var transcriptionService: TranscriptionService = .elevenLabs
-    public var summaryService: SummaryService = .gemini
+    public var transcriptionService: TranscriptionService = .mm2t
+    public var summaryService: SummaryService = .mm2t
     public var selfHostedURL: URL?
     /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
     public private(set) var vocabulary: [String] = []
@@ -366,6 +366,10 @@ public final class SettingsStore {
         if machine.isAppleSilicon { decoder.userInfo[AppSettings.installedMLX] = installedMLX }
         let stored = defaults.data(forKey: Self.key).flatMap { try? decoder.decode(AppSettings.self, from: $0) }
         var compatible = stored ?? AppSettings()
+        if stored == nil, defaults.object(forKey: Self.key) != nil {
+            compatible.transcriptionService = .elevenLabs
+            compatible.summaryService = .gemini
+        }
         if #unavailable(macOS 26), compatible.captionEngine == .apple {
             compatible.captionEngine = .firefox
             if let target = compatible.captionTranslation.target, !CaptionTarget.all.contains(target) {

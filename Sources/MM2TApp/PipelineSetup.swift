@@ -121,13 +121,15 @@ public struct PipelineSetup: Sendable {
         let llm: (any LLMProvider)?
         switch try buildLLM(settings, accountURL: accountURL) {
         case .ready(let provider): llm = provider
-        case .needsSetup(let missing): llm = nil; issues += missing
+        case .needsSetup(let missing):
+            llm = nil
+            if settings.summaryService != .mm2t { issues += missing }
         }
 
         let models = catalog.localSpeakerModels()
         if models == nil { issues.append(.diarizationModelsMissing) }
 
-        guard let route, let llm, let models else { return .needsSetup(issues) }
+        guard issues.isEmpty, let route, let models else { return .needsSetup(issues) }
         return .ready(MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
             diarizer: models.diarizer, embedder: models.embedder,
@@ -147,7 +149,11 @@ public struct PipelineSetup: Sendable {
             guard let url = settings.selfHostedURL else { return nil }
             return .init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken), language: language))
         case .mm2t:
-            guard let accountURL, let token = try accountToken(for: accountURL) else { return nil }
+            guard let accountURL, let token = try accountToken(for: accountURL) else {
+                guard let model = settings.localSpeechModel,
+                      let local = catalog.localTranscription(model: model, language: language) else { return nil }
+                return .init(.local, local)
+            }
             return .init(.selfHosted, catalog.hostedTranscription(url: Self.hostedURL(accountURL, job: "stt"),
                                                                   authorization: authorization(token), language: language))
         }

@@ -248,7 +248,7 @@ public final class AppController {
                 folders.recorded(id)
                 guard let live else { return queue.enqueue(.process, on: id) }
                 let prepared = live.processing
-                return queue.enqueue(.process, on: id, using: prepared?.pipeline, finalize: {
+                return queue.enqueue(.process, on: id, using: prepared?.checkpointPipeline, finalize: {
                     guard let meeting = try? await library.meeting(id),
                           let transcription = await live.finish(mic: library.audioURL(meeting, track: .me),
                                                                 remote: library.audioURL(meeting, track: .remote)),

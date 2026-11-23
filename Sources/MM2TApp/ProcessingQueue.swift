@@ -57,8 +57,8 @@ public final class ProcessingQueue {
     /// Rewrites a passage with the configured large language model, outside any job: it changes nothing
     /// until the user saves the result.
     public func rewrite(_ text: String, instruction: String) async throws -> String {
-        guard case .ready(let pipeline) = try makePipeline() else { throw RewriteUnsupported() }
-        return try await pipeline.llm.rewrite(text, instruction: instruction)
+        guard case .ready(let pipeline) = try makePipeline(), let llm = pipeline.llm else { throw RewriteUnsupported() }
+        return try await llm.rewrite(text, instruction: instruction)
     }
 
     /// Only the passage explicitly corrected by the user is sent to the selected model.
