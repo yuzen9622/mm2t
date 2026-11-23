@@ -31,8 +31,6 @@ extension ModelService {
     }
 }
 
-var planName: String { String(localized: "Free") }
-
 struct ModelsServicesPage: View {
     let app: AppController
     @State private var editor: ModelService?
@@ -309,8 +307,7 @@ struct ModelsServicesPage: View {
         switch service {
         case .mm2t:
             guard app.collabAccount?.user != nil else { return nil }
-            guard let quota = app.collabAccount?.quota else { return planName }
-            return String(localized: "\(planName) · \(quota.used) / \(quota.limit) shared meetings")
+            return app.collabAccount?.planAndQuotaLabel
         case .elevenLabs: return String(localized: "Transcription")
         case .gemini: return String(localized: "Summaries")
         case .openAICompatible:

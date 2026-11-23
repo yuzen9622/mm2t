@@ -29,6 +29,7 @@ public struct CollabProfile: Decodable, Sendable {
     }
     public let user: CollabUser
     public let quota: Quota
+    public let planName: String?
 }
 
 public struct CollabRoom: Decodable, Equatable, Sendable {

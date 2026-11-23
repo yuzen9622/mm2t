@@ -2,6 +2,7 @@
   "sourceLanguage": "en",
   "strings": {
     "%@ · %lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 已分享 %lld / %lld 場會議"}}}},
+    "%lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已分享 %lld / %lld 場會議"}}}},
     "%@ · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · %lld 個模型"}}}},
     "%@ · Unavailable": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 無法使用"}}}},
     "API key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "API 金鑰"}}}},
@@ -15,7 +16,6 @@
     "Connected · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已連線 · %lld 個模型"}}}},
     "Couldn't reach the OpenAI-compatible server.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法連線至 OpenAI 相容伺服器。"}}}},
     "Couldn't reach your transcription server (%@).": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法連線至你的轉錄伺服器（%@）。"}}}},
-    "Free": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "免費版"}}}},
     "Models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "模型"}}}},
     "Models and services": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "模型與服務"}}}},
     "OpenAI-compatible server": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "OpenAI 相容伺服器"}}}},

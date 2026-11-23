@@ -14,7 +14,9 @@ struct CollabAccountSettings: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(verbatim: user.name).font(Typo.bodyStrong)
                         Text(verbatim: user.email).foregroundStyle(Palette.secondary)
-                        if showsPlan { Text(verbatim: planName).font(Typo.captionStrong).foregroundStyle(Palette.secondary) }
+                        if showsPlan, let name = account.planName {
+                            Text(verbatim: name).font(Typo.captionStrong).foregroundStyle(Palette.secondary)
+                        }
                     }
                     Spacer()
                     PillButton("Sign Out") { Task { await account.signOut() } }

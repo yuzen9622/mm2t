@@ -37,11 +37,19 @@ public final class CollabAccount {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     public private(set) var user: CollabUser? {
         didSet {
-            if user == nil { quota = nil }
+            if user == nil { quota = nil; planName = nil }
             if user != oldValue { onUserChanged?() }
         }
     }
     public private(set) var quota: CollabProfile.Quota?
+    public private(set) var planName: String?
+    public var planAndQuotaLabel: String? {
+        guard let quota else { return planName }
+        if let planName {
+            return String(localized: "\(planName) · \(quota.used) / \(quota.limit) shared meetings", bundle: .main)
+        }
+        return String(localized: "\(quota.used) / \(quota.limit) shared meetings", bundle: .main)
+    }
     public private(set) var busy = false
     public private(set) var error: CollabError?
     private(set) var signingOut = false
@@ -93,7 +101,7 @@ public final class CollabAccount {
         defer { busy = false }
         do {
             let profile = try await service.me()
-            quota = profile.quota
+            applyPlan(profile)
             didSignIn(profile.user)
         }
         catch CollabError.notSignedIn { user = nil }
@@ -129,6 +137,7 @@ public final class CollabAccount {
     func completeSignIn(code: String, verifier: String) async throws {
         let verified = try await service.exchange(code: code, codeVerifier: verifier)
         quota = nil
+        planName = nil
         didSignIn(verified)
         try? await loadProfile(for: profileSession)
     }
@@ -151,11 +160,17 @@ public final class CollabAccount {
             defer { if profileRefresh?.session == session { profileRefresh = nil } }
             let profile = try await service.me()
             guard session == profileSession, !Task.isCancelled else { return }
-            quota = profile.quota
+            applyPlan(profile)
             user = profile.user
         }
         profileRefresh = (session, task)
         try await task.value
+    }
+
+    private func applyPlan(_ profile: CollabProfile) {
+        quota = profile.quota
+        let name = profile.planName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        planName = name?.isEmpty == false ? name : nil
     }
 
     private func didSignIn(_ verified: CollabUser) {

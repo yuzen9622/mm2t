@@ -23,6 +23,24 @@ import Testing
         #expect(restored.quota == nil)
     }
 
+    @Test func planLabelUsesTheServerNameOrTheQuotaAlone() async throws {
+        let fixture = try await Fixture()
+        let account = fixture.account
+        #expect(account.planName == nil)
+        #expect(account.planAndQuotaLabel == "0 / 10 shared meetings")
+        CollabBackend.planName.set("Pro")
+        CollabBackend.quotaUsed.set(3)
+        await account.refreshProfile()
+        #expect(account.planName == "Pro")
+        #expect(account.planAndQuotaLabel == "Pro · 3 / 10 shared meetings")
+        CollabBackend.planName.set(nil)
+        await account.refreshProfile()
+        #expect(account.planName == nil)
+        #expect(account.planAndQuotaLabel == "3 / 10 shared meetings")
+        await account.signOut()
+        #expect(account.planAndQuotaLabel == nil)
+    }
+
     @Test func refreshUpdatesQuotaAndKeepsTheProfileOnServerError() async throws {
         let fixture = try await Fixture()
         let account = fixture.account
@@ -1066,6 +1084,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static let requests = Box<[String]>([])
     static let quotaUsed = Box(0)
+    static let planName = Box<String?>(nil)
     static let profileUnavailable = Box(false)
     static let holdNextProfile = Box(false)
     static let deferredProfile = Box<(@Sendable () -> Void)?>(nil)
@@ -1091,7 +1110,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
-        quotaUsed.set(0); profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
+        quotaUsed.set(0); planName.set(nil); profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); doneRejection.set(nil); expired.set(false); holdOps.set(false); deferredReply.set(nil)
@@ -1146,8 +1165,9 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             Self.expired.set(false)
             response = (200, Data("{\"accessToken\":\"\(id)-access\",\"refreshToken\":\"\(id)-refresh\",\"user\":\(identity(id))}".utf8))
         case "/v1/me":
+            let plan = Self.planName.get.map { ",\"planName\":\"\($0)\"" } ?? ""
             response = Self.profileUnavailable.get ? (503, Data()) : (200, Data(
-                "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}}".utf8))
+                "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}\(plan)}".utf8))
             var hold = false
             Self.holdNextProfile.update { hold = $0; $0 = false }
             if hold {
