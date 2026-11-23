@@ -51,6 +51,7 @@ public final class CredentialField: Identifiable {
     public private(set) var hasSavedValue = false
     public nonisolated var id: Credential { credential }
 
+    @ObservationIgnored private var checkedSecret: Secret?
     @ObservationIgnored private let store: any CredentialStoring
     @ObservationIgnored private let validator: any KeyValidating
     @ObservationIgnored private let selfHostedURL: @MainActor () -> URL?
@@ -69,11 +70,22 @@ public final class CredentialField: Identifiable {
 
     public func load() {
         do {
-            text = try store.read(credential)?.revealed ?? ""
+            let secret = try store.read(credential)
+            text = secret?.revealed ?? ""
             hasSavedValue = !text.isEmpty
+            if let checkedSecret, checkedSecret == secret { return }
+            checkedSecret = nil
             state = hasSavedValue ? .saved : .empty
         } catch {
             state = .storageFailed(String(describing: error))
+        }
+    }
+
+    var isConfigured: Bool {
+        guard hasSavedValue else { return false }
+        switch state {
+        case .checked(.rejected), .validating: return false
+        default: return true
         }
     }
 
@@ -83,6 +95,7 @@ public final class CredentialField: Identifiable {
     public func save() {
         do {
             try store.save(Secret(text), for: credential)
+            checkedSecret = nil
             text = Secret(text).revealed
             hasSavedValue = !text.isEmpty
             state = hasSavedValue ? .saved : .empty
@@ -114,8 +127,11 @@ public final class CredentialField: Identifiable {
         case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken, .collabAccount:
             return  // Written by account sign-in, never typed into a key field.
         }
+        checkedSecret = secret
         state = .validating
-        state = .checked(await validator.validate(request))
+        let result = await validator.validate(request)
+        guard checkedSecret == secret else { return }
+        state = .checked(result)
     }
 }
 
@@ -437,8 +453,8 @@ public final class SetupModel {
     public func isConfigured(_ service: ModelService, signedIn: Bool) -> Bool {
         switch service {
         case .mm2t: signedIn
-        case .elevenLabs: field(.elevenLabsAPIKey).hasSavedValue
-        case .gemini: field(.geminiAPIKey).hasSavedValue
+        case .elevenLabs: field(.elevenLabsAPIKey).isConfigured
+        case .gemini: field(.geminiAPIKey).isConfigured
         case .openAICompatible: settings.settings.openAIBaseURL != nil
         case .transcriptionServer: settings.settings.selfHostedURL != nil
         }

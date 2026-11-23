@@ -54,6 +54,31 @@ import Testing
         #expect(world.offlineInstallers.values.allSatisfy { $0.downloads.get == 0 })
     }
 
+    @Test func aRejectedSavedKeyBlocksContinueButAnUnverifiedKeyDoesNot() async throws {
+        let world = try firstRun()
+        let setup = world.app.setup
+        let flow = world.app.onboarding
+        #expect(flow.advance())
+        let elevenLabs = setup.field(.elevenLabsAPIKey)
+        elevenLabs.text = "eleven"
+        elevenLabs.save()
+        let gemini = setup.field(.geminiAPIKey)
+        gemini.text = "bad"
+        await gemini.validate()
+        #expect(gemini.hasSavedValue)
+        #expect(!setup.isConfigured(.gemini, signedIn: false))
+        #expect(!flow.canContinue && !flow.advance())
+        gemini.load()
+        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
+        #expect(!flow.canContinue)
+
+        gemini.text = "timeout"
+        await gemini.validate()
+        #expect(gemini.state == .checked(.inconclusive("Could not reach Gemini")))
+        #expect(setup.isConfigured(.gemini, signedIn: false))
+        #expect(flow.canContinue)
+    }
+
     @Test func independentSelectionsDownloadSharedWeightsOnlyOnce() async throws {
         let world = try firstRun()
         let setup = world.app.setup

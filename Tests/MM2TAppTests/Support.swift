@@ -457,6 +457,7 @@ struct FakeValidator: KeyValidating {
     func validate(_ request: KeyValidation) async -> KeyCheck {
         requests.update { $0.append(request) }
         if case .gemini(let key) = request, key.revealed == "bad" { return .rejected("Gemini API Key 無效") }
+        if case .gemini(let key) = request, key.revealed == "timeout" { return .inconclusive("Could not reach Gemini") }
         return .valid
     }
 }
