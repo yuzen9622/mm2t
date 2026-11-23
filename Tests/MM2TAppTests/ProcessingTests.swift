@@ -119,6 +119,78 @@ import Testing
         await world.capture.stop()
     }
 
+    @Test(.serialized, arguments: [false, true])
+    func hostedAccountChangesDoNotInterruptOwnLiveTranscription(signOut: Bool) async throws {
+        let api = URL(string: "https://rotation.example")!
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RecordingTokenProbe.self]
+        let session = URLSession(configuration: configuration)
+        RecordingTokenProbe.summaryRequests.set([])
+        let world = try World(collabConfiguration: .init(apiURL: api, webURL: api), collabSession: session)
+        let old = Secret(#"{"apiURL":"https://rotation.example","tokens":{"accessToken":"old-token","refreshToken":"old-refresh"}}"#)
+        try world.credentials.save(old, for: .collabAccount)
+        world.catalog.hostedLLMSession.set(session)
+        world.catalog.selfHosted.behavior.set(.words)
+        world.catalog.recordingDiarizer.set(RecordingTestDiarizer())
+        world.app.settings.settings.transcriptionService = .server
+        world.app.settings.settings.selfHostedURL = URL(string: "https://speech.example")
+        world.app.settings.settings.summaryService = .mm2t
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "Token rotation", platform: .zoom))
+        let recording = try #require(world.recorder.last)
+        let directory = recording.configuration.directory
+
+        func writeTracks(seconds: Int) throws {
+            let samples = (0..<(16_000 * seconds)).map { Int16($0 % 32 < 16 ? 2200 : -2200) }
+            try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: samples), to: directory.appending(path: RecordingManifest.micFile))
+            try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: Array(repeating: 0, count: samples.count)),
+                                to: directory.appending(path: RecordingManifest.remoteFile))
+        }
+        func waitForTranscription(seconds: TimeInterval) async throws -> Bool {
+            let deadline = ContinuousClock.now + .seconds(8)
+            repeat {
+                if let progress = await world.capture.liveProgress(), progress.transcribedSeconds >= seconds { return true }
+                try await Task.sleep(for: .milliseconds(50))
+            } while ContinuousClock.now < deadline
+            return false
+        }
+
+        try writeTracks(seconds: 35)
+        #expect(try await waitForTranscription(seconds: 15))
+        let account = try #require(world.app.collabAccount)
+        if signOut {
+            try await account.service.logout()
+            #expect(try world.credentials.read(.collabAccount) == nil)
+        } else {
+            try await account.service.refresh()
+            let newCredential = try #require(try world.credentials.read(.collabAccount))
+            #expect(CollabService.storedAccessToken(newCredential, for: api) == "new-token")
+        }
+
+        try writeTracks(seconds: 65)
+        await recording.useSuppliedTracks(duration: 65)
+        #expect(try await waitForTranscription(seconds: 40), "live transcription reaches audio added after the account change")
+        await world.capture.stop()
+
+        let meetings = try await world.library.list()
+        let meeting = try #require(meetings.first)
+        #expect(meeting.transcription?.me.source == .selfHosted)
+        let requests = RecordingTokenProbe.summaryRequests.get
+        if signOut {
+            guard case .failed(_, let reason) = meeting.status else {
+                Issue.record("Expected summary generation to require sign-in after logout")
+                return
+            }
+            #expect(reason == "Sign in to use your mm2t plan.")
+            #expect(requests.isEmpty, "no hosted request should use the signed-out token")
+        } else {
+            #expect(meeting.status == .completed)
+            #expect(meeting.outputs.summary?.headline == "Summary with the rotated token")
+            #expect(!requests.isEmpty)
+            #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer new-token" })
+            #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-MM2T-Purpose") == "auto" })
+        }
+    }
+
     @Test func speakersAreToldApartOnThisMacEvenWhenOldSettingsPreferredTheServicesLabels() async throws {
         let world = try World()
         let old = Data(#"{"transcriptionOrder":["cloud"],"diarizationOrder":["transcription","local"]}"#.utf8)
@@ -274,6 +346,44 @@ func silentTrack(in directory: URL, _ name: String, seconds: Int = 1) throws -> 
     writer.appendSilence(frames: 16_000 * seconds)
     try writer.close()
     return url
+}
+
+private final class RecordingTokenProbe: URLProtocol, @unchecked Sendable {
+    static let summaryRequests = Box<[URLRequest]>([])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        let status: Int
+        let body: String
+        switch (request.httpMethod, url.path) {
+        case ("POST", "/v1/auth/refresh"):
+            status = 200
+            body = #"{"accessToken":"new-token","refreshToken":"new-refresh","user":{"id":"1","name":"Test","email":"test@example.test"}}"#
+        case ("POST", "/v1/auth/logout"):
+            status = 200
+            body = #"{"ok":true}"#
+        case ("POST", "/v1/hosted/llm/chat/completions"):
+            Self.summaryRequests.update { $0.append(request) }
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer new-token" {
+                status = 200
+                body = #"{"choices":[{"message":{"content":"{\"guesses\":[],\"paragraphs\":[],\"digests\":[],\"headline\":\"Summary with the rotated token\",\"decisions\":[],\"discussionPoints\":[],\"actionItems\":[]}"},"finish_reason":"stop"}]}"#
+            } else {
+                status = 401
+                body = "{}"
+            }
+        default:
+            status = 404
+            body = "{}"
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 private struct RecordingTestDiarizer: Diarizer, StreamingDiarizerFactory {

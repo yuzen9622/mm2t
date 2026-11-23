@@ -198,12 +198,12 @@ public final class AppController {
                 }
                 guard let chain = LiveTranscriber.recordingChain(transcription) else { return nil }
                 let transcriptionCredential: Credential = current.transcriptionService == .elevenLabs ? .elevenLabsAPIKey : .selfHostedToken
-                let summaryCredential: Credential = switch current.summaryService {
+                let summaryCredential: Credential? = switch current.summaryService {
                 case .gemini: .geminiAPIKey
                 case .openAICompatible: .openAICompatibleAPIKey
-                case .mm2t: .collabAccount
+                case .mm2t: nil // HostedAuthorization reads the current token for each request.
                 }
-                let credentialKinds = pipeline == nil ? [transcriptionCredential] : [transcriptionCredential, summaryCredential]
+                let credentialKinds = [transcriptionCredential, pipeline == nil ? nil : summaryCredential].compactMap { $0 }
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
                     settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
