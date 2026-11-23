@@ -50,6 +50,7 @@ public final class CollabAccount {
     @ObservationIgnored var onUserChanged: (() -> Void)?
     @ObservationIgnored var beforeSignOut: (() async -> Void)?
     @ObservationIgnored private var profileSession = UUID()
+    @ObservationIgnored private var profileRefresh: (session: UUID, task: Task<Void, Error>)?
     @ObservationIgnored private var monitoring: Task<Void, Never>?
     @ObservationIgnored private var replaying: Task<Void, Never>?
     @ObservationIgnored private var roomEndPreparations: [UUID: Task<Void, Never>] = [:]
@@ -141,10 +142,18 @@ public final class CollabAccount {
     }
 
     private func loadProfile(for session: UUID) async throws {
-        let profile = try await service.me()
-        guard session == profileSession, !Task.isCancelled else { return }
-        quota = profile.quota
-        user = profile.user
+        if let refresh = profileRefresh, refresh.session == session {
+            return try await refresh.task.value
+        }
+        let task = Task {
+            defer { if profileRefresh?.session == session { profileRefresh = nil } }
+            let profile = try await service.me()
+            guard session == profileSession, !Task.isCancelled else { return }
+            quota = profile.quota
+            user = profile.user
+        }
+        profileRefresh = (session, task)
+        try await task.value
     }
 
     private func didSignIn(_ verified: CollabUser) {

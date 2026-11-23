@@ -285,7 +285,6 @@ struct SettingsPage: View {
                         var updated = app.settings.settings
                         guard OnboardingFlow.switchMode(choice, in: &updated) else { return }
                         app.settings.settings = updated
-                        app.setup.recheck()
                     }
                     if !app.setup.issues.isEmpty {
                         Panel(title: "Still needed") {

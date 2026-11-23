@@ -44,6 +44,43 @@ import Testing
         #expect(newAccount.quota == nil)
     }
 
+    @Test func overlappingProfileRefreshesShareTheResponse() async throws {
+        let fixture = try await Fixture()
+        CollabBackend.requests.set([])
+        CollabBackend.quotaUsed.set(4)
+        CollabBackend.holdNextProfile.set(true)
+        defer { CollabBackend.releaseProfile() }
+        let first = Task { await fixture.account.refreshProfile() }
+        try #require(await waitForCollabEvent { CollabBackend.deferredProfile.get != nil })
+
+        CollabBackend.quotaUsed.set(7)
+        let entered = Box(false)
+        let secondReturned = Box(false)
+        let second = Task {
+            entered.set(true)
+            await fixture.account.refreshProfile()
+            secondReturned.set(true)
+        }
+        try #require(await waitForCollabEvent { entered.get })
+        #expect(!(await waitForCollabEvent(until: .milliseconds(50)) { secondReturned.get }))
+        CollabBackend.releaseProfile()
+        await first.value
+        await second.value
+        #expect(CollabBackend.requests.get.filter { $0 == "/v1/me" }.count == 1)
+        #expect(fixture.account.quota?.used == 4)
+    }
+
+    @Test func refreshAfterCompletionMakesANewRequest() async throws {
+        let fixture = try await Fixture()
+        CollabBackend.requests.set([])
+        CollabBackend.quotaUsed.set(4)
+        await fixture.account.refreshProfile()
+        CollabBackend.quotaUsed.set(7)
+        await fixture.account.refreshProfile()
+        #expect(CollabBackend.requests.get.filter { $0 == "/v1/me" }.count == 2)
+        #expect(fixture.account.quota?.used == 7)
+    }
+
     @Test func eachSignInUsesASeparateVerifierAndCancelledLoginDoesNotExchange() async throws {
         let f = try await Fixture()
         let account = f.newAccount()
@@ -861,6 +898,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let requests = Box<[String]>([])
     static let quotaUsed = Box(0)
     static let profileUnavailable = Box(false)
+    static let holdNextProfile = Box(false)
+    static let deferredProfile = Box<(@Sendable () -> Void)?>(nil)
     static let document = Box<Document?>(nil)
     static let extraComponent = Box<String?>(nil)
     static let appliedBatches = Box<Set<UUID>>([])
@@ -882,11 +921,17 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
-        quotaUsed.set(0); profileUnavailable.set(false)
+        quotaUsed.set(0); profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
         holdCreation.set(false); deferredCreation.set(nil)
+    }
+
+    static func releaseProfile() {
+        var reply: (@Sendable () -> Void)?
+        deferredProfile.update { reply = $0; $0 = nil }
+        reply?()
     }
 
     static func releaseCreation() {
@@ -933,6 +978,13 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         case "/v1/me":
             response = Self.profileUnavailable.get ? (503, Data()) : (200, Data(
                 "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}}".utf8))
+            var hold = false
+            Self.holdNextProfile.update { hold = $0; $0 = false }
+            if hold {
+                let (status, body) = response
+                Self.deferredProfile.set { [self] in reply(status: status, body: body) }
+                return
+            }
         case "/v1/rooms":
             let body = Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8)
             if Self.holdCreation.get {
