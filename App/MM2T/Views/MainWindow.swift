@@ -106,7 +106,6 @@ struct MainWindow: View {
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
     @State private var movedUp = false
     @Namespace private var sidebarSpace
-    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduce
     /// Setup or the app, or the window on its way from one to the other.
     @State private var stage: WindowStage
@@ -343,11 +342,7 @@ struct MainWindow: View {
                     .padding(.bottom, 12)
                     .transition(.opacity)
             }
-            HStack(spacing: 2) {
-                IconButton("Settings", icon: "settings") { show(.settings) }
-                IconButton("Help", icon: "help-circle") { openURL(AppLinks.help) }
-                Spacer(minLength: 0)
-            }
+            AccountMenuButton(app: app)
         }
         .padding(.horizontal, 12)
         .padding(.top, 40)

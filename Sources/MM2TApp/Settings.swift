@@ -185,6 +185,20 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public enum TermSource: Sendable { case manual, learned }
 
+    public mutating func setTranscriptionSource(_ source: TranscriptionSource, enabled: Bool) {
+        guard enabled else {
+            transcriptionOrder.removeAll { $0 == source }
+            return
+        }
+        guard !transcriptionOrder.contains(source) else { return }
+        if source != .cloud, transcriptionOrder.first != .cloud,
+           let fallback = transcriptionOrder.firstIndex(of: .cloud) {
+            transcriptionOrder.insert(source, at: fallback)
+        } else {
+            transcriptionOrder.append(source)
+        }
+    }
+
     public func source(of term: String) -> TermSource {
         learnedVocabulary.contains(term) ? .learned : .manual
     }

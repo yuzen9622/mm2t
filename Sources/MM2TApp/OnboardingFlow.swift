@@ -182,27 +182,34 @@ public final class OnboardingFlow {
     public func select(_ choice: UsageChoice) {
         guard choice.isAvailable, choice != self.choice else { return }
         self.choice = choice
-        guard Self.choice(in: settings.settings) != choice else { return }
-        var new = settings.settings
-        switch choice {
-        case .signIn:
-            return
-        case .ownKeys:
-            new.transcriptionOrder = [.cloud]
-            new.llmLocation = .cloud
-            new.cloudLLM = .gemini
-        case .ownServer:
-            new.transcriptionOrder = [.selfHosted]
-            new.llmLocation = .cloud
-            new.cloudLLM = .openAICompatible
-        }
-        settings.settings = new
+        var updated = settings.settings
+        guard Self.apply(choice, to: &updated) else { return }
+        settings.settings = updated
         setup.recheck()
     }
 
-    /// The choice the settings describe: a self-hosted server tried first means the user's own server.
+    public static func apply(_ choice: UsageChoice, to settings: inout AppSettings) -> Bool {
+        guard choice != Self.choice(in: settings) else { return false }
+        switch choice {
+        case .signIn:
+            return false
+        case .ownKeys:
+            settings.transcriptionOrder = [.cloud]
+            settings.llmLocation = .cloud
+            settings.cloudLLM = .gemini
+        case .ownServer:
+            settings.transcriptionOrder = [.selfHosted]
+            settings.llmLocation = .cloud
+            settings.cloudLLM = .openAICompatible
+        }
+        return true
+    }
+
     public static func choice(in settings: AppSettings) -> UsageChoice {
-        settings.transcriptionOrder.first == .selfHosted ? .ownServer : .ownKeys
+        switch settings.transcriptionOrder.first {
+        case .selfHosted, .local: .ownServer
+        case .cloud, nil: .ownKeys
+        }
     }
 
     // MARK: Last screen
@@ -255,8 +262,7 @@ public final class OnboardingFlow {
     public func turnOff(_ model: OfflineModel) {
         switch model {
         case .whisperCPU, .transcription, .breezeCoreML, .parakeet, .nemotron:
-            let enabled = Set(settings.settings.transcriptionOrder).subtracting([.local])
-            settings.settings.transcriptionOrder = TranscriptionSource.allCases.filter(enabled.contains)
+            settings.settings.setTranscriptionSource(.local, enabled: false)
         case .llm:
             settings.settings.llmLocation = .cloud
         }

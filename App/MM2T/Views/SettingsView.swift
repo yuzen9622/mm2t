@@ -19,10 +19,11 @@ enum AppLinks {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case account
+    case usage
     case general
     case assistant
     case privacy
-    case collaboration
     case about
 
     var id: String { rawValue }
@@ -32,7 +33,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: String(localized: "General")
         case .assistant: String(localized: "Personalization")
         case .privacy: String(localized: "Privacy")
-        case .collaboration: String(localized: "Collaboration")
+        case .account: String(localized: "Account")
+        case .usage: String(localized: "Usage")
         case .about: String(localized: "About")
         }
     }
@@ -41,7 +43,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general, .assistant: "adjustments-horizontal"
         case .privacy: "shield-check"
-        case .collaboration: "link"
+        case .account: "user-circle"
+        case .usage: "route"
         case .about: "info-circle"
         }
     }
@@ -57,7 +60,7 @@ enum SettingsRow: Hashable {
     case hideFromCapture
     case recordShortcut
     case promptApps, promptSites
-    case systemPermissions, calendars, reminders, collaboration
+    case systemPermissions, calendars, reminders, account
     case version, sourceCode, author, buyMeACoffee
     case privacyPolicy, terms, licenses
 
@@ -86,7 +89,7 @@ enum SettingsRow: Hashable {
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
                                   String(localized: "Accessibility"), String(localized: "Automation")]
         case .calendars: ["Apple", "Google", "Outlook"]
-        case .collaboration: [String(localized: "Sign in with Google"), String(localized: "Sign in with Apple"), String(localized: "Sign Out")]
+        case .account: [String(localized: "Account"), String(localized: "Sign in with Google"), String(localized: "Sign in with Apple"), String(localized: "Sign Out")]
         case .reminders: [String(localized: "Reminders"), String(localized: "To-dos")]
         case .version: [String(localized: "Version")]
         case .sourceCode: [String(localized: "Source code"), "GitHub"]
@@ -105,18 +108,28 @@ struct SettingsGroup: Identifiable {
     let section: SettingsSection
     let title: String
     let rows: [SettingsRow]
+    var mode: UsageChoice? = nil
 
     static var all: [SettingsGroup] {
         [
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
-                          rows: [.transcriptionLanguage, .selfHostedTranscription, .cloudTranscription, .localTranscription,
-                                 .liveCaptions]),
+                          rows: [.transcriptionLanguage, .liveCaptions]),
             SettingsGroup(id: "translation", section: .general, title: String(localized: "Translation"), rows: [.translationEnabled, .translationModel]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationModel]),
-            SettingsGroup(id: "summaries", section: .general, title: String(localized: "Summaries"),
-                          rows: [.summaryBackend, .geminiKey, .localSummaries]),
+            SettingsGroup(id: "usage-keys-transcription", section: .usage, title: String(localized: "Transcription"),
+                          rows: [.cloudTranscription], mode: .ownKeys),
+            SettingsGroup(id: "usage-keys-summaries", section: .usage, title: String(localized: "Summaries"),
+                          rows: [.summaryBackend, .geminiKey], mode: .ownKeys),
+            SettingsGroup(id: "usage-keys-fallback", section: .usage, title: String(localized: "Fallback"),
+                          rows: [.selfHostedTranscription, .localTranscription], mode: .ownKeys),
+            SettingsGroup(id: "usage-server-transcription", section: .usage, title: String(localized: "Transcription"),
+                          rows: [.selfHostedTranscription, .localTranscription], mode: .ownServer),
+            SettingsGroup(id: "usage-server-summaries", section: .usage, title: String(localized: "Summaries"),
+                          rows: [.summaryBackend, .geminiKey, .localSummaries], mode: .ownServer),
+            SettingsGroup(id: "usage-server-fallback", section: .usage, title: String(localized: "Fallback"),
+                          rows: [.cloudTranscription], mode: .ownServer),
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .privacy, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
@@ -125,21 +138,23 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "system", section: .privacy, title: String(localized: "macOS permissions"), rows: [.systemPermissions]),
             SettingsGroup(id: "calendars", section: .privacy, title: String(localized: "Calendars"), rows: [.calendars]),
             SettingsGroup(id: "reminders", section: .privacy, title: String(localized: "Reminders"), rows: [.reminders]),
-            SettingsGroup(id: "collaboration", section: .collaboration, title: SettingsSection.collaboration.title, rows: [.collaboration]),
+            SettingsGroup(id: "account", section: .account, title: SettingsSection.account.title, rows: [.account]),
             SettingsGroup(id: "app", section: .about, title: "mm2t", rows: [.version, .sourceCode, .author, .buyMeACoffee]),
             SettingsGroup(id: "legal", section: .about, title: String(localized: "Legal"), rows: [.privacyPolicy, .terms, .licenses]),
         ]
     }
 
     /// The groups `section` shows, or, while searching, every group's matching rows across sections.
-    static func visible(in section: SettingsSection, query: String, collaborationAvailable: Bool = false) -> [SettingsGroup] {
+    static func visible(in section: SettingsSection, query: String, mode: UsageChoice, accountAvailable: Bool) -> [SettingsGroup] {
         let query = query.trimmingCharacters(in: .whitespaces)
-        let available = all.filter { collaborationAvailable || $0.section != .collaboration }
+        let available = all.filter {
+            (accountAvailable || $0.section != .account) && ($0.mode == nil || $0.mode == mode)
+        }
         guard !query.isEmpty else { return available.filter { $0.section == section } }
         return available.compactMap { group in
             if group.title.localizedStandardContains(query) || group.section.title.localizedStandardContains(query) { return group }
             let rows = group.rows.filter { $0.terms.contains { $0.localizedStandardContains(query) } }
-            return rows.isEmpty ? nil : SettingsGroup(id: group.id, section: group.section, title: group.title, rows: rows)
+            return rows.isEmpty ? nil : SettingsGroup(id: group.id, section: group.section, title: group.title, rows: rows, mode: group.mode)
         }
     }
 }
@@ -201,7 +216,7 @@ struct SettingsDialog: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Settings").font(Typo.heading).padding(.horizontal, 6).padding(.top, 8)
             SearchField(text: $query).padding(.top, 14).padding(.bottom, 16)
-            ForEach(SettingsSection.allCases.filter { app.collabAccount != nil || $0 != .collaboration }) { section in
+            ForEach(SettingsSection.allCases.filter { app.collabAccount != nil || $0 != .account }) { section in
                 SettingsSectionRow(section: section, isSelected: !searching && !showLicenses && navigation.settingsSection == section) {
                     query = ""
                     showLicenses = false
@@ -257,15 +272,24 @@ struct SettingsPage: View {
 
     var body: some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        let groups = SettingsGroup.visible(in: section, query: query, collaborationAvailable: app.collabAccount != nil)
+        let mode = OnboardingFlow.choice(in: app.settings.settings)
+        let groups = SettingsGroup.visible(in: section, query: query, mode: mode, accountAvailable: app.collabAccount != nil)
         VStack(alignment: .leading, spacing: 24) {
             if !searching {
                 Text(section.title).font(Typo.title)
-                if section == .general, !app.setup.issues.isEmpty {
-                    Panel(title: "Still needed") {
-                        ForEach(app.setup.issues, id: \.self) { IssueRow(issue: $0) }
+                if section == .usage {
+                    UsageModePicker(selection: mode) { choice in
+                        var updated = app.settings.settings
+                        guard OnboardingFlow.apply(choice, to: &updated) else { return }
+                        app.settings.settings = updated
+                        app.setup.recheck()
                     }
-                    .entrance()
+                    if !app.setup.issues.isEmpty {
+                        Panel(title: "Still needed") {
+                            ForEach(app.setup.issues, id: \.self) { IssueRow(issue: $0) }
+                        }
+                        .entrance()
+                    }
                 }
             } else if groups.isEmpty {
                 Text("No settings match “\(query)”.")
@@ -291,6 +315,7 @@ struct SettingsPage: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .toggleStyle(SwitchStyle())
+        .motion(Motion.reveal, value: mode)
         .motion(Motion.reveal, value: app.settings.settings.transcriptionOrder)
         .motion(Motion.reveal, value: app.settings.settings.llmLocation)
         .motion(Motion.reveal, value: app.setup.issues)
@@ -310,7 +335,7 @@ struct SettingsRowView: View {
     @ViewBuilder private var controls: some View {
         @Bindable var store = app.settings
         switch row {
-        case .collaboration:
+        case .account:
             if let account = app.collabAccount { CollabAccountSettings(account: account) }
         case .assistantMemory:
             AssistantMemorySettings(preferences: app.assistantPreferences, conversations: app.assistantConversations)
@@ -720,7 +745,6 @@ private extension AppController {
     }
 }
 
-/// On means the source is in the chain; self-hosted always goes before cloud.
 struct SourceToggle: View {
     let source: TranscriptionSource
     let store: SettingsStore
@@ -728,10 +752,7 @@ struct SourceToggle: View {
     var body: some View {
         Toggle(Copy.source(source), isOn: Binding(
             get: { store.settings.transcriptionOrder.contains(source) },
-            set: { on in
-                let enabled = Set(store.settings.transcriptionOrder).union(on ? [source] : []).subtracting(on ? [] : [source])
-                store.settings.transcriptionOrder = TranscriptionSource.allCases.filter(enabled.contains)
-            }))
+            set: { store.settings.setTranscriptionSource(source, enabled: $0) }))
     }
 }
 

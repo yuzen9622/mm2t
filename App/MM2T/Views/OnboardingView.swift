@@ -351,21 +351,20 @@ private struct UsageRows: View {
     let flow: OnboardingFlow
 
     var body: some View {
-        ChoiceRow(choice: .signIn, icon: "user", selected: false, title: "Sign in",
-                  detail: "Free plan, 250 minutes a month, processed after the meeting.", flow: flow)
+        ChoiceRow(choice: .signIn, selected: false, title: UsageChoice.signIn.title,
+                  detail: "Free, 250 minutes a month", flow: flow)
             .arrives(2)
-        ChoiceRow(choice: .ownKeys, icon: "key", selected: flow.choice == .ownKeys, title: "Use your own API keys",
+        ChoiceRow(choice: .ownKeys, selected: flow.choice == .ownKeys, title: "Use your own API keys",
                   detail: "ElevenLabs and Gemini, billed to your accounts.", flow: flow)
             .arrives(3)
-        ChoiceRow(choice: .ownServer, icon: "server", selected: flow.choice == .ownServer, title: "Connect to your own server",
-                  detail: "Audio only travels between your machines.", flow: flow)
+        ChoiceRow(choice: .ownServer, selected: flow.choice == .ownServer, title: UsageChoice.ownServer.title,
+                  detail: "This Mac or your own server", flow: flow)
             .arrives(4)
     }
 }
 
 private struct ChoiceRow: View {
     let choice: UsageChoice
-    let icon: String
     let selected: Bool
     let title: LocalizedStringKey
     let detail: LocalizedStringKey
@@ -375,18 +374,12 @@ private struct ChoiceRow: View {
     var body: some View {
         Button { flow.select(choice) } label: {
             HStack(spacing: 12) {
-                Icon(icon, size: 20).foregroundStyle(selected ? Palette.orange : Palette.secondary)
+                Icon(choice.icon, size: 20).foregroundStyle(selected ? Palette.orange : Palette.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(title).font(Typo.bodyStrong).lineLimit(1)
                         if !choice.isAvailable {
-                            Text("Coming soon")
-                                .font(Typo.caption)
-                                .foregroundStyle(Palette.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(Palette.tonal, in: Capsule())
+                            ComingSoonBadge()
                         }
                     }
                     Text(detail).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
@@ -602,7 +595,8 @@ private struct ServiceRows: View {
     var body: some View {
         let flow = app.onboarding
         let setup = app.setup
-        ForEach(Array(flow.services.enumerated()), id: \.element) { index, entry in
+        let services = flow.services
+        ForEach(Array(services.enumerated()), id: \.element) { index, entry in
             Group {
                 switch entry {
                 case .elevenLabs:
@@ -651,6 +645,21 @@ private struct ServiceRows: View {
                 }
             }
             .arrives(2 + index)
+        }
+        if let account = app.collabAccount {
+            ServiceRow(title: Text("Sign in to share meetings")) {
+                if let user = account.user {
+                    HStack(spacing: 8) {
+                        AccountAvatar(name: user.name, size: 28)
+                        Text(verbatim: user.name).font(Typo.bodyStrong).lineLimit(1)
+                        Icon("check", size: 16).foregroundStyle(Palette.orange)
+                    }
+                } else {
+                    AccountSignInButtons(account: account)
+                }
+                AccountErrorLine(account: account)
+            }
+            .arrives(2 + services.count)
         }
     }
 }

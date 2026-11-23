@@ -153,6 +153,38 @@ import Testing
         #expect(world.app.onboarding.step == .usage)
     }
 
+    @Test func usageModeUsesTheFirstSourceAndKeepsAnAlreadySelectedConfiguration() {
+        var settings = AppSettings()
+        settings.transcriptionOrder = [.local, .cloud]
+        settings.llmLocation = .local
+        #expect(OnboardingFlow.choice(in: settings) == .ownServer)
+        let original = settings
+        #expect(!OnboardingFlow.apply(.ownServer, to: &settings))
+        #expect(!OnboardingFlow.apply(.signIn, to: &settings))
+        #expect(settings == original)
+
+        #expect(OnboardingFlow.apply(.ownKeys, to: &settings))
+        #expect(settings.transcriptionOrder == [.cloud])
+        #expect(settings.llmLocation == .cloud && settings.cloudLLM == .gemini)
+    }
+
+    @Test func enablingFallbackKeepsThePrimarySourceAndUsageMode() {
+        var settings = AppSettings()
+        settings.setTranscriptionSource(.selfHosted, enabled: true)
+        settings.setTranscriptionSource(.local, enabled: true)
+        #expect(settings.transcriptionOrder == [.cloud, .selfHosted, .local])
+        #expect(OnboardingFlow.choice(in: settings) == .ownKeys)
+
+        settings.transcriptionOrder = [.local]
+        settings.setTranscriptionSource(.cloud, enabled: true)
+        settings.setTranscriptionSource(.selfHosted, enabled: true)
+        #expect(settings.transcriptionOrder == [.local, .selfHosted, .cloud])
+        #expect(OnboardingFlow.choice(in: settings) == .ownServer)
+
+        settings.setTranscriptionSource(.cloud, enabled: false)
+        #expect(settings.transcriptionOrder == [.local, .selfHosted])
+    }
+
     @Test func theChoiceIsWrittenIntoTheExistingSettings() throws {
         let world = try World()
         let flow = world.app.onboarding
@@ -194,7 +226,7 @@ import Testing
         store.settings.llmLocation = .local
         world.app.setup.recheck()
         flow.reopen()
-        #expect(flow.choice == .ownKeys)
+        #expect(flow.choice == .ownServer)
         #expect(flow.services == [.offlineModel(.transcription), .offlineModel(.llm)])
         #expect(flow.note == nil, "not on the last step")
     }
@@ -304,15 +336,18 @@ import Testing
     }
 
     @Test func turningTheOnlySourceOffOffersTheChosenOneBack() async throws {
-        let world = try await atTheLastStep { $0.transcriptionOrder = [.local] }
+        let world = try await atTheLastStep {
+            $0.transcriptionOrder = [.local]
+            $0.selfHostedURL = URL(string: "http://server.invalid:8000")
+        }
         let flow = world.app.onboarding
         flow.turnOff(.transcription)
         #expect(world.app.setup.issues == [.noTranscriptionSource])
         #expect(flow.services == [.gemini, .transcriptionSource])
         #expect(flow.note == .issue(.noTranscriptionSource))
         flow.turnOnTranscriptionSource()
-        #expect(world.app.settings.settings.transcriptionOrder == [.cloud])
-        #expect(flow.services == [.elevenLabs, .gemini])
+        #expect(world.app.settings.settings.transcriptionOrder == [.selfHosted])
+        #expect(flow.services == [.transcriptionServer, .gemini])
         #expect(flow.canContinue)
     }
 

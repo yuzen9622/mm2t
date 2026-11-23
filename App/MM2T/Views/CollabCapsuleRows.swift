@@ -53,7 +53,7 @@ struct CollabCapsuleRows: View {
             HStack(spacing: 10) {
                 Text("Sign in to share")
                 CapsulePill("Sign In") {
-                    MainNavigation.shared.settingsSection = .collaboration
+                    MainNavigation.shared.settingsSection = .account
                     MainNavigation.shared.open(.settings)
                 }
                 CircleButton("Cancel", icon: "x", action: session.dismissCommand)
@@ -124,33 +124,6 @@ struct CollabCopyLink: View {
     }
 }
 
-struct CollabAccountSettings: View {
-    let account: CollabAccount
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                if let user = account.user {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(verbatim: user.name)
-                        Text(verbatim: user.email).foregroundStyle(Palette.secondary)
-                    }
-                    Spacer()
-                    PillButton("Sign Out") { Task { await account.signOut() } }
-                } else {
-                    PillButton("Sign in with Google") { Task { await account.signIn(.google) } }
-                    PillButton("Sign in with Apple") { Task { await account.signIn(.apple) } }
-                    Spacer()
-                }
-            }
-            .disabled(account.busy)
-            if let error = account.error {
-                Text(verbatim: error.collabMessage).font(Typo.caption).foregroundStyle(Palette.danger)
-            }
-        }
-    }
-}
-
 private extension CollabComponentKind {
     var icon: String {
         switch self {
@@ -174,7 +147,7 @@ private extension CollabSession.Failure {
     }
 }
 
-private extension CollabError {
+extension CollabError {
     var collabMessage: String {
         switch self {
         case .notSignedIn: String(localized: "Sign in to share")

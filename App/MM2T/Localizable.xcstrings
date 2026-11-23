@@ -1,6 +1,18 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Account": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "帳戶"}}}},
+    "Usage": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "使用方式"}}}},
+    "Plan": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "方案"}}}},
+    "Own API keys": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "自備 API 金鑰"}}}},
+    "Local and self-hosted": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本機與自架伺服器"}}}},
+    "Fallback": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "備援"}}}},
+    "Free, 250 minutes a month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "免費，每月 250 分鐘"}}}},
+    "This Mac or your own server": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "這台 Mac 或你的伺服器"}}}},
+    "Sign in to share meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "登入以分享會議"}}}},
+    "Account and settings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "帳戶與設定"}}}},
+    "Shared meetings this month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本月已分享的會議"}}}},
+    "%lld / %lld": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%lld / %lld"}}}},
     "Reviewed meeting folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "檢查會議歸檔"}}}},
     "Checked %lld meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已檢查 %lld 篇會議"}}}},
     "Create folder and move meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "建立資料夾並移入會議"}}}},
