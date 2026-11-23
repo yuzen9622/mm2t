@@ -40,6 +40,7 @@ final class MainNavigation {
         let section: SidebarItem
         var meeting: MeetingID?
         var utterance: UtteranceID?
+        var settingsSection: SettingsSection = .general
     }
 
     static let shared = MainNavigation()
@@ -56,8 +57,9 @@ final class MainNavigation {
     var liveFrontmost = false
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
-    func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
-        request = Request(section: section, meeting: meeting, utterance: utterance)
+    func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil,
+              settingsSection: SettingsSection = .general) {
+        request = Request(section: section, meeting: meeting, utterance: utterance, settingsSection: settingsSection)
         WindowOpener.open(WindowID.main)
     }
 
@@ -187,7 +189,7 @@ struct MainWindow: View {
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
-            show(request.section, meeting: request.meeting, utterance: request.utterance)
+            show(request.section, meeting: request.meeting, utterance: request.utterance, settingsSection: request.settingsSection)
             MainNavigation.shared.request = nil
         }
     }
@@ -472,8 +474,10 @@ struct MainWindow: View {
         .filingTarget(target)
     }
 
-    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil) {
+    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil,
+                      settingsSection: SettingsSection = .general) {
         if item == .settings {
+            MainNavigation.shared.settingsSection = settingsSection
             MainNavigation.shared.settingsOpen = true
             return
         }

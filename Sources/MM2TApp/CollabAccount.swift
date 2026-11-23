@@ -7,6 +7,13 @@ import OSLog
 public struct CollabConfiguration: Sendable {
     let apiURL: URL
     let webURL: URL
+    let accountURL: URL
+
+    init(apiURL: URL, webURL: URL, accountURL: URL? = nil) {
+        self.apiURL = apiURL
+        self.webURL = webURL
+        self.accountURL = accountURL ?? webURL
+    }
 
     static func live(bundle: Bundle = .main, environment: [String: String] = ProcessInfo.processInfo.environment) -> Self? {
         func read(_ key: String, override: String) -> URL? {
@@ -24,11 +31,16 @@ public struct CollabConfiguration: Sendable {
         }
         guard let api = read("MM2TCollabAPIURL", override: "MM2T_COLLAB_API_URL"),
               let web = read("MM2TCollabWebURL", override: "MM2T_COLLAB_WEB_URL") else { return nil }
-        return Self(apiURL: api, webURL: web)
+        let account = read("MM2TAccountWebURL", override: "MM2T_ACCOUNT_WEB_URL")
+        return Self(apiURL: api, webURL: web, accountURL: account)
     }
 
     func accepts(_ url: URL) -> Bool {
         url.scheme == webURL.scheme && url.host == webURL.host && url.port == webURL.port && url.user == nil && url.password == nil
+    }
+
+    func acceptsAccountPage(_ url: URL) -> Bool {
+        url.scheme == accountURL.scheme && url.host == accountURL.host && url.port == accountURL.port && url.user == nil && url.password == nil
     }
 }
 
@@ -166,7 +178,7 @@ public final class CollabAccount {
         defer { busy = false }
         do {
             let url = try await service.billingHandoff()
-            guard configuration.accepts(url) else { throw CollabError.server(status: 0) }
+            guard configuration.acceptsAccountPage(url) else { throw CollabError.server(status: 0) }
             open(url)
         } catch CollabError.notSignedIn {
             user = nil

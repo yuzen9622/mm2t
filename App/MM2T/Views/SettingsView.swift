@@ -19,9 +19,9 @@ enum AppLinks {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case general
     case account
     case models
-    case general
     case assistant
     case privacy
     case about

@@ -63,6 +63,8 @@
 	<string></string>
 	<key>MM2TCollabWebURL</key>
 	<string></string>
+	<key>MM2TAccountWebURL</key>
+	<string></string>
 	<key>MM2TGoogleClientID</key>
 	<string>580698568106-sggv7puhusc6hgeba4mhosp123emnllv.apps.googleusercontent.com</string>
 
