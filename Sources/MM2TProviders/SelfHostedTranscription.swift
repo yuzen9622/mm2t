@@ -4,6 +4,7 @@ import MM2TCore
 /// The user's own faster-whisper server (`server/` in this repo), over LAN or Tailscale.
 /// It never labels speakers, so `labelSpeakers` is ignored.
 public struct SelfHostedTranscription: TranscriptionProvider {
+    private let service: Service
     let baseURL: URL
     let token: Secret?
     let languageCode: String?
@@ -16,8 +17,9 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     /// stall the fallback chain for its full length.
     public init(
         baseURL: URL, token: Secret?, languageCode: String? = nil, session: URLSession = .shared,
-        probeTimeout: TimeInterval = 5, timeout: TimeInterval = 3600
+        probeTimeout: TimeInterval = 5, timeout: TimeInterval = 3600, hostedPlan: Bool = false
     ) {
+        self.service = hostedPlan ? .mm2tPlan : .selfHosted
         self.baseURL = baseURL
         self.token = token.flatMap { $0.isEmpty ? nil : $0 }
         self.languageCode = languageCode
@@ -28,13 +30,20 @@ public struct SelfHostedTranscription: TranscriptionProvider {
 
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         do {
-            try await checkHealth()
-            let upload = try AudioFile.upload(audio, for: .selfHosted)
+            if service != .mm2tPlan { try await checkHealth() }
+            let upload = try AudioFile.upload(audio, for: service)
             return .unlabeled(try await post(upload.data, filename: upload.filename, mimeType: upload.mimeType,
                                              hints: hints, languageCode: languageCode))
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
+    }
+
+    private func transcriptionError(_ error: ProviderError) -> TranscriptionError {
+        if service == .selfHosted, error.kind == .unreachable, let host = baseURL.host() {
+            return .unreachable(String(localized: "Couldn't reach your transcription server (\(host)).", bundle: .main))
+        }
+        return error.asTranscriptionError
     }
 
     private func post(_ audio: Data, filename: String, mimeType: String, hints: [String], languageCode: String?) async throws -> [TimedWord] {
@@ -51,9 +60,12 @@ public struct SelfHostedTranscription: TranscriptionProvider {
         request.httpMethod = "POST"
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finished()
-        let response = try await session.send(request, for: .selfHosted)
-        guard response.status == 200 else { throw ProviderError(.selfHosted, Self.failure(response)) }
-        return try Self.parse(response.body)
+        let response = try await session.send(request, for: service)
+        guard response.status == 200 else {
+            let failure = service == .mm2tPlan ? response.commonFailure : Self.failure(response)
+            throw ProviderError(service, failure)
+        }
+        return try Self.parse(response.body, service: service)
     }
 
     /// `/v1/*` checks the token before routing, so a GET on the POST-only transcription route
@@ -63,24 +75,26 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             try await checkHealth()
             var request = authorized(URLRequest(url: url("v1/transcriptions"), timeoutInterval: probeTimeout))
             request.httpMethod = "GET"
-            let response = try await session.send(request, for: .selfHosted)
+            let response = try await session.send(request, for: service)
             if response.status == 401 {
                 return .rejected(token == nil
                     ? String(localized: "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.", bundle: .main)
-                    : ProviderError(.selfHosted, .invalidCredential).description)
+                    : ProviderError(service, .invalidCredential).description)
             }
-            return .valid
+            if (200..<300).contains(response.status) || response.status == 405 { return .valid }
+            return .from(ProviderError(service, Self.failure(response)))
         } catch let error as ProviderError {
+            if error.kind == .unreachable { return .inconclusive(transcriptionError(error).description) }
             return .from(error)
         } catch {
-            return .inconclusive(ProviderError(.selfHosted, .unreachable).description)
+            return .inconclusive(ProviderError(service, .unreachable).description)
         }
     }
 
     private func checkHealth() async throws {
-        let response = try await session.send(URLRequest(url: url("healthz"), timeoutInterval: probeTimeout), for: .selfHosted)
+        let response = try await session.send(URLRequest(url: url("healthz"), timeoutInterval: probeTimeout), for: service)
         guard response.status == 200 else {
-            throw ProviderError(.selfHosted, response.status >= 500 ? .unavailable : .unreachable)
+            throw ProviderError(service, response.status >= 500 ? .unavailable : .unreachable)
         }
     }
 
@@ -126,9 +140,9 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     }
 
     /// Whisper words carry a leading space ("␠hello"); the core joins tokens itself.
-    static func parse(_ body: Data) throws -> [TimedWord] {
+    static func parse(_ body: Data, service: Service = .selfHosted) throws -> [TimedWord] {
         guard let response = try? JSONDecoder().decode(Response.self, from: body) else {
-            throw ProviderError(.selfHosted, .malformedResponse)
+            throw ProviderError(service, .malformedResponse)
         }
         var words: [TimedWord] = []
         var previousEnd = 0.0
@@ -154,7 +168,7 @@ extension SelfHostedTranscription: ClipTranscriber {
         do {
             try await checkHealth()
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
     }
 
@@ -164,7 +178,7 @@ extension SelfHostedTranscription: ClipTranscriber {
                                        hints: request.hints, languageCode: request.languageCode)
             return Alignment.joined(words)
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
     }
 }

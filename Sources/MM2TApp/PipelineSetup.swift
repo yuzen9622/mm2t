@@ -7,20 +7,21 @@ import MM2TSystem
 /// Something the user has to configure before a meeting can be processed. The UI routes each
 /// one to the setup screen that fixes it instead of letting processing fail midway.
 public enum SetupIssue: Hashable, Sendable {
-    case missingCredential(Credential)
-    case missingSelfHostedURL
-    /// The OpenAI-compatible large language model server needs a base URL and a model name.
-    case missingLLMEndpoint
-    case speechModelNotSelected
-    case noTranscriptionSource
+    case transcriptionServiceNotConfigured(TranscriptionService)
+    case summaryServiceNotConfigured(SummaryService)
     case diarizationModelsMissing
-    case offlineModelMissing(OfflineModel)
+
+    public var service: ModelService? {
+        switch self {
+        case .transcriptionServiceNotConfigured(let source): source.connection
+        case .summaryServiceNotConfigured(let source): source.connection
+        case .diarizationModelsMissing: nil
+        }
+    }
 }
 
-/// The on-device models behind the two offline switches, each downloaded separately.
 public enum OfflineModel: String, Hashable, Sendable, CaseIterable {
-    case transcription
-    case llm, parakeet, nemotron, breezeCoreML, whisperCPU
+    case transcription, parakeet, nemotron, breezeCoreML, whisperCPU
 
     public init(_ speech: LocalSpeechModel) {
         switch speech {
@@ -64,10 +65,9 @@ public protocol ProviderCatalog: Sendable {
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider
     /// nil until the models are on disk.
     func localSpeakerModels() -> LocalSpeakerModels?
-    /// nil until the model is on disk.
+    func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider
+    func hostedLLM(url: URL, token: Secret) -> any LLMProvider
     func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)?
-    /// nil until the model is on disk.
-    func localLLM() -> (any LLMProvider)?
     /// Live caption translation into `target` on this Mac; nil until the models it needs are on disk.
     func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) async -> (any CaptionTranslator)?
     var thresholds: MatchThresholds { get }
@@ -97,40 +97,18 @@ public struct PipelineSetup: Sendable {
         self.catalog = catalog
     }
 
+    public static func hostedURL(_ apiURL: URL, job: String) -> URL {
+        apiURL.appending(path: "v1/hosted").appending(component: job)
+    }
+
     /// Throws only when the Keychain cannot be read.
-    public func build(_ settings: AppSettings) throws -> PipelineBuild {
+    public func build(_ settings: AppSettings, accountURL: URL? = nil) throws -> PipelineBuild {
         var issues: [SetupIssue] = []
-        var routes: [TranscriptionChain.Route] = []
-        for source in settings.transcriptionOrder {
-            switch source {
-            case .cloud:
-                if let key = try? nonEmpty(.elevenLabsAPIKey) {
-                    routes.append(.init(.cloud, catalog.cloudTranscription(apiKey: key, language: settings.transcriptionLanguage)))
-                } else {
-                    issues.append(.missingCredential(.elevenLabsAPIKey))
-                }
-            case .selfHosted:
-                if let url = settings.selfHostedURL {
-                    routes.append(.init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken), language: settings.transcriptionLanguage)))
-                } else {
-                    issues.append(.missingSelfHostedURL)
-                }
-            case .local:
-                guard let choice = settings.localSpeechModel else {
-                    issues.append(.speechModelNotSelected)
-                    continue
-                }
-                if let local = catalog.localTranscription(model: choice, language: settings.transcriptionLanguage) {
-                    routes.append(.init(.local, local))
-                } else {
-                    issues.append(.offlineModelMissing(OfflineModel(choice)))
-                }
-            }
-        }
-        if settings.transcriptionOrder.isEmpty { issues.append(.noTranscriptionSource) }
+        let route = try transcriptionRoute(settings, accountURL: accountURL)
+        if route == nil { issues.append(.transcriptionServiceNotConfigured(settings.transcriptionService)) }
 
         let llm: (any LLMProvider)?
-        switch try buildLLM(settings) {
+        switch try buildLLM(settings, accountURL: accountURL) {
         case .ready(let provider): llm = provider
         case .needsSetup(let missing): llm = nil; issues += missing
         }
@@ -138,66 +116,73 @@ public struct PipelineSetup: Sendable {
         let models = catalog.localSpeakerModels()
         if models == nil { issues.append(.diarizationModelsMissing) }
 
-        guard issues.isEmpty, let llm else { return .needsSetup(issues) }
+        guard let route, let llm, let models else { return .needsSetup(issues) }
         return .ready(MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
-            diarizer: models?.diarizer, embedder: models?.embedder,
+            diarizer: models.diarizer, embedder: models.embedder,
             diarizationOrder: AppSettings.diarizationOrder,
-            transcription: TranscriptionChain(routes), llm: llm,
+            transcription: TranscriptionChain([route]), llm: llm,
             thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
-            runsConcurrently: settings.llmLocation == .cloud,
-            transcribesConcurrently: !settings.transcriptionOrder.contains(.local),
-            micCleaner: EchoRemover()))
+            runsConcurrently: true, transcribesConcurrently: true, micCleaner: EchoRemover()))
     }
 
-    /// Live captions try the sources in the transcription order, skipping any not set up; nil when none is.
+    private func transcriptionRoute(_ settings: AppSettings, accountURL: URL?) throws -> TranscriptionChain.Route? {
+        let language = settings.transcriptionLanguage
+        switch settings.transcriptionService {
+        case .elevenLabs:
+            guard let key = try nonEmpty(.elevenLabsAPIKey) else { return nil }
+            return .init(.cloud, catalog.cloudTranscription(apiKey: key, language: language))
+        case .server:
+            guard let url = settings.selfHostedURL else { return nil }
+            return .init(.selfHosted, catalog.selfHostedTranscription(url: url, token: try nonEmpty(.selfHostedToken), language: language))
+        case .mm2t:
+            guard let accountURL, let token = try accountToken(for: accountURL) else { return nil }
+            return .init(.selfHosted, catalog.hostedTranscription(url: Self.hostedURL(accountURL, job: "stt"), token: token, language: language))
+        }
+    }
+
     public func buildCaptions(_ settings: AppSettings) -> StreamingTranscriptionChain? {
-        var routes: [StreamingTranscriptionChain.Route] = []
-        for source in settings.transcriptionOrder {
+        let routes: [StreamingTranscriptionChain.Route] = settings.captionSources.compactMap { source in
             switch source {
             case .cloud:
-                if let key = try? nonEmpty(.elevenLabsAPIKey) {
-                    routes.append(.init(.cloud, catalog.streamingTranscription(apiKey: key)))
-                }
+                guard let key = try? nonEmpty(.elevenLabsAPIKey) else { return nil }
+                return .init(.cloud, catalog.streamingTranscription(apiKey: key))
             case .selfHosted:
-                // The token is optional; only an unreadable one skips the server.
-                if let url = settings.selfHostedURL, case .success(let token) = Result(catching: { try nonEmpty(.selfHostedToken) }) {
-                    routes.append(.init(.selfHosted, catalog.selfHostedStreamingTranscription(url: url, token: token)))
-                }
+                guard let url = settings.selfHostedURL,
+                      case .success(let token) = Result(catching: { try nonEmpty(.selfHostedToken) }) else { return nil }
+                return .init(.selfHosted, catalog.selfHostedStreamingTranscription(url: url, token: token))
             case .local:
-                let alongsideBreeze = settings.transcriptionOrder.first == .local && settings.localSpeechModel?.isBreeze == true
-                if let choice = settings.effectiveCaptionModel,
-                   let local = catalog.localStreamingTranscription(model: choice, alongsideBreeze: alongsideBreeze) {
-                    routes.append(.init(.local, local))
-                }
+                guard let choice = settings.effectiveCaptionModel,
+                      let local = catalog.localStreamingTranscription(model: choice, alongsideBreeze: false) else { return nil }
+                return .init(.local, local)
             }
         }
         return routes.isEmpty ? nil : StreamingTranscriptionChain(routes)
     }
 
     /// Text-only tasks need the selected LLM, independently of recording and speaker setup.
-    public func buildLLM(_ settings: AppSettings) throws -> LLMBuild {
-        var issues: [SetupIssue] = []
-        var llm: (any LLMProvider)?
-        switch settings.llmLocation {
-        case .cloud:
-            switch settings.cloudLLM {
-            case .gemini:
-                if let key = try nonEmpty(.geminiAPIKey) { llm = catalog.llm(apiKey: key) } else { issues.append(.missingCredential(.geminiAPIKey)) }
-            case .openAICompatible:
-                let model = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let url = settings.openAIBaseURL, !model.isEmpty {
-                    llm = catalog.openAICompatibleLLM(baseURL: url, apiKey: try nonEmpty(.openAICompatibleAPIKey), model: model)
-                } else {
-                    issues.append(.missingLLMEndpoint)
-                }
+    public func buildLLM(_ settings: AppSettings, accountURL: URL? = nil) throws -> LLMBuild {
+        let llm: (any LLMProvider)?
+        switch settings.summaryService {
+        case .gemini:
+            llm = try nonEmpty(.geminiAPIKey).map(catalog.llm(apiKey:))
+        case .openAICompatible:
+            let model = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let url = settings.openAIBaseURL, !model.isEmpty else {
+                return .needsSetup([.summaryServiceNotConfigured(.openAICompatible)])
             }
-        case .local:
-            if let local = catalog.localLLM() { llm = local } else { issues.append(.offlineModelMissing(.llm)) }
+            llm = catalog.openAICompatibleLLM(baseURL: url, apiKey: try nonEmpty(.openAICompatibleAPIKey), model: model)
+        case .mm2t:
+            if let accountURL, let token = try accountToken(for: accountURL) {
+                llm = catalog.hostedLLM(url: Self.hostedURL(accountURL, job: "llm"), token: token)
+            } else { llm = nil }
         }
-
-        guard let llm else { return .needsSetup(issues) }
+        guard let llm else { return .needsSetup([.summaryServiceNotConfigured(settings.summaryService)]) }
         return .ready(llm)
+    }
+
+    private func accountToken(for url: URL) throws -> Secret? {
+        try nonEmpty(.collabAccount).flatMap { CollabService.storedAccessToken($0, for: url) }
     }
 
     private func nonEmpty(_ credential: Credential) throws -> Secret? {

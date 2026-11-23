@@ -100,7 +100,6 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public let models: DiarizationModels
     private let parakeet: ParakeetTranscription
     public let transcriptionModel: LocalTranscriptionModel
-    public let llmModel: LocalLLMModel
     public let translationModels: TranslationModels
     private let speakerModels: LocalSpeakerModels
     private let cpu: WhisperCPU
@@ -108,13 +107,12 @@ public final class LiveProviderCatalog: ProviderCatalog {
     private let machine: MachineProfile
     private let transcription: BreezeMLX
 
-    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel,
+    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel,
                 translationModels: TranslationModels, machine: MachineProfile = .current) {
         self.machine = machine
         self.parakeet = ParakeetTranscription(directory: LocalSpeechModel.parakeet.snapshot(in: models.directory).directory)
         self.models = models
         self.transcriptionModel = transcriptionModel
-        self.llmModel = llmModel
         self.translationModels = translationModels
         cpu = WhisperCPU(folder: LocalSpeechModel.whisperCPU.snapshot(in: models.directory).directory)
         coreML = LocalTranscription(model: .breeze(in: models.directory))
@@ -129,6 +127,12 @@ public final class LiveProviderCatalog: ProviderCatalog {
     }
     public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
+    }
+    public func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code, hostedPlan: true)
+    }
+    public func hostedLLM(url: URL, token: Secret) -> any LLMProvider {
+        OpenAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t", hostedPlan: true)
     }
     public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
         ElevenLabsRealtime(apiKey: apiKey)
@@ -172,9 +176,6 @@ public final class LiveProviderCatalog: ProviderCatalog {
             return snapshot.isDownloaded ? NemotronTranscription(directory: snapshot.directory, language: language.code) : nil
         }
     }
-    /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
-    /// while a meeting is being processed rather than while the app idles in the menu bar.
-    public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
     /// A fresh translator per recording, so its model is freed when the recording's captions end.
     public func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) async -> (any CaptionTranslator)? {
         switch engine {

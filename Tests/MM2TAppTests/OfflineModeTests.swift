@@ -6,73 +6,15 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct OfflineModeTests {
-    @Test func bothSwitchesOnProcessAMeetingWithoutAnyKeyOrNetworkProvider() async throws {
-        let world = try World(keys: false)
-        world.catalog.offlineDownloaded[.transcription]!.set(true)
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        world.app.settings.settings.localSpeechModel = .breeze
-        world.app.settings.settings.transcriptionOrder = [.local]
-        world.app.settings.settings.llmLocation = .local
-        world.app.settings.settings.addVocabulary("mm2t", source: .manual)
-
-        let meeting = try await world.recordedMeeting()
-        let processed = try await world.library.meeting(meeting.id)
-
-        #expect(world.queue.jobs[meeting.id] == .completed)
-        #expect(processed.transcription?.remote.source == .local)
-        #expect(processed.transcription?.me.source == .local)
-        #expect(world.catalog.onDeviceSTT.calls.get.first?.hints == ["mm2t"])
-        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames", "cleanTranscript", "digestPerPerson", "summarize"])
-        #expect(processed.outputs.summary != nil)
-        #expect(world.catalog.keysUsed.get.isEmpty, "story 61: fully offline needs no key")
-        #expect(world.catalog.cloud.calls.get.isEmpty && world.catalog.llm.calls.get.isEmpty)
-    }
-
-    @Test func theChainFallsThroughToTheMacWhenSelfHostedAndCloudAreUnreachable() async throws {
+    @Test func downloadsAndPersistsCaptionModelsWithoutBlockingProcessing() async throws {
         let world = try World()
-        world.catalog.offlineDownloaded[.transcription]!.set(true)
-        world.catalog.cloud.behavior.set(.unreachable)
-        world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8000")
-        world.app.settings.settings.localSpeechModel = .breeze
-        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
-
-        let meeting = try await world.recordedMeeting()
-        let processed = try await world.library.meeting(meeting.id)
-
-        #expect(world.catalog.selfHosted.calls.get.count == 2)
-        #expect(world.catalog.cloud.calls.get.count == 2)
-        #expect(processed.transcription?.remote.source == .local, "story 64: the Mac is the last resort and is recorded")
-        #expect(world.catalog.llm.calls.get.count == 4, "the LLM switch is independent and stays on Gemini")
-    }
-
-    @Test func turningOnAnOfflineSwitchAsksForItsDownloadAndTheDownloadClearsIt() async throws {
-        let world = try World()
-        let setup = world.app.setup
-        world.app.settings.settings.llmLocation = .local
-        setup.refresh()
-        #expect(setup.offlineModels == Dictionary(uniqueKeysWithValues: OfflineModel.allCases.map { ($0, .notDownloaded) }))
-        #expect(setup.issues == [.offlineModelMissing(.llm)])
-
-        await setup.downloadOfflineModel(.llm)
-        #expect(setup.offlineModels[.llm] == .downloaded)
-        #expect(setup.offlineModels[.transcription] == .notDownloaded, "each model downloads on its own")
-        #expect(setup.issues.isEmpty)
-    }
-
-    @Test func selectsAndInstallsSpeechModelsIndependently() async throws {
-        let world = try World()
-        let store = world.app.settings
-        store.settings.transcriptionOrder = [.local]
         for choice in [LocalSpeechModel.nemotron, .parakeet, .breeze, .breezeCoreML] {
-            store.settings.localSpeechModel = choice
-            let model = OfflineModel(choice)
-            world.app.setup.refresh()
-            #expect(world.app.setup.issues.contains(.offlineModelMissing(model)))
-            await world.app.setup.downloadOfflineModel(model)
-            #expect(!world.app.setup.issues.contains(.offlineModelMissing(model)))
-            #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(store.settings)).localSpeechModel == choice)
+            await world.app.setup.selectSpeechModel(choice, for: \.localCaptionModel).value
+            #expect(world.app.setup.offlineModels[OfflineModel(choice)] == .downloaded)
+            #expect(world.app.setup.issues.isEmpty)
+            let settings = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(world.app.settings.settings))
+            #expect(settings.effectiveCaptionModel == choice)
         }
-        #expect(try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8)).localSpeechModel == nil)
     }
 
     @Test func choosingCoreMLPreparesTheCompletedDownloadAndCanRetryWithoutDownloadingAgain() async throws {
@@ -97,32 +39,13 @@ import Testing
         #expect(setup.speechModelChoices.contains(.breezeCoreML))
     }
 
-    @Test func eachLocalRouteUsesItsOwnInstalledModel() throws {
-        let world = try World()
-        let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
-                                  credentials: world.credentials, catalog: world.catalog)
-        var settings = world.app.settings.settings
-        settings.transcriptionOrder = [.local]
-        settings.localCaptionModel = .nemotron
-        settings.localSpeechModel = .breeze
-        world.catalog.offlineDownloaded[.nemotron]!.set(true)
-        #expect(setup.buildCaptions(settings) != nil)
-        guard case .needsSetup(let issues) = try setup.build(settings) else { Issue.record("Missing Breeze"); return }
-        #expect(issues.contains(.offlineModelMissing(.transcription)))
-        world.catalog.offlineDownloaded[.nemotron]!.set(false)
-        world.catalog.offlineDownloaded[.transcription]!.set(true)
-        #expect(setup.buildCaptions(settings) == nil)
-        guard case .ready = try setup.build(settings) else { Issue.record("Breeze should be ready"); return }
-    }
-
-    @Test func olderLocalConfigurationKeepsBothCoreMLRoutesOnRestart() throws {
+    @Test func olderLocalConfigurationKeepsTheCoreMLCaptionModelOnRestart() throws {
         let before = Data(#"{"transcriptionOrder":["local"],"hasCompletedOnboarding":true}"#.utf8)
         let migrated = try JSONDecoder().decode(AppSettings.self, from: before)
         #expect(migrated.localSpeechModel == .breezeCoreML && migrated.effectiveCaptionModel == .breezeCoreML)
-        #expect(migrated.hasChosenSpeechModel)
         #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(migrated)) == migrated)
         let fresh = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
-        #expect(fresh.localSpeechModel == nil && !fresh.hasChosenSpeechModel)
+        #expect(fresh.effectiveCaptionModel == nil)
     }
 
     @Test func oldSharedFlagDoesNotSelectAnUninstalledMLXDefaultOnTheOtherPicker() throws {
@@ -133,12 +56,12 @@ import Testing
         let migrated = SettingsStore(defaults: defaults, machine: machine, installedMLX: false)
         #expect(migrated.settings.localSpeechModel == .breezeCoreML && migrated.settings.localCaptionModel == nil)
         let reopened = SettingsStore(defaults: defaults, machine: machine, installedMLX: true)
-        #expect(reopened.settings == migrated.settings)
+        #expect(reopened.settings.localCaptionModel == .breeze)
         defaults.set(data, forKey: SettingsStore.key)
         #expect(SettingsStore(defaults: defaults, machine: machine, installedMLX: true).settings.localCaptionModel == .breeze)
     }
 
-    @Test func intelMigratesOnlyTheUnsupportedFieldsAndPersistsTheResult() throws {
+    @Test func intelUsesCompatibleModelsWithoutWritingAtLaunch() throws {
         let intel = MachineProfile(isAppleSilicon: false, memoryBytes: 16 << 30)
         let silicon = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30)
         for caption in LocalSpeechModel.allCases {
@@ -148,7 +71,7 @@ import Testing
                 stored.localCaptionModel = caption
                 stored.localSpeechModel = transcript
                 stored.hasCompletedOnboarding = true
-                stored.transcriptionOrder = [.selfHosted, .local]
+                stored.transcriptionService = .server
                 stored.addVocabulary("mm2t", source: .manual)
                 defaults.set(try JSONEncoder().encode(stored), forKey: SettingsStore.key)
                 #expect(SettingsStore(defaults: defaults, machine: silicon).settings == stored)
@@ -156,8 +79,7 @@ import Testing
                 if caption != .whisperCPU { stored.localCaptionModel = .whisperCPU }
                 if transcript != .whisperCPU { stored.localSpeechModel = .whisperCPU }
                 #expect(migrated == stored)
-                // Re-open without the Intel filter so a stale persisted choice would be visible.
-                #expect(SettingsStore(defaults: defaults, machine: silicon).settings == stored)
+                #expect(SettingsStore(defaults: defaults, machine: silicon).settings.localCaptionModel == caption)
             }
         }
     }
@@ -166,19 +88,19 @@ import Testing
         let world = try World(machine: MachineProfile(isAppleSilicon: false, memoryBytes: 16 << 30))
         let setup = world.app.setup
         let store = world.app.settings
-        #expect(!store.settings.hasChosenSpeechModel)
-        #expect(!world.app.onboarding.canLeave(.models))
+        #expect(store.settings.localSpeechModel == nil)
+        #expect(world.app.onboarding.canLeave(.models))
         #expect(store.settings.localCaptionModel == nil && store.settings.localSpeechModel == nil)
         #expect(setup.speechModelChoices == [.whisperCPU])
         for field in [\AppSettings.localCaptionModel, \AppSettings.localSpeechModel] {
             await setup.selectSpeechModel(.breeze, for: field).value
         }
-        #expect(!store.settings.hasChosenSpeechModel)
+        #expect(store.settings.localSpeechModel == nil)
         await setup.downloadOfflineModel(.transcription)
         #expect(world.offlineInstallers[.transcription]?.downloads.get == 0)
         #expect(setup.offlineModels[.transcription] == nil)
         await setup.selectSpeechModel(.whisperCPU, for: \.localCaptionModel).value
-        #expect(!world.app.onboarding.canLeave(.models))
+        #expect(world.app.onboarding.canLeave(.models))
         #expect(store.settings.localSpeechModel == nil)
         await setup.selectSpeechModel(.whisperCPU, for: \.localSpeechModel).value
         #expect(world.app.onboarding.canLeave(.models))
@@ -224,20 +146,6 @@ import Testing
         settings.localCaptionModel = nil
         let inherited = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
         #expect(inherited.effectiveCaptionModel == .breeze && inherited.localCaptionModel == nil)
-    }
-
-    @Test func aMeetingWaitingForTheModelRunsOnceItIsDownloaded() async throws {
-        let world = try World(keys: false)
-        world.app.settings.settings.localSpeechModel = .breeze
-        world.app.settings.settings.transcriptionOrder = [.local]
-        world.app.settings.settings.llmLocation = .local
-        let meeting = try await world.recordedMeeting()
-        #expect(world.queue.jobs[meeting.id] == .needsSetup([.offlineModelMissing(.transcription), .offlineModelMissing(.llm)]))
-
-        await world.app.setup.downloadOfflineModel(.transcription)
-        await world.app.setup.downloadOfflineModel(.llm)
-        await world.queue.retryAfterSetup()
-        #expect(world.queue.jobs[meeting.id] == .completed)
     }
 
     @Test func theSuggestionFollowsThisMacsChipAndMemory() throws {

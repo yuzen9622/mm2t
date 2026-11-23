@@ -128,8 +128,8 @@ import Testing
         #expect((cleaned ? saved.outputs.cleaned?.paragraphs.first?.text : saved.utterance(raw.id)?.text) == original)
     }
 
-    @Test(arguments: LLMLocation.allCases)
-    func learningOnlyRequiresTheSelectedLanguageModel(location: LLMLocation) async throws {
+    @Test(arguments: [SummaryService.gemini, .openAICompatible])
+    func learningOnlyRequiresTheSelectedLanguageModel(service: SummaryService) async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()
         let detail = world.detail(meeting.id)
@@ -137,9 +137,10 @@ import Testing
         let row = try #require(detail.presentation?.raw.first)
         world.credentials.values.update { $0[.elevenLabsAPIKey] = nil }
         world.catalog.modelsDownloaded.set(false)
-        world.app.settings.settings.llmLocation = location
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        let llm = location == .local ? world.catalog.onDeviceLLM : world.catalog.llm
+        world.app.settings.settings.summaryService = service
+        world.app.settings.settings.openAIBaseURL = URL(string: "https://llm.example/v1")
+        world.app.settings.settings.openAIModel = "custom"
+        let llm = world.catalog.llm
         llm.corrections.set([.init(incorrect: String(row.text.prefix(2)), correct: "Grafana")])
         await detail.edit(row.id, to: "Grafana " + row.text.dropFirst(2))
         #expect(world.app.settings.settings.learnedVocabulary == ["Grafana"])

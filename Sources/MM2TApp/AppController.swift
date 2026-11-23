@@ -95,7 +95,9 @@ public final class AppController {
         AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints, folders: folders,
                                                todos: { [todoStatus] in await todoStatus.snapshot }),
                        conversations: assistantConversations, preferences: assistantPreferences,
-                       build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
+                       build: { [pipelineSetup, settings, url = collabAccount?.configuration.apiURL] in
+                           try pipelineSetup.buildLLM(settings.settings, accountURL: url)
+                       })
     }
 
     public init(
@@ -128,6 +130,9 @@ public final class AppController {
         let settings = SettingsStore(defaults: defaults, machine: machine, installedMLX: offlineInstallers[.transcription]?.isDownloaded)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
+        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials, pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json")) }
+        collabAccount = account
+        let accountURL = collabConfiguration?.apiURL
         let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
         migrateVoiceprints = { progress in
             guard let models = catalog.localSpeakerModels() else { return }
@@ -143,12 +148,12 @@ public final class AppController {
             }
         }
         let queue = ProcessingQueue(
-            makePipeline: { try pipelineSetup.build(settings.settings) },
-            makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
+            makePipeline: { try pipelineSetup.build(settings.settings, accountURL: accountURL) },
+            makeLLM: { try pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) })
         queue.onCompleted = { meeting in
             guard folders.claimRecording(meeting.id), !folders.folders.isEmpty, folders.revision(of: meeting.id) == nil else { return }
             Task {
-                guard case .ready(let provider) = try? pipelineSetup.buildLLM(settings.settings) else { return }
+                guard case .ready(let provider) = try? pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) else { return }
                 _ = try? await FolderOrganizer.run(folders, library: library, provider: provider, question: "", scope: [meeting.id], mode: .automatic)
             }
         }
@@ -160,8 +165,6 @@ public final class AppController {
         self.voiceprints = voiceprints
         self.pipelineSetup = pipelineSetup
         self.queue = queue
-        let account = collabConfiguration.map { CollabAccount(configuration: $0, credentials: credentials, pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json")) }
-        collabAccount = account
         capture = CaptureController(
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
@@ -172,36 +175,25 @@ public final class AppController {
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let mic = directory.appending(path: RecordingManifest.micFile)
                 let remote = directory.appending(path: RecordingManifest.remoteFile)
-                if current.transcriptionOrder.first == .local, let choice = current.localSpeechModel, choice.isBreeze {
-                    guard let breeze = catalog.localTranscription(model: choice, language: current.transcriptionLanguage) else { return nil }
-                    let names = await voiceprints.spokenNames()
-                    return LiveTranscriber(mic: mic, remote: remote, chain: TranscriptionChain([.init(.local, breeze)]),
-                        hints: names + current.vocabulary.filter { !names.contains($0) }, scratch: scratch,
-                        pieceSeconds: LiveTranscriber.breezePieceSeconds, configurationIsCurrent: {
-                            let latest = settings.settings
-                            return latest.transcriptionOrder == current.transcriptionOrder && latest.localSpeechModel == current.localSpeechModel
-                                && latest.transcriptionLanguage == current.transcriptionLanguage && latest.vocabulary == current.vocabulary
-                        })
-                }
+                guard current.transcriptionService != .mm2t, current.summaryService != .mm2t else { return nil }
                 guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
                       let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
                 let pipeline: MeetingProcessingPipeline
-                if current.llmLocation == .cloud, let gemini = configured.llm as? GeminiLLM {
+                if let gemini = configured.llm as? GeminiLLM {
                     pipeline = configured.withLLM(gemini.forRecording())
-                } else if current.llmLocation == .cloud, let compatible = configured.llm as? OpenAICompatibleLLM {
+                } else if let compatible = configured.llm as? OpenAICompatibleLLM {
                     pipeline = configured.withLLM(compatible.forRecording())
                 } else { pipeline = configured }
-                let speechCredentials: [Credential] = chain.routes.compactMap {
-                    switch $0.source { case .cloud: .elevenLabsAPIKey; case .selfHosted: .selfHostedToken; case .local: nil }
-                }
-                let credentialKinds = speechCredentials + (current.llmLocation == .cloud
-                    ? [current.cloudLLM == .gemini ? Credential.geminiAPIKey : .openAICompatibleAPIKey] : [])
+                let credentialKinds: [Credential] = [
+                    current.transcriptionService == .elevenLabs ? .elevenLabsAPIKey : .selfHostedToken,
+                    current.summaryService == .gemini ? .geminiAPIKey : .openAICompatibleAPIKey,
+                ]
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
                     settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
                 let processing: LiveRecordingProcessor?
-                if current.llmLocation == .cloud, let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
+                if let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
                    let session = try? await factory.makeStreamingSession() {
                     processing = LiveRecordingProcessor(pipeline: pipeline, session: session,
                         scratch: scratch.appending(path: "speakers"), configurationIsCurrent: configurationIsCurrent)
@@ -216,11 +208,10 @@ public final class AppController {
             makeCollaboration: { title in
                 account.map { CollabSession(account: $0, title: title, now: now, llmSnapshot: {
                     let snapshot = settings.settings
-                    return { try pipelineSetup.buildLLM(snapshot) }
+                    return { try pipelineSetup.buildLLM(snapshot, accountURL: accountURL) }
                 }) }
             },
             makeCaptions: { captions in
-                // Opt-in, from the transcription sources in their order; with none set up nothing runs.
                 let current = settings.settings
                 guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
@@ -261,7 +252,7 @@ public final class AppController {
                 try await engine.prepare()
             },
             checkSetup: {
-                switch (try? pipelineSetup.build(settings.settings)) {
+                switch (try? pipelineSetup.build(settings.settings, accountURL: accountURL)) {
                 case .needsSetup(let issues): issues
                 case .ready, nil: []
                 }
@@ -283,7 +274,7 @@ public final class AppController {
             voiceprints: voiceprints, recorder: voiceRecorder, permissions: permissions,
             scratch: paths.recordings.appending(path: "enrollment.wav"),
             transcribe: { audio in
-                guard case .ready(let pipeline)? = try? pipelineSetup.build(settings.settings),
+                guard case .ready(let pipeline)? = try? pipelineSetup.build(settings.settings, accountURL: accountURL),
                       let heard = try? await pipeline.transcription.transcribe(audio: audio, hints: [], labelSpeakers: false) else { return nil }
                 return heard.words.map(\.text).joined()
             },
@@ -294,7 +285,10 @@ public final class AppController {
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
         onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
-        account?.onUserChanged = { [weak capture] in capture?.collaboration?.accountChanged() }
+        account?.onUserChanged = { [weak capture, weak setup] in
+            setup?.recheck()
+            capture?.collaboration?.accountChanged()
+        }
         account?.beforeSignOut = { [weak capture] in await capture?.signOutOfCollaboration() }
     }
 
@@ -312,14 +306,13 @@ public final class AppController {
         let info = { (key: String) in OAuthClientID.resolve(Bundle.main.object(forInfoDictionaryKey: key)) }
         let models = DiarizationModels(directory: paths.models)
         let transcription = LocalTranscriptionModel.breezeMLX(in: paths.models)
-        let llm = LocalLLMModel.qwen35(in: paths.models)
         let translation = TranslationModels.mozilla(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
-            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm,
+            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription,
                                          translationModels: translation, machine: machine),
             recorder: recorder, permissions: permissions,
-            installer: models, offlineInstallers: [.whisperCPU: LocalSpeechModel.whisperCPU.snapshot(in: paths.models), .transcription: transcription.snapshot, .breezeCoreML: LocalSpeechModel.breezeCoreML.snapshot(in: paths.models), .llm: llm.snapshot,
+            installer: models, offlineInstallers: [.whisperCPU: LocalSpeechModel.whisperCPU.snapshot(in: paths.models), .transcription: transcription.snapshot, .breezeCoreML: LocalSpeechModel.breezeCoreML.snapshot(in: paths.models),
                 .parakeet: LocalSpeechModel.parakeet.snapshot(in: paths.models), .nemotron: LocalSpeechModel.nemotron.snapshot(in: paths.models)],
             translationInstaller: { engine, target in
                 switch engine {
@@ -345,8 +338,7 @@ public final class AppController {
 
     public var shouldPrepareBreeze: Bool {
         let selected = settings.settings
-        return selected.transcriptionOrder.first == .local
-            && (selected.localSpeechModel == .breeze || (selected.liveCaptions && selected.effectiveCaptionModel == .breeze))
+        return selected.liveCaptions && selected.effectiveCaptionModel == .breeze
             && setup.offlineModels[.transcription] == .downloaded
     }
 
@@ -360,7 +352,7 @@ public final class AppController {
     public func launch(watchMeetings: Bool = true) async {
         collabAccount?.observeSignIn()
         Task(priority: .utility) {
-            if settings.settings.localSpeechModel == .breezeCoreML, settings.settings.transcriptionOrder.contains(.local),
+            if settings.settings.liveCaptions, settings.settings.effectiveCaptionModel == .breezeCoreML,
                setup.offlineModels[.breezeCoreML] == .downloaded { await setup.prepareInstalledCoreML() }
             await preparePreferredBreeze()
         }

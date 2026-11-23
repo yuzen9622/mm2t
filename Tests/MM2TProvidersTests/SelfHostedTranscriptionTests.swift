@@ -66,14 +66,14 @@ import Testing
             try await provider.transcribe(audio: try audioFile(), hints: [], labelSpeakers: false)
         }
         guard case .unreachable(let message) = error else { Issue.record("got \(String(describing: error))"); return }
-        #expect(message.contains("Tailscale"))
+        #expect(message.contains("100.64.0.7"))
         #expect(server.requests.map(\.url.path) == ["/healthz"])
     }
 
     @Test func wrongAddressIsUnreachable() async throws {
         let server = StubServer(status: 404, body: "<html>not found</html>")
         let provider = SelfHostedTranscription(baseURL: base, token: nil, session: server.session)
-        await #expect(throws: TranscriptionError.unreachable(ProviderError(.selfHosted, .unreachable).description)) {
+        await #expect(throws: TranscriptionError.unreachable("Couldn't reach your transcription server (100.64.0.7).")) {
             try await provider.transcribe(audio: try audioFile(), hints: [], labelSpeakers: false)
         }
     }

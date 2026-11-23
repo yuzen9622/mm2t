@@ -14,7 +14,7 @@ struct WhisperCPUIntegrationTests {
         let root = URL(filePath: try #require(Self.environment["MM2T_CPU_MODELS"]))
         let audio = URL(filePath: try #require(Self.environment["MM2T_CPU_AUDIO"]))
         let catalog = LiveProviderCatalog(models: DiarizationModels(directory: root), transcriptionModel: .breezeMLX(in: root),
-                                          llmModel: .qwen35(in: root), translationModels: .mozilla(in: root),
+                                          translationModels: .mozilla(in: root),
                                           machine: MachineProfile(isAppleSilicon: false, memoryBytes: 16 << 30))
         #expect(catalog.localTranscription(model: .breeze, language: .chinese) == nil)
         #expect(catalog.localStreamingTranscription(model: .breeze, alongsideBreeze: false) == nil)

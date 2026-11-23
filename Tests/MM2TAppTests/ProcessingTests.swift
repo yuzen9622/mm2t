@@ -8,7 +8,7 @@ import Testing
 @MainActor @Suite struct ProcessingTests {
     @Test func rewritingRetainsItsExistingSetupRequirements() async {
         let queue = ProcessingQueue(
-            makePipeline: { .needsSetup([.noTranscriptionSource]) },
+            makePipeline: { .needsSetup([.transcriptionServiceNotConfigured(.elevenLabs)]) },
             makeLLM: { throw URLError(.badServerResponse) })
         await #expect(throws: RewriteUnsupported.self) {
             try await queue.rewrite("Original passage", instruction: "Make it concise")
@@ -19,8 +19,8 @@ import Testing
         let world = try World(keys: false)
         let meeting = try await world.recordedMeeting()
 
-        #expect(world.queue.jobs[meeting.id] == .needsSetup([.missingCredential(.elevenLabsAPIKey), .missingCredential(.geminiAPIKey)]))
-        #expect(world.queue.pendingSetup == [.missingCredential(.elevenLabsAPIKey), .missingCredential(.geminiAPIKey)])
+        #expect(world.queue.jobs[meeting.id] == .needsSetup([.transcriptionServiceNotConfigured(.elevenLabs), .summaryServiceNotConfigured(.gemini)]))
+        #expect(world.queue.pendingSetup == [.transcriptionServiceNotConfigured(.elevenLabs), .summaryServiceNotConfigured(.gemini)])
         #expect(world.catalog.providerCalls == 0, "nothing was uploaded")
         #expect(try await world.library.meeting(meeting.id).status == .pending(next: .transcribe), "not a failure")
 
@@ -36,38 +36,44 @@ import Testing
         #expect(Set(world.catalog.keysUsed.get) == ["stt:eleven", "llm:gemini"], "the saved keys reached the providers")
     }
 
-    @Test func eachEnabledSourceMustBeConfiguredIncludingTheOfflineModels() throws {
+    @Test func onlySelectedServicesNeedConfigurationAndSpeakerSeparationStaysLocal() throws {
         let world = try World()
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
                                   credentials: world.credentials, catalog: world.catalog)
-        func issues(_ change: (inout AppSettings) -> Void) throws -> [SetupIssue] {
-            var settings = AppSettings()
-            change(&settings)
-            if case .needsSetup(let issues) = try setup.build(settings) { return issues }
-            return []
-        }
-
-        #expect(try issues { _ in }.isEmpty)
-        #expect(try issues { $0.transcriptionOrder = [.selfHosted, .cloud] } == [.missingSelfHostedURL])
-        #expect(try issues { $0.transcriptionOrder = [] } == [.noTranscriptionSource])
-        #expect(try issues { $0.transcriptionOrder = [.cloud, .local] } == [.speechModelNotSelected])
-        #expect(try issues {
-            $0.localSpeechModel = .breeze
-            $0.transcriptionOrder = [.cloud, .local]
-        } == [.offlineModelMissing(.transcription)])
-        #expect(try issues { $0.llmLocation = .local } == [.offlineModelMissing(.llm)])
-        world.catalog.offlineDownloaded[.transcription]!.set(true)
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        #expect(try issues {
-            $0.localSpeechModel = .breeze
-            $0.transcriptionOrder = [.cloud, .local]
-            $0.llmLocation = .local
-        }.isEmpty)
-
+        var settings = AppSettings()
+        settings.transcriptionService = .server
+        settings.summaryService = .openAICompatible
+        settings.localCaptionModel = .breeze
+        guard case .needsSetup(let issues) = try setup.build(settings) else { Issue.record("Expected setup issues"); return }
+        #expect(issues == [.transcriptionServiceNotConfigured(.server), .summaryServiceNotConfigured(.openAICompatible)])
+        #expect(issues.compactMap(\.service) == [.transcriptionServer, .openAICompatible])
         world.catalog.modelsDownloaded.set(false)
-        #expect(try issues { _ in } == [.diarizationModelsMissing])
-        #expect(try issues { $0.transcriptionOrder = [.cloud] } == [.diarizationModelsMissing],
-                "speakers are always told apart on this Mac, whatever the transcription service")
+        guard case .needsSetup(let missing) = try setup.build(AppSettings()) else { Issue.record("Expected speaker models issue"); return }
+        #expect(missing == [.diarizationModelsMissing])
+    }
+
+    @Test func hostedJobsUseOnlyTheTokenForTheConfiguredCollaborationAPI() throws {
+        let world = try World()
+        world.catalog.keysUsed.set([])
+        let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
+                                  credentials: world.credentials, catalog: world.catalog)
+        let api = URL(string: "https://collab.example/proxy/")!
+        #expect(PipelineSetup.hostedURL(api, job: "stt").absoluteString == "https://collab.example/proxy/v1/hosted/stt")
+        #expect(PipelineSetup.hostedURL(api, job: "llm").absoluteString == "https://collab.example/proxy/v1/hosted/llm")
+        var settings = AppSettings()
+        settings.transcriptionService = .mm2t
+        settings.summaryService = .mm2t
+        let stored = #"{"apiURL":"https://collab.example/proxy/","tokens":{"accessToken":"test-bearer","refreshToken":"test-refresh"}}"#
+        try world.credentials.save(Secret(stored), for: .collabAccount)
+        guard case .needsSetup(let issues) = try setup.build(settings, accountURL: URL(string: "https://other.example")) else {
+            Issue.record("Wrong account origin must not receive the token"); return
+        }
+        #expect(issues == [.transcriptionServiceNotConfigured(.mm2t), .summaryServiceNotConfigured(.mm2t)])
+        guard case .ready(let pipeline) = try setup.build(settings, accountURL: api) else { Issue.record("Expected hosted plan"); return }
+        #expect(pipeline.transcription.routes.count == 1)
+        #expect(world.catalog.selfHostedURLs.get.map(\.absoluteString) == ["https://collab.example/proxy/v1/hosted/stt"])
+        #expect(world.catalog.openAIEndpoints.get == ["https://collab.example/proxy/v1/hosted/llm|test-bearer|mm2t"])
+        #expect(world.catalog.keysUsed.get == ["hosted-stt:test-bearer"])
     }
 
     @Test func speakersAreToldApartOnThisMacEvenWhenOldSettingsPreferredTheServicesLabels() async throws {
@@ -83,27 +89,28 @@ import Testing
         #expect(!world.catalog.cloud.labelRequests.get.contains(true), "the service is never asked for speaker labels")
     }
 
-    @Test func transcriptionFollowsTheConfiguredOrderAndFallsThroughWhenSelfHostedIsDown() async throws {
+    @Test func aFailedTranscriptionServerNeverSendsAudioToElevenLabsOrTheMac() async throws {
         let world = try World()
         let server = try #require(AppSettings.selfHostedURL(from: " http://gpu.tailnet:8000 "))
         world.app.settings.settings.selfHostedURL = server
-        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud]
-        world.app.settings.settings.addVocabulary("mm2t, Typeless\nmm2t\n", source: .manual)
+        world.app.settings.settings.transcriptionService = .server
+        world.app.settings.settings.localCaptionModel = .breeze
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
 
         let meeting = try await world.recordedMeeting()
-        let processed = try await world.library.meeting(meeting.id)
-
         #expect(Set(world.catalog.selfHostedURLs.get) == [server])
-        #expect(world.catalog.selfHosted.calls.get.count == 2, "tried first for both tracks")
-        #expect(processed.transcription?.remote.source == .cloud, "story 64: the source actually used is recorded")
-        #expect(world.catalog.cloud.calls.get.first?.hints == ["mm2t", "Typeless"])
+        #expect(!world.catalog.selfHosted.calls.get.isEmpty)
+        #expect(world.catalog.cloud.calls.get.isEmpty)
+        #expect(world.catalog.onDeviceSTT.calls.get.isEmpty)
+        guard case .failed(step: .transcribe, reason: _) = world.queue.jobs[meeting.id] else {
+            Issue.record("Expected the server failure to surface"); return
+        }
     }
 
-    @Test func aLocalSpeechFallbackDoesNotSerializeTheCloudLLM() async throws {
+    @Test func aLocalCaptionModelDoesNotSerializeGemini() async throws {
         let world = try World()
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.app.settings.settings.localSpeechModel = .breeze
-        world.app.settings.settings.transcriptionOrder = [.cloud, .local]
         let gate = Gate<Bool>()
         world.catalog.llm.holds.update { $0["inferNames"] = gate }
         await world.capture.startNow(title: "Concurrent cloud summary")
@@ -115,31 +122,13 @@ import Testing
         #expect(try await world.library.list().first?.status == .completed)
     }
 
-    @Test func hostedSpeechStillKeepsTheOnDeviceLLMSerial() async throws {
-        let world = try World()
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        world.app.settings.settings.llmLocation = .local
-        let gate = Gate<Bool>()
-        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
-        await world.capture.startNow(title: "Serial local summary")
-        let stopping = Task { await world.capture.stop() }
-        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames"])
-        await gate.open(true)
-        await stopping.value
-        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames", "cleanTranscript", "digestPerPerson", "summarize"])
-    }
-
     @Test func cancellingAJobLeavesTheMeetingReadyToResumeFromTheStoppedStep() async throws {
         let world = try World()
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        world.app.settings.settings.llmLocation = .local
         let gate = Gate<Bool>()
-        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
+        world.catalog.llm.holds.update { $0["inferNames"] = gate }
         await world.capture.startNow(title: "Stopped by the user")
         let stopping = Task { await world.capture.stop() }
-        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
+        #expect(await eventually { world.catalog.llm.calls.get.contains("inferNames") })
         let id = try #require(world.app.queue.activeJob?.id)
 
         world.app.queue.cancel(id)
@@ -147,7 +136,7 @@ import Testing
         await stopping.value
 
         #expect(world.app.queue.jobs[id] == nil)
-        #expect(world.catalog.onDeviceLLM.calls.get == ["inferNames"], "nothing after the stopped step ran")
+
         #expect(try await world.library.meeting(id).status == .pending(next: .inferNames))
 
         await world.app.queue.run(.process, on: id)
@@ -156,13 +145,11 @@ import Testing
 
     @Test func cancellingAQueuedJobTakesItOutOfLineAtOnceAndItNeverRuns() async throws {
         let world = try World()
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        world.app.settings.settings.llmLocation = .local
         let gate = Gate<Bool>()
-        world.catalog.onDeviceLLM.holds.update { $0["inferNames"] = gate }
+        world.catalog.llm.holds.update { $0["inferNames"] = gate }
         await world.capture.startNow(title: "Ahead in line")
         let first = Task { await world.capture.stop() }
-        #expect(await eventually { world.catalog.onDeviceLLM.calls.get.contains("inferNames") })
+        #expect(await eventually { world.catalog.llm.calls.get.contains("inferNames") })
         await world.capture.startNow(title: "Waiting in line")
         let second = Task { await world.capture.stop() }
         #expect(await eventually { world.app.queue.jobs.values.contains(.queued) })
@@ -177,31 +164,6 @@ import Testing
         await second.value
         #expect(world.app.queue.jobs[waiting] == nil)
         #expect(try await world.library.meeting(waiting).status == .pending(next: .transcribe), "it never ran")
-    }
-
-    @Test func speechAndLLMConcurrencyFollowTheirOwnModelLocations() throws {
-        let world = try World()
-        world.catalog.offlineDownloaded[.transcription]!.set(true)
-        world.catalog.offlineDownloaded[.llm]!.set(true)
-        let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
-                                  credentials: world.credentials, catalog: world.catalog)
-        for (speech, llm, concurrentSpeech, concurrentLLM) in [
-            ([TranscriptionSource.cloud, .local], LLMLocation.cloud, false, true),
-            ([.local, .cloud], .cloud, false, true),
-            ([.cloud], .local, true, false),
-            ([.local], .local, false, false),
-        ] {
-            var settings = AppSettings()
-            settings.localSpeechModel = .breeze
-            settings.transcriptionOrder = speech
-            settings.llmLocation = llm
-            guard case .ready(let pipeline) = try setup.build(settings) else {
-                Issue.record("expected configured pipeline")
-                continue
-            }
-            #expect(pipeline.transcribesConcurrently == concurrentSpeech)
-            #expect(pipeline.runsConcurrently == concurrentLLM)
-        }
     }
 
     @Test func aFailedStepShowsItsReasonKeepsTheAudioAndRetriesFromThatStep() async throws {

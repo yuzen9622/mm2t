@@ -2,6 +2,7 @@ import Foundation
 import MM2TCore
 
 public enum Service: String, Sendable, CaseIterable {
+    case mm2tPlan
     case elevenLabs
     case selfHosted
     case gemini
@@ -12,6 +13,7 @@ public enum Service: String, Sendable, CaseIterable {
     /// User-facing text here is looked up in the app's String Catalog (`Bundle.main`), so it shows in the UI language.
     var displayName: String {
         switch self {
+        case .mm2tPlan: String(localized: "mm2t plan", bundle: .main)
         case .elevenLabs: "ElevenLabs"
         case .selfHosted: String(localized: "the self-hosted transcription server", bundle: .main)
         case .gemini: "Gemini"
@@ -27,7 +29,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .selfHosted: String(localized: "the self-hosted server token", bundle: .main)
         case .gemini: "Gemini API Key"
         case .openAICompatible: String(localized: "the large language model API key", bundle: .main)
-        case .localTranscription, .localLLM: displayName
+        case .mm2tPlan, .localTranscription, .localLLM: displayName
         }
     }
 }
@@ -69,6 +71,10 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
     public var errorDescription: String? { description }
 
     public var description: String {
+        if service == .mm2tPlan {
+            if kind == .invalidCredential { return String(localized: "Sign in to use your mm2t plan.", bundle: .main) }
+            if kind == .outOfCredit { return String(localized: "Your mm2t plan has no minutes left this month.", bundle: .main) }
+        }
         let name = service.displayName
         let key = service.keyName
         let text = switch kind {

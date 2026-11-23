@@ -72,6 +72,18 @@ public actor CollabService {
         let user: CollabUser?
     }
 
+    private nonisolated static func storedLogin(_ secret: Secret, for url: URL) -> StoredLogin? {
+        guard let stored = try? JSONDecoder().decode(StoredLogin.self, from: Data(secret.revealed.utf8)),
+              stored.apiURL == url else { return nil }
+        return stored
+    }
+
+    package nonisolated static func storedAccessToken(_ secret: Secret, for url: URL) -> Secret? {
+        guard let stored = storedLogin(secret, for: url) else { return nil }
+        let token = Secret(stored.tokens.accessToken)
+        return token.isEmpty ? nil : token
+    }
+
     private struct Login: Decodable, Sendable {
         let accessToken: String
         let refreshToken: String
@@ -214,8 +226,7 @@ public actor CollabService {
     private func currentTokens() throws -> Tokens {
         if !didLoad {
             if let secret = try load() {
-                let stored = try? JSONDecoder().decode(StoredLogin.self, from: Data(secret.revealed.utf8))
-                if let stored, stored.apiURL == baseURL {
+                if let stored = Self.storedLogin(secret, for: baseURL) {
                     tokens = stored.tokens
                     signedInUser = stored.user
                 }

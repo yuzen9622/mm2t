@@ -292,7 +292,6 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let diarizer = ScriptedDiarizer()
     let modelsDownloaded = Box(true)
     let onDeviceSTT = FakeSTT()
-    let onDeviceLLM = FakeLLM()
     let offlineDownloaded: [OfflineModel: Box<Bool>] = Dictionary(uniqueKeysWithValues: OfflineModel.allCases.map { ($0, Box(false)) })
     let keysUsed = Box<[String]>([])
     let selfHostedURLs = Box<[URL]>([])
@@ -347,8 +346,13 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return offlineDownloaded[OfflineModel(model)]!.get ? onDeviceSTT : nil
     }
 
-    func localLLM() -> (any LLMProvider)? {
-        offlineDownloaded[.llm]!.get ? onDeviceLLM : nil
+    func hostedTranscription(url: URL, token: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        keysUsed.update { $0.append("hosted-stt:" + token.revealed) }
+        return selfHostedTranscription(url: url, token: token, language: language)
+    }
+
+    func hostedLLM(url: URL, token: Secret) -> any LLMProvider {
+        openAICompatibleLLM(baseURL: url, apiKey: token, model: "mm2t")
     }
 
     let translator = FakeTranslator()
@@ -363,7 +367,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
 
     var providerCalls: Int {
         selfHosted.calls.get.count + cloud.calls.get.count + llm.calls.get.count
-            + onDeviceSTT.calls.get.count + onDeviceLLM.calls.get.count
+            + onDeviceSTT.calls.get.count
     }
 }
 

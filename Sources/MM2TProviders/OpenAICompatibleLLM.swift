@@ -16,6 +16,7 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         }
     }
 
+    package let service: Service
     let baseURL: URL
     let apiKey: Secret?
     let model: String
@@ -32,8 +33,9 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     /// `baseURL` is the API root the user copies from their server, e.g. `http://host:8000/v1`.
     public init(
         baseURL: URL, apiKey: Secret?, model: String, session: URLSession = .shared,
-        limits: Limits = Limits(), timeout: TimeInterval = 900
+        limits: Limits = Limits(), timeout: TimeInterval = 900, hostedPlan: Bool = false
     ) {
+        self.service = hostedPlan ? .mm2tPlan : .openAICompatible
         self.baseURL = Self.apiRoot(baseURL)
         self.apiKey = apiKey.flatMap { $0.isEmpty ? nil : $0 }
         self.model = model
@@ -54,15 +56,15 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     public func availableModels() async throws -> [String] {
         var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 15))
         request.httpMethod = "GET"
-        let response = try await session.send(request, for: .openAICompatible)
+        let response = try await session.send(request, for: service)
         if response.status == 404 || response.status == 405 { throw ModelListingError.unsupported }
-        guard response.status == 200 else { throw ProviderError(.openAICompatible, Self.failure(response)) }
+        guard response.status == 200 else { throw ProviderError(service, Self.failure(response)) }
         struct Listing: Decodable {
             struct Model: Decodable { let id: String }
             let data: [Model]
         }
         guard let listing = try? JSONDecoder().decode(Listing.self, from: response.body) else {
-            throw ProviderError(.openAICompatible, .malformedResponse)
+            throw ProviderError(service, .malformedResponse)
         }
         return Set(listing.data.map(\.id).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }).sorted()
     }
@@ -107,27 +109,25 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         do {
             var request = authorized(URLRequest(url: baseURL.appending(path: "models"), timeoutInterval: 30))
             request.httpMethod = "GET"
-            var response = try await session.send(request, for: .openAICompatible)
+            var response = try await session.send(request, for: service)
             if response.status == 404 || response.status == 405 {
                 let body = Self.object([
                     ("model", JSON.text(model).serialized()),
                     ("messages", JSON.list([Self.message("user", "ping")]).serialized()),
                     ("max_completion_tokens", "1"),
                 ])
-                response = try await session.send(completionRequest(body, timeout: 30), for: .openAICompatible)
+                response = try await session.send(completionRequest(body, timeout: 30), for: service)
             }
             if (200..<300).contains(response.status) { return .valid }
-            return .from(ProviderError(.openAICompatible, Self.failure(response)))
+            return .from(ProviderError(service, Self.failure(response)))
         } catch let error as ProviderError {
             return .from(error)
         } catch {
-            return .inconclusive(ProviderError(.openAICompatible, .unreachable).description)
+            return .inconclusive(ProviderError(service, .unreachable).description)
         }
     }
 
     // MARK: Transport
-
-    package var service: Service { .openAICompatible }
 
     package func generate(system: String, input: String, schema: JSON) async throws -> String {
         let preferred = try await send(system: system, input: input, format: Self.schemaFormat(schema))
@@ -136,11 +136,11 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
             // with the schema spelled out in the prompt instead.
             let hint = "\(system)\n\nReply with one JSON object that matches this JSON Schema:\n\(schema.serialized())"
             let fallback = try await send(system: hint, input: input, format: #"{"type":"json_object"}"#)
-            guard fallback.status == 200 else { throw ProviderError(.openAICompatible, Self.failure(fallback)) }
-            return try Self.messageText(fallback.body)
+            guard fallback.status == 200 else { throw ProviderError(service, Self.failure(fallback)) }
+            return try Self.messageText(fallback.body, service: service)
         }
-        guard preferred.status == 200 else { throw ProviderError(.openAICompatible, Self.failure(preferred)) }
-        return try Self.messageText(preferred.body)
+        guard preferred.status == 200 else { throw ProviderError(service, Self.failure(preferred)) }
+        return try Self.messageText(preferred.body, service: service)
     }
 
     /// `response_format` as serialized JSON.
@@ -154,14 +154,14 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
     private func send(system: String, input: String, format: String) async throws -> HTTPResponse {
         var fields = chatFields(system: system, input: input, format: format)
         var response = try await session.send(
-            completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
+            completionRequest(Self.object(fields), timeout: timeout), for: service)
         // Optional extensions are not universal. Remove only explicitly rejected fields,
         // at most once each; never retry authentication, rate limits or server failures.
         for _ in 0..<3 {
             guard let accepted = withoutRejectedFields(fields, response) else { return response }
             fields = accepted
             response = try await session.send(
-                completionRequest(Self.object(fields), timeout: timeout), for: .openAICompatible)
+                completionRequest(Self.object(fields), timeout: timeout), for: service)
         }
         return response
     }
@@ -205,15 +205,15 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         var fields = chatFields(system: system, input: input, format: nil)
         for attempt in 0...3 {
             let (bytes, status) = try await TextStreaming.connect(
-                completionRequest(Self.object(fields), timeout: timeout), session: session, service: .openAICompatible)
+                completionRequest(Self.object(fields), timeout: timeout), session: session, service: service)
             if status == 200 { return bytes }
             let failure = HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))
             guard attempt < 3, let accepted = withoutRejectedFields(fields, failure) else {
-                throw ProviderError(.openAICompatible, Self.failure(failure))
+                throw ProviderError(service, Self.failure(failure))
             }
             fields = accepted
         }
-        throw ProviderError(.openAICompatible, .serviceError)
+        throw ProviderError(service, .serviceError)
     }
 
     private static func rejectsOptionalParameter(_ name: String, _ response: HTTPResponse) -> Bool {
@@ -258,19 +258,19 @@ public struct OpenAICompatibleLLM: LLMProvider, StructuredGenerator {
         let choices: [Choice]?
     }
 
-    static func messageText(_ body: Data) throws -> String {
+    static func messageText(_ body: Data, service: Service = .openAICompatible) throws -> String {
         guard let choice = (try? JSONDecoder().decode(Response.self, from: body))?.choices?.first else {
-            throw ProviderError(.openAICompatible, .malformedResponse)
+            throw ProviderError(service, .malformedResponse)
         }
         switch choice.finish_reason {
         case nil, "stop": break
         case "length": throw OutputTruncated()
-        case "content_filter": throw ProviderError(.openAICompatible, .blocked)
-        default: throw ProviderError(.openAICompatible, .malformedResponse)
+        case "content_filter": throw ProviderError(service, .blocked)
+        default: throw ProviderError(service, .malformedResponse)
         }
-        if choice.message?.refusal?.isEmpty == false { throw ProviderError(.openAICompatible, .blocked) }
+        if choice.message?.refusal?.isEmpty == false { throw ProviderError(service, .blocked) }
         let text = unwrapped(choice.message?.content ?? "")
-        guard !text.isEmpty else { throw ProviderError(.openAICompatible, .malformedResponse) }
+        guard !text.isEmpty else { throw ProviderError(service, .malformedResponse) }
         return text
     }
 

@@ -27,13 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if fixture, let root = AssistantScenarioRunner.fixtureRoot, UserDefaults.standard.bool(forKey: "MM2TReplayAudio") {
                 recorder = MeetingAudioReplay(root: root)
                 var settings = SettingsStore(defaults: defaults).settings
-                settings.transcriptionOrder = [.local]
                 settings.localCaptionModel = .nemotron
-                settings.localSpeechModel = UserDefaults.standard.bool(forKey: "MM2TReplayBreezeCoreML") ? .breezeCoreML : .breeze
                 settings.liveCaptions = true
                 settings.captionTranslation = .off
                 settings.transcriptionLanguage = .auto
-                settings.llmLocation = .local
                 SettingsStore(defaults: defaults).settings = settings
             }
             #endif

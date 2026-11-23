@@ -6,6 +6,32 @@ import MM2TProviders
 import MM2TSystem
 import Observation
 
+public enum ModelService: String, CaseIterable, Identifiable, Sendable {
+    case mm2t, elevenLabs, gemini, openAICompatible, transcriptionServer
+
+    public var id: Self { self }
+}
+
+extension TranscriptionService {
+    public var connection: ModelService {
+        switch self {
+        case .mm2t: .mm2t
+        case .elevenLabs: .elevenLabs
+        case .server: .transcriptionServer
+        }
+    }
+}
+
+extension SummaryService {
+    public var connection: ModelService {
+        switch self {
+        case .mm2t: .mm2t
+        case .gemini: .gemini
+        case .openAICompatible: .openAICompatible
+        }
+    }
+}
+
 public enum KeyState: Equatable, Sendable {
     case empty
     case saved
@@ -22,6 +48,7 @@ public final class CredentialField: Identifiable {
     public let credential: Credential
     public var text = ""
     public private(set) var state: KeyState = .empty
+    public private(set) var hasSavedValue = false
     public nonisolated var id: Credential { credential }
 
     @ObservationIgnored private let store: any CredentialStoring
@@ -43,18 +70,22 @@ public final class CredentialField: Identifiable {
     public func load() {
         do {
             text = try store.read(credential)?.revealed ?? ""
-            state = text.isEmpty ? .empty : .saved
+            hasSavedValue = !text.isEmpty
+            state = hasSavedValue ? .saved : .empty
         } catch {
             state = .storageFailed(String(describing: error))
         }
     }
+
+    public func savedSecret() throws -> Secret? { try store.read(credential) }
 
     /// Saving an empty field deletes the stored key.
     public func save() {
         do {
             try store.save(Secret(text), for: credential)
             text = Secret(text).revealed
-            state = text.isEmpty ? .empty : .saved
+            hasSavedValue = !text.isEmpty
+            state = hasSavedValue ? .saved : .empty
         } catch {
             state = .storageFailed(String(describing: error))
         }
@@ -121,11 +152,9 @@ public final class SetupModel {
     /// Automation per running browser; macOS can only answer for a running app.
     public private(set) var automation: [String: PermissionState] = [:]
     public private(set) var models: ModelDownloadState = .notDownloaded
-    /// The on-device speech model and LLM behind the two offline switches.
     public private(set) var offlineModels: [OfflineModel: ModelDownloadState] = [:]
     /// The live caption translation models the chosen target language needs.
     public private(set) var translationModels: ModelDownloadState = .notDownloaded
-    /// Whether this Mac is suited to each offline option, for the hint next to its switch.
     public let suitability: OfflineSuitability
     public private(set) var issues: [SetupIssue] = []
     public private(set) var preparingCoreML = false
@@ -198,7 +227,7 @@ public final class SetupModel {
         self.permissions = permissions
         self.installer = installer
         let supportedSpeech = LocalSpeechModel.allCases.filter { $0.isSupported(on: settings.machine) }
-        let availableModels = Set(supportedSpeech.map(OfflineModel.init)).union([.llm])
+        let availableModels = Set(supportedSpeech.map(OfflineModel.init))
         self.offlineInstallers = offlineInstallers.filter { availableModels.contains($0.key) }
         self.translationInstaller = translationInstaller
         self.suitability = suitability
@@ -289,7 +318,6 @@ public final class SetupModel {
     public func fit(for model: OfflineModel) -> OfflineFit {
         switch model {
         case .whisperCPU: .suited
-        case .llm: suitability.llm
         default: suitability.transcription
         }
     }
@@ -396,6 +424,16 @@ public final class SetupModel {
         downloadTasks[key] = task
         lastDownload = task
         await task.value
+    }
+
+    public func isConfigured(_ service: ModelService, signedIn: Bool) -> Bool {
+        switch service {
+        case .mm2t: signedIn
+        case .elevenLabs: field(.elevenLabsAPIKey).hasSavedValue
+        case .gemini: field(.geminiAPIKey).hasSavedValue
+        case .openAICompatible: settings.settings.openAIBaseURL != nil
+        case .transcriptionServer: settings.settings.selfHostedURL != nil
+        }
     }
 
     /// Re-checks what processing still needs after the user changed keys or settings.
