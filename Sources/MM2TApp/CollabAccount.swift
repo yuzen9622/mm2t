@@ -176,9 +176,15 @@ public final class CollabAccount {
 
     public var hasPendingRoomEndWrites: Bool { roomEndWrite != nil || pendingEnds.hasUnpersistedClosures }
 
-    public func waitForRoomEndWrites() async {
+    public func prepareToQuit(closing session: CollabSession?) -> Task<Void, Never>? {
+        let deadline = ContinuousClock.now + .seconds(2)
+        _ = session?.end()
+        guard hasPendingRoomEndWrites else { return nil }
+        return Task { await waitForRoomEndWrites(until: deadline) }
+    }
+
+    func waitForRoomEndWrites(until deadline: ContinuousClock.Instant = .now + .seconds(2)) async {
         let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(2)
         let (completion, signal) = AsyncStream<Void>.makeStream()
         let preparation = Task { [weak self] in
             defer { signal.finish() }

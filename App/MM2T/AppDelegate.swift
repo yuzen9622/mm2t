@@ -97,9 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let account = app?.collabAccount, account.hasPendingRoomEndWrites else { return .terminateNow }
+        guard let app, let closing = app.collabAccount?.prepareToQuit(closing: app.capture.collaboration) else { return .terminateNow }
         Task {
-            await account.waitForRoomEndWrites()
+            await closing.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

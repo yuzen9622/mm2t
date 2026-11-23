@@ -236,11 +236,11 @@ import Testing
         CollabBackend.offlineEnd.set(true)
         f.begin()
         try #require(await waitForCollabEvent { CollabBackend.deferredCreation.get != nil })
-        let ending = f.session.end()
+        let closing = try #require(f.account.prepareToQuit(closing: f.session))
         #expect(f.account.hasPendingRoomEndWrites)
         let quitReturned = Box(false)
         let quit = Task {
-            await f.account.waitForRoomEndWrites()
+            await closing.value
             quitReturned.set(true)
         }
         #expect(!(await waitForCollabEvent(until: .milliseconds(50)) { quitReturned.get }))
@@ -253,7 +253,20 @@ import Testing
         #expect(saved == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
         try #require(await eventually { f.retryDelays.get == [.seconds(2)] })
         await retry.open(true)
-        await ending?.value
+        await f.session.waitForRoomClosure()
+    }
+
+    @Test func quitRegistersAnActiveRoomWithoutEndingItFirst() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        CollabBackend.offlineEnd.set(true)
+        #expect(!f.account.hasPendingRoomEndWrites)
+        let quit = try #require(f.account.prepareToQuit(closing: f.session))
+        await quit.value
+        #expect(f.session.state == .ended)
+        let saved = try JSONDecoder().decode(Set<CollabPendingEnds.Room>.self, from: Data(contentsOf: f.pendingFile))
+        #expect(saved == [.init(apiURL: f.configuration.apiURL, owner: "test", id: "room")])
+        await f.session.waitForRoomClosure()
     }
 
     @Test func quitReturnsWhileRegisteredWorkIsStillWaiting() async throws {
