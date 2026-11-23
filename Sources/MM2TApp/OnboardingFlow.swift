@@ -128,6 +128,7 @@ public final class OnboardingFlow {
         if step == .services, !repairsExistingSetup {
             var updated = settings.settings
             updated.transcriptionService = choice.transcription
+            updated.initializeCaptionSources(for: choice.transcription)
             updated.summaryService = choice.summary
             settings.settings = updated
             setup.recheck()

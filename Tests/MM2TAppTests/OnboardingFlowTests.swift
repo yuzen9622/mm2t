@@ -118,6 +118,7 @@ import Testing
         #expect(flow.advance())
         #expect(world.app.settings.settings.transcriptionService == .server)
         #expect(world.app.settings.settings.summaryService == .openAICompatible)
+        #expect(world.app.settings.settings.captionSources == [.local, .selfHosted])
     }
 
     @Test func planRequiresSignInAndConfiguresBothJobsTogether() async throws {
@@ -134,6 +135,7 @@ import Testing
         #expect(flow.advance())
         #expect(world.app.settings.settings.transcriptionService == .mm2t)
         #expect(world.app.settings.settings.summaryService == .mm2t)
+        #expect(world.app.settings.settings.captionSources == [.local])
     }
 
     @Test func reopeningRepairKeepsTheExistingPairOfServices() throws {

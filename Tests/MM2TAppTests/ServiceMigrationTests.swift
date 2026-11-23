@@ -35,16 +35,16 @@ import Testing
         for key in ["transcriptionOrder", "llmLocation", "cloudLLM"] { #expect(encoded[key] == nil) }
     }
 
-    @Test func changingTheSpeechServiceDiscardsMigratedCaptionRoutes() throws {
+    @Test func changingPostMeetingServicePreservesMigratedCaptionRoutes() throws {
         let legacy = Data(#"{"transcriptionOrder":["cloud","selfHosted","local"],"liveCaptions":true}"#.utf8)
         var settings = try JSONDecoder().decode(AppSettings.self, from: legacy)
         #expect(settings.captionSources == [.cloud, .selfHosted, .local])
         settings.transcriptionService = .server
-        #expect(settings.captionSources == [.local, .selfHosted])
+        #expect(settings.captionSources == [.cloud, .selfHosted, .local])
         let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
-        #expect(saved.captionSources == [.local, .selfHosted])
+        #expect(saved.captionSources == [.cloud, .selfHosted, .local])
         settings.transcriptionService = .mm2t
-        #expect(settings.captionSources == [.local])
+        #expect(settings.captionSources == [.cloud, .selfHosted, .local])
     }
 
     @MainActor @Test func decodingLegacyPreferencesDoesNotWriteOnLaunch() throws {

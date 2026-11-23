@@ -228,6 +228,41 @@ import Testing
         await world.capture.stop()
     }
 
+    @Test(arguments: [false, true]) func changingPostMeetingServiceDoesNotStopElevenLabsCaptions(migrated: Bool) async throws {
+        let world = try World()
+        if migrated {
+            world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from:
+                Data(#"{"transcriptionOrder":["cloud"]}"#.utf8))
+        }
+        world.app.settings.settings.liveCaptions = true
+        #expect(world.app.settings.settings.effectiveCaptionModel == nil)
+        let expected = migrated ? [TranscriptionSource.cloud] : [.local, .cloud]
+        #expect(world.app.settings.settings.captionSources == expected)
+        world.app.settings.settings.transcriptionService = .mm2t
+        #expect(world.app.settings.settings.captionSources == expected)
+        let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(world.app.settings.settings))
+        #expect(saved.captionSources == expected)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.streaming.sessions.get.count == 1)
+        await world.capture.stop()
+    }
+
+    @Test func aSavedServerSelectionKeepsCaptionsOnThatServerEvenWithAnElevenLabsKey() async throws {
+        let world = try World()
+        world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from: Data(
+            #"{"transcriptionService":"server","selfHostedURL":"https://speech.example","liveCaptions":true}"#.utf8))
+        world.app.settings.settings.transcriptionService = .mm2t
+        let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(world.app.settings.settings))
+        world.app.settings.settings = saved
+        #expect(saved.captionSources == [.local, .selfHosted])
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.selfHostedStreaming.sessions.get.count == 1)
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
     @Test func captionsFollowTheTranscriptionOrderStartingWithTheServer() async throws {
         let world = try World()
         world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from:

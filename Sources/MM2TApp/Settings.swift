@@ -41,9 +41,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// `diarizationOrder` that preferred the transcription service's speaker labels; it is ignored.
     public static let diarizationOrder: [DiarizationSource] = [.local]
 
-    public var transcriptionService: TranscriptionService = .elevenLabs {
-        didSet { if oldValue != transcriptionService { captionSourceOrder = nil } }
-    }
+    public var transcriptionService: TranscriptionService = .elevenLabs
     public var summaryService: SummaryService = .gemini
     public var selfHostedURL: URL?
     /// Every term, in the order added. Sent to speech recognition as hints and to the cleanup as a glossary.
@@ -60,16 +58,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var transcript: LocalSpeechModel?
     }
     private var speechModels = SpeechModels()
-    private var captionSourceOrder: [TranscriptionSource]?
-    var captionSources: [TranscriptionSource] {
-        if let captionSourceOrder { return captionSourceOrder }
-        let local: [TranscriptionSource] = effectiveCaptionModel == nil ? [] : [.local]
-        switch transcriptionService {
-        case .elevenLabs: return local + [.cloud]
-        case .server: return local + [.selfHosted]
-        case .mm2t: return local
+    var captionSources: [TranscriptionSource] { captionSourceOrder }
+    private var captionSourceOrder: [TranscriptionSource] = [.local, .cloud]
+
+    mutating func initializeCaptionSources(for service: TranscriptionService) {
+        switch service {
+        case .elevenLabs: captionSourceOrder = [.local, .cloud]
+        case .server: captionSourceOrder = [.local, .selfHosted]
+        case .mm2t: captionSourceOrder = [.local]
         }
     }
+
     public var localCaptionModel: LocalSpeechModel? {
         get { speechModels.captions }
         set { speechModels.captions = newValue }
@@ -78,7 +77,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         get { speechModels.transcript }
         set { speechModels.transcript = newValue }
     }
-    fileprivate mutating func useSelectedCaptionSource() { captionSourceOrder = nil }
+    fileprivate mutating func preferLocalCaptions() {
+        captionSourceOrder.removeAll { $0 == .local }
+        captionSourceOrder.insert(.local, at: 0)
+    }
 
     public var effectiveCaptionModel: LocalSpeechModel? { localCaptionModel ?? localSpeechModel }
     public var transcriptionLanguage: TranscriptionLanguage = .auto
@@ -155,7 +157,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
-        captionSourceOrder = try c.decodeIfPresent([TranscriptionSource].self, forKey: .captionSourceOrder) ?? oldOrder
+        if let order = try c.decodeIfPresent([TranscriptionSource].self, forKey: .captionSourceOrder) ?? oldOrder {
+            captionSourceOrder = order
+        } else {
+            initializeCaptionSources(for: transcriptionService)
+        }
         captionEngine = (try? c.decode(CaptionEngine.self, forKey: .captionEngine)) ?? .firefox
         captionTranslation = try c.decodeIfPresent(CaptionTranslation.self, forKey: .captionTranslation) ?? defaults.captionTranslation
         translationEnabled = try c.decodeIfPresent(Bool.self, forKey: .translationEnabled) ?? (captionTranslation != .off)
@@ -184,7 +190,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var settings = self
         settings.liveCaptions = false
         settings.speechModels = SpeechModels()
-        settings.captionSourceOrder = nil
+        settings.captionSourceOrder = []
         settings.translationEnabled = false
         settings.captionEngine = .initial
         settings.captionTranslation = .off
@@ -342,7 +348,7 @@ public final class SettingsStore {
         // Selecting the transcript model again restores the default link between the pickers.
         let transcript = nativeSelections[\.localSpeechModel] ?? settings.localSpeechModel
         var updated = settings
-        if field == \.localCaptionModel { updated.useSelectedCaptionSource() }
+        if field == \.localCaptionModel { updated.preferLocalCaptions() }
         updated[keyPath: field] = field == \.localCaptionModel && choice == transcript ? nil : choice
         settings = updated
     }
