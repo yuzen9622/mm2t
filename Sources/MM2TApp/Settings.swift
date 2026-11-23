@@ -35,6 +35,43 @@ public struct CaptionTranslation: Codable, Hashable, Sendable {
     }
 }
 
+public struct ServerConnectionDraft {
+    public enum Kind: Sendable { case summaries, transcription }
+
+    private let kind: Kind
+    public var address: String {
+        didSet { if Origin(oldValue) != Origin(address) { key = "" } }
+    }
+    public var key: String
+
+    public init(kind: Kind, savedURL: URL? = nil, savedKey: String = "") {
+        self.kind = kind
+        address = savedURL?.absoluteString ?? ""
+        key = Origin(address) == nil ? "" : savedKey
+    }
+
+    public var endpoint: URL? {
+        switch kind {
+        case .summaries: AppSettings.openAIBaseURL(from: address)
+        case .transcription: AppSettings.selfHostedURL(from: address)
+        }
+    }
+
+    private struct Origin: Equatable {
+        let scheme: String
+        let host: String
+        let port: Int
+
+        init?(_ address: String) {
+            guard let url = AppSettings.selfHostedURL(from: address),
+                  let scheme = url.scheme?.lowercased(), let host = url.host()?.lowercased() else { return nil }
+            self.scheme = scheme
+            self.host = host
+            port = url.port ?? (scheme == "https" ? 443 : 80)
+        }
+    }
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
     /// Speakers are always told apart on this Mac. Settings saved by an older build may still hold a

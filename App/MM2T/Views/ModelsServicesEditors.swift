@@ -67,8 +67,7 @@ private struct ServiceServerEditor: View {
     let app: AppController
     let service: ModelService
     let onModelsChanged: (URL, [String]?) -> Void
-    @State private var address = ""
-    @State private var key = ""
+    @State private var connection = ServerConnectionDraft(kind: .transcription)
     @State private var model = ""
     @State private var listed: [String]?
     @State private var testing = false
@@ -78,16 +77,16 @@ private struct ServiceServerEditor: View {
     private var isLLM: Bool { service == .openAICompatible }
     private var field: CredentialField { app.setup.field(isLLM ? .openAICompatibleAPIKey : .selfHostedToken) }
     private var savedURL: URL? { isLLM ? app.settings.settings.openAIBaseURL : app.settings.settings.selfHostedURL }
-    private var endpoint: URL? { isLLM ? AppSettings.openAIBaseURL(from: address) : AppSettings.selfHostedURL(from: address) }
+    private var endpoint: URL? { connection.endpoint }
     private var savedModel: String { app.settings.settings.openAIModel }
     private var hasChanges: Bool {
-        endpoint != savedURL || Secret(key).revealed != field.text || (isLLM && model != savedModel)
+        endpoint != savedURL || Secret(connection.key).revealed != field.text || (isLLM && model != savedModel)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldBox { TextField("Server URL", text: $address) }
-            FieldBox { SecureField(isLLM ? "API key (optional)" : "Token (optional)", text: $key) }
+            FieldBox { TextField("Server URL", text: $connection.address) }
+            FieldBox { SecureField(isLLM ? "API key (optional)" : "Token (optional)", text: $connection.key) }
             if isLLM {
                 HStack {
                     FieldBox { TextField("Model name", text: $model) }
@@ -107,7 +106,7 @@ private struct ServiceServerEditor: View {
                 }
             }
             if testing { ProgressView().controlSize(.small) }
-            if !address.isEmpty, endpoint == nil {
+            if !connection.address.isEmpty, endpoint == nil {
                 Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
             } else if let error {
                 Text(verbatim: error).font(Typo.caption).foregroundStyle(Palette.danger)
@@ -117,12 +116,11 @@ private struct ServiceServerEditor: View {
         }
         .onAppear {
             field.load()
-            address = savedURL?.absoluteString ?? ""
-            key = field.text
+            connection = ServerConnectionDraft(kind: isLLM ? .summaries : .transcription, savedURL: savedURL, savedKey: field.text)
             model = isLLM ? savedModel : ""
         }
-        .onChange(of: address) { resetTest() }
-        .onChange(of: key) { resetTest() }
+        .onChange(of: connection.address) { resetTest() }
+        .onChange(of: connection.key) { resetTest() }
     }
 
     private func resetTest() {
@@ -134,15 +132,15 @@ private struct ServiceServerEditor: View {
     private func save() {
         guard let endpoint else { return }
         error = nil
-        let credentialChanged = Secret(key) != Secret(field.text)
-        field.text = key
+        let credentialChanged = Secret(connection.key) != Secret(field.text)
+        field.text = connection.key
         field.save()
         if case .storageFailed = field.state {
             error = Copy.keyState(field.state)
             field.load()
             return
         }
-        key = field.text
+        connection.key = field.text
         var updated = app.settings.settings
         if isLLM {
             if updated.openAIBaseURL != endpoint || listed != nil || credentialChanged {
@@ -176,15 +174,15 @@ private struct ServiceServerEditor: View {
         }
         app.settings.settings = updated
         app.setup.recheck()
-        address = ""
-        key = ""
+        connection.address = ""
+        connection.key = ""
         model = ""
         resetTest()
     }
 
     private func test() {
         guard let endpoint else { return }
-        let secret = Secret(key)
+        let secret = Secret(connection.key)
         testing = true
         resetTest()
         Task {
@@ -192,21 +190,21 @@ private struct ServiceServerEditor: View {
             do {
                 if isLLM {
                     let models = try await OpenAICompatibleLLM(baseURL: endpoint, apiKey: secret, model: "").availableModels()
-                    guard self.endpoint == endpoint, Secret(key) == secret else { return }
+                    guard self.endpoint == endpoint, Secret(connection.key) == secret else { return }
                     listed = models
                     if model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let first = models.first { model = first }
                     status = String(localized: "Connected · \(models.count) models")
                     if endpoint == savedURL, secret == Secret(field.text) { onModelsChanged(endpoint, models) }
                 } else {
                     let check = await SelfHostedTranscription(baseURL: endpoint, token: secret).validateKey()
-                    guard self.endpoint == endpoint, Secret(key) == secret else { return }
+                    guard self.endpoint == endpoint, Secret(connection.key) == secret else { return }
                     switch check {
                     case .valid: status = String(localized: "Connected")
                     case .rejected(let reason), .inconclusive(let reason): error = reason
                     }
                 }
             } catch {
-                guard self.endpoint == endpoint, Secret(key) == secret else { return }
+                guard self.endpoint == endpoint, Secret(connection.key) == secret else { return }
                 if error is OpenAICompatibleLLM.ModelListingError {
                     self.error = String(localized: "This server does not support model listing. Enter a model ID manually.")
                 } else {
