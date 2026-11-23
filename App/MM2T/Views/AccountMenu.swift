@@ -10,13 +10,15 @@ struct AccountMenuButton: View {
     var body: some View {
         let account = app.collabAccount
         let user = account?.user
-        let mode = OnboardingFlow.choice(in: app.settings.settings)
+        let settings = app.settings.settings
+        let usesPlan = settings.transcriptionService == .mm2t || settings.summaryService == .mm2t
+        let subtitle = user.map { usesPlan ? planName : $0.email } ?? settings.transcriptionService.connection.title
         Button { open.toggle() } label: {
             HStack(spacing: 8) {
                 AccountAvatar(name: user?.name, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: user?.name ?? "mm2t").font(Typo.bodyStrong).lineLimit(1)
-                    Text(mode.title).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(1)
+                    Text(verbatim: subtitle).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Icon("selector", size: 14).foregroundStyle(Palette.secondary)
@@ -46,7 +48,7 @@ struct AccountMenuButton: View {
                 }
                 if account != nil { row("Account", icon: "user-circle") { showSettings(.account) } }
                 row("Settings", icon: "settings") { showSettings(.general) }
-                row("Usage", icon: "route") { showSettings(.usage) }
+                row("Models and services", icon: "sparkles") { showSettings(.models) }
                 row("Help", icon: "help-circle") { openURL(AppLinks.help) }
                 if let account {
                     Divider()

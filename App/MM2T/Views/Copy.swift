@@ -70,26 +70,13 @@ enum Copy {
 
     static func issue(_ issue: SetupIssue) -> String {
         switch issue {
-        case .missingCredential(let credential): String(localized: "Enter your \(credentialName(credential)).")
-        case .missingSelfHostedURL: String(localized: "Enter the self-hosted server URL, or turn that source off.")
-        case .missingLLMEndpoint: String(localized: "Enter the large language model's server URL and model name, or switch back to Gemini.")
-        case .noTranscriptionSource: String(localized: "Turn on at least one transcription source.")
+        case .transcriptionServiceNotConfigured(.mm2t), .summaryServiceNotConfigured(.mm2t):
+            String(localized: "Sign in to use your mm2t plan.")
+        case .transcriptionServiceNotConfigured(.elevenLabs): String(localized: "Add your ElevenLabs API key.")
+        case .summaryServiceNotConfigured(.gemini): String(localized: "Add your Gemini API key.")
+        case .transcriptionServiceNotConfigured(.server): String(localized: "Set up your transcription server.")
+        case .summaryServiceNotConfigured(.openAICompatible): String(localized: "Set the OpenAI-compatible server URL and model name.")
         case .diarizationModelsMissing: String(localized: "Download the speaker separation model.")
-        case .speechModelNotSelected: String(localized: "Choose a model")
-        case .offlineModelMissing(.whisperCPU), .offlineModelMissing(.transcription), .offlineModelMissing(.breezeCoreML), .offlineModelMissing(.parakeet), .offlineModelMissing(.nemotron): String(localized: "Download the on-device transcription model.")
-        case .offlineModelMissing(.llm): String(localized: "Download the on-device large language model.")
-        }
-    }
-
-    static func credentialName(_ credential: Credential) -> String {
-        switch credential {
-        case .elevenLabsAPIKey: String(localized: "ElevenLabs API key")
-        case .geminiAPIKey: String(localized: "Gemini API key")
-        case .selfHostedToken: String(localized: "self-hosted server token")
-        case .openAICompatibleAPIKey: String(localized: "large language model API key")
-        case .googleCalendarRefreshToken: String(localized: "Google Calendar sign-in")
-        case .collabAccount: String(localized: "Collaboration")
-        case .microsoftCalendarRefreshToken: String(localized: "Outlook sign-in")
         }
     }
 
@@ -129,14 +116,6 @@ enum Copy {
             }
         case .unreachable: String(localized: "Couldn't reach \(calendarSource(kind)).")
         case .signedOut: String(localized: "\(calendarSource(kind)) signed you out. Connect it again.")
-        }
-    }
-
-    static func source(_ source: TranscriptionSource) -> String {
-        switch source {
-        case .selfHosted: String(localized: "Self-hosted server")
-        case .cloud: String(localized: "ElevenLabs (cloud)")
-        case .local: String(localized: "Local models")
         }
     }
 

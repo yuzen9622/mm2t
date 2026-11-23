@@ -20,7 +20,7 @@ enum AppLinks {
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case account
-    case usage
+    case models
     case general
     case assistant
     case privacy
@@ -31,10 +31,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
-        case .assistant: String(localized: "Personalization")
+        case .assistant: String(localized: "Assistant")
         case .privacy: String(localized: "Privacy")
         case .account: String(localized: "Account")
-        case .usage: String(localized: "Usage")
+        case .models: String(localized: "Models and services")
         case .about: String(localized: "About")
         }
     }
@@ -44,7 +44,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .general, .assistant: "adjustments-horizontal"
         case .privacy: "shield-check"
         case .account: "user-circle"
-        case .usage: "route"
+        case .models: "sparkles"
         case .about: "info-circle"
         }
     }
@@ -53,9 +53,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// One setting the search can find. A new setting is a case here, a place in its group's `rows`,
 /// and its view in `SettingsRowView`.
 enum SettingsRow: Hashable {
-    case transcriptionLanguage, selfHostedTranscription, cloudTranscription, localTranscription, liveCaptions
+    case transcriptionLanguage, liveCaptions, modelsServices
     case diarizationModel, translationEnabled, translationModel
-    case summaryBackend, geminiKey, localSummaries
     case appLanguage, assistantMemory
     case hideFromCapture
     case recordShortcut
@@ -68,18 +67,17 @@ enum SettingsRow: Hashable {
     var terms: [String] {
         switch self {
         case .transcriptionLanguage: [String(localized: "Meeting language"), String(localized: "Auto-detect"), "中文", "English"]
-        case .selfHostedTranscription: [Copy.source(.selfHosted), String(localized: "Server URL"), Copy.credentialName(.selfHostedToken)]
-        case .cloudTranscription: [Copy.source(.cloud), Copy.credentialName(.elevenLabsAPIKey)]
-        case .localTranscription: [Copy.source(.local), String(localized: "Transcription model")]
-        case .liveCaptions: [String(localized: "Live captions"), String(localized: "Live caption model"), Copy.source(.selfHosted), Copy.source(.cloud), Copy.source(.local)]
+        case .modelsServices:
+            [String(localized: "Post-meeting transcription"), String(localized: "Summaries and assistant"),
+             String(localized: "Models"), String(localized: "Services"), String(localized: "Server URL"),
+             String(localized: "Summary"),
+             String(localized: "API key"), String(localized: "Token"), "OpenAI", "Scribe"]
+                + ModelService.allCases.map(\.title)
+        case .liveCaptions: [String(localized: "Live captions"), String(localized: "Live caption model")]
         case .translationEnabled: [String(localized: "Enable translation")]
         case .translationModel: [String(localized: "Translate captions"), String(localized: "Translation model"),
                                  "Apple Translation", "Mozilla Firefox Translations", "Bergamot", "Tencent Hy-MT2"] + CaptionTarget.all.map(\.name)
         case .diarizationModel: [String(localized: "Speaker separation model (about 230 MB) runs on this Mac.")]
-        case .summaryBackend: [String(localized: "Large language model"), "Gemini", String(localized: "OpenAI-compatible"),
-                               String(localized: "Model name"), Copy.credentialName(.openAICompatibleAPIKey)]
-        case .geminiKey: [Copy.credentialName(.geminiAPIKey)]
-        case .localSummaries: [String(localized: "Generate on this Mac")]
         case .assistantMemory: [String(localized: "Personalized memory"), String(localized: "Conversation history"), String(localized: "Preference")]
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
@@ -108,30 +106,15 @@ struct SettingsGroup: Identifiable {
     let section: SettingsSection
     let title: String
     let rows: [SettingsRow]
-    var mode: UsageChoice? = nil
-
-    static func all(settings: AppSettings) -> [SettingsGroup] {
-        let summaryRows: [SettingsRow] = [.summaryBackend, .geminiKey]
-            + (OnboardingFlow.showsLocalSummaries(in: settings) ? [.localSummaries] : [])
-        return [
+    static var all: [SettingsGroup] {
+        [
+            SettingsGroup(id: "models", section: .models, title: SettingsSection.models.title, rows: [.modelsServices]),
             SettingsGroup(id: "assistant", section: .assistant, title: String(localized: "Personalized memory"), rows: [.assistantMemory]),
             SettingsGroup(id: "transcription", section: .general, title: String(localized: "Transcription"),
                           rows: [.transcriptionLanguage, .liveCaptions]),
             SettingsGroup(id: "translation", section: .general, title: String(localized: "Translation"), rows: [.translationEnabled, .translationModel]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationModel]),
-            SettingsGroup(id: "usage-keys-transcription", section: .usage, title: String(localized: "Transcription"),
-                          rows: [.cloudTranscription], mode: .ownKeys),
-            SettingsGroup(id: "usage-keys-summaries", section: .usage, title: String(localized: "Summaries"),
-                          rows: summaryRows, mode: .ownKeys),
-            SettingsGroup(id: "usage-keys-fallback", section: .usage, title: String(localized: "Fallback"),
-                          rows: [.selfHostedTranscription, .localTranscription], mode: .ownKeys),
-            SettingsGroup(id: "usage-server-transcription", section: .usage, title: String(localized: "Transcription"),
-                          rows: [.selfHostedTranscription, .localTranscription], mode: .ownServer),
-            SettingsGroup(id: "usage-server-summaries", section: .usage, title: String(localized: "Summaries"),
-                          rows: summaryRows, mode: .ownServer),
-            SettingsGroup(id: "usage-server-fallback", section: .usage, title: String(localized: "Fallback"),
-                          rows: [.cloudTranscription], mode: .ownServer),
             SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .privacy, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
@@ -147,17 +130,14 @@ struct SettingsGroup: Identifiable {
     }
 
     /// The groups `section` shows, or, while searching, every group's matching rows across sections.
-    static func visible(in section: SettingsSection, query: String, settings: AppSettings, accountAvailable: Bool) -> [SettingsGroup] {
+    static func visible(in section: SettingsSection, query: String, accountAvailable: Bool) -> [SettingsGroup] {
         let query = query.trimmingCharacters(in: .whitespaces)
-        let mode = OnboardingFlow.choice(in: settings)
-        let available = all(settings: settings).filter {
-            (accountAvailable || $0.section != .account) && ($0.mode == nil || $0.mode == mode)
-        }
+        let available = all.filter { accountAvailable || $0.section != .account }
         guard !query.isEmpty else { return available.filter { $0.section == section } }
         return available.compactMap { group in
             if group.title.localizedStandardContains(query) || group.section.title.localizedStandardContains(query) { return group }
             let rows = group.rows.filter { $0.terms.contains { $0.localizedStandardContains(query) } }
-            return rows.isEmpty ? nil : SettingsGroup(id: group.id, section: group.section, title: group.title, rows: rows, mode: group.mode)
+            return rows.isEmpty ? nil : SettingsGroup(id: group.id, section: group.section, title: group.title, rows: rows)
         }
     }
 }
@@ -275,24 +255,10 @@ struct SettingsPage: View {
 
     var body: some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        let mode = OnboardingFlow.choice(in: app.settings.settings)
-        let groups = SettingsGroup.visible(in: section, query: query, settings: app.settings.settings, accountAvailable: app.collabAccount != nil)
+        let groups = SettingsGroup.visible(in: section, query: query, accountAvailable: app.collabAccount != nil)
         VStack(alignment: .leading, spacing: 24) {
             if !searching {
                 Text(section.title).font(Typo.title)
-                if section == .usage {
-                    UsageModePicker(selection: mode) { choice in
-                        var updated = app.settings.settings
-                        guard OnboardingFlow.switchMode(choice, in: &updated) else { return }
-                        app.settings.settings = updated
-                    }
-                    if !app.setup.issues.isEmpty {
-                        Panel(title: "Still needed") {
-                            ForEach(app.setup.issues, id: \.self) { IssueRow(issue: $0) }
-                        }
-                        .entrance()
-                    }
-                }
             } else if groups.isEmpty {
                 Text("No settings match “\(query)”.")
                     .foregroundStyle(Palette.secondary)
@@ -300,26 +266,29 @@ struct SettingsPage: View {
                     .padding(.top, 60)
             }
             ForEach(groups) { group in
-                VStack(alignment: .leading, spacing: 10) {
-                    if group.title != group.section.title || searching {
-                        Text(searching && group.title != group.section.title ? "\(group.section.title) › \(group.title)" : group.title)
-                            .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
+                if group.section == .models {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if searching { Text(group.title).font(Typo.captionStrong).foregroundStyle(Palette.secondary) }
+                        ModelsServicesPage(app: app)
                     }
-                    // Rows are set apart by space, not lines.
-                    VStack(alignment: .leading, spacing: 20) {
-                        ForEach(group.rows, id: \.self) { row in
-                            SettingsRowView(app: app, row: row, showLicenses: $showLicenses)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if group.title != group.section.title || searching {
+                            Text(searching && group.title != group.section.title ? "\(group.section.title) › \(group.title)" : group.title)
+                                .font(Typo.captionStrong).foregroundStyle(Palette.secondary).padding(.leading, 4)
                         }
+                        VStack(alignment: .leading, spacing: 20) {
+                            ForEach(group.rows, id: \.self) { row in
+                                SettingsRowView(app: app, row: row, showLicenses: $showLicenses)
+                            }
+                        }
+                        .card()
                     }
-                    .card()
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .toggleStyle(SwitchStyle())
-        .motion(Motion.reveal, value: mode)
-        .motion(Motion.reveal, value: app.settings.settings.transcriptionOrder)
-        .motion(Motion.reveal, value: app.settings.settings.llmLocation)
         .motion(Motion.reveal, value: app.setup.issues)
     }
 }
@@ -353,56 +322,13 @@ struct SettingsRowView: View {
                     }
                 }
             }
-        case .selfHostedTranscription:
-            SourceToggle(source: .selfHosted, store: store)
-            if store.settings.transcriptionOrder.contains(.selfHosted) {
-                ServerURLField(store: store)
-                CredentialFieldView(field: app.setup.field(.selfHostedToken), setup: app.setup)
-            }
-        case .cloudTranscription:
-            SourceToggle(source: .cloud, store: store)
-            if store.settings.transcriptionOrder.contains(.cloud) {
-                CredentialFieldView(field: app.setup.field(.elevenLabsAPIKey), setup: app.setup)
-            }
-        case .localTranscription:
-            SourceToggle(source: .local, store: store)
-            if store.settings.transcriptionOrder.contains(.local) {
-                SpeechModelPicker(store: store, setup: app.setup)
-            }
+        case .modelsServices: EmptyView()
         case .translationEnabled: TranslationEnableRow(app: app)
         case .translationModel: CaptionTranslationRow(app: app)
         case .liveCaptions:
             LiveCaptionsRow(app: app)
         case .diarizationModel:
             ModelDownloadView(setup: app.setup)
-        case .summaryBackend:
-            if store.settings.llmLocation == .cloud {
-                HStack {
-                    Text("Large language model")
-                    Spacer()
-                    Segmented(options: CloudLLM.allCases, selection: $store.settings.cloudLLM) { backend in
-                        switch backend {
-                        case .gemini: "Gemini"
-                        case .openAICompatible: String(localized: "OpenAI-compatible")
-                        }
-                    }
-                }
-                if store.settings.cloudLLM == .openAICompatible {
-                    LLMServerFields(store: store, key: app.setup.field(.openAICompatibleAPIKey))
-                    CredentialFieldView(field: app.setup.field(.openAICompatibleAPIKey), setup: app.setup)
-                }
-            }
-        case .geminiKey:
-            if store.settings.llmLocation == .local || store.settings.cloudLLM == .gemini {
-                CredentialFieldView(field: app.setup.field(.geminiAPIKey), setup: app.setup)
-            }
-        case .localSummaries:
-            Toggle("Generate on this Mac", isOn: Binding(
-                get: { store.settings.llmLocation == .local },
-                set: { store.settings.llmLocation = $0 ? .local : .cloud }))
-            if store.settings.llmLocation == .local {
-                OfflineModelView(model: .llm, setup: app.setup)
-            }
         case .appLanguage:
             LanguagePicker()
         case .hideFromCapture:
@@ -480,180 +406,6 @@ private struct LinkRow: View {
 }
 
 /// The self-hosted server's address, saved as the user types so the token check beside it always sees it.
-struct ServerURLField: View {
-    let store: SettingsStore
-    @State private var text = ""
-
-    var body: some View {
-        FieldBox {
-            TextField("Server URL", text: $text, prompt: Text(verbatim: "http://gpu.tailnet:8000"))
-                .onSubmit(save)
-        }
-        .onAppear { text = store.settings.selfHostedURL?.absoluteString ?? "" }
-        .onChange(of: text) { save() }
-        if !text.isEmpty, AppSettings.selfHostedURL(from: text) == nil {
-            Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
-        }
-    }
-
-    private func save() {
-        store.settings.selfHostedURL = AppSettings.selfHostedURL(from: text)
-    }
-}
-
-/// Where an OpenAI-compatible server (vLLM, Ollama, LM Studio, llama.cpp) answers, and which model to ask.
-struct LLMServerFields: View {
-    let store: SettingsStore
-    let key: CredentialField
-    @State private var url = ""
-    @State private var models: [String] = []
-    @State private var loading = false
-    @State private var error: String?
-    @State private var refresh = 0
-    @State private var showModels = false
-    @State private var modelFieldWidth: CGFloat = 320
-    @State private var hoveredModel: String?
-
-    private struct Query: Equatable {
-        let url: String
-        let key: String
-        let refresh: Int
-    }
-
-    var body: some View {
-        FieldBox {
-            TextField("Server URL", text: $url, prompt: Text(verbatim: "http://localhost:11434/v1"))
-                .onSubmit { save(); refresh += 1 }
-        }
-        .onAppear { url = store.settings.openAIBaseURL?.absoluteString ?? "" }
-        .onChange(of: url) { save() }
-        .task(id: Query(url: url, key: key.text, refresh: refresh)) { await loadModels() }
-        if !url.isEmpty, AppSettings.openAIBaseURL(from: url) == nil {
-            Text("Enter a full http:// or https:// address.").font(Typo.caption).foregroundStyle(Palette.danger)
-        }
-        FieldBox {
-            HStack(spacing: 8) {
-                TextField("Model name", text: Binding(
-                    get: { store.settings.openAIModel }, set: { store.settings.openAIModel = $0 }),
-                    prompt: Text(verbatim: "model-id"))
-                if loading { ProgressView().controlSize(.mini) }
-                Button { showModels.toggle() } label: {
-                    Icon("chevron-right", size: 14)
-                        .rotationEffect(.degrees(90))
-                        .foregroundStyle(showModels ? Palette.orange : Palette.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(showModels ? Palette.orangeSoft : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(Pressable())
-                .accessibilityLabel("Available models")
-                .help("Available models")
-            }
-        }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { modelFieldWidth = $0 }
-        .popover(isPresented: $showModels, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-            modelMenu
-        }
-        if let error {
-            Text(verbatim: error).font(Typo.caption).foregroundStyle(Palette.danger)
-        }
-    }
-
-    private var modelMenu: some View {
-        VStack(spacing: 4) {
-            if !models.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(models, id: \.self) { model in
-                            Button {
-                                store.settings.openAIModel = model
-                                showModels = false
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(verbatim: model.hasPrefix("/") ? (model as NSString).lastPathComponent : model)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Icon("check", size: 15)
-                                        .foregroundStyle(Palette.orange)
-                                        .opacity(model == store.settings.openAIModel ? 1 : 0)
-                                }
-                                .padding(.horizontal, 12)
-                                .frame(height: 36)
-                                .background(hoveredModel == model ? Palette.hover : model == store.settings.openAIModel ? Palette.selected : .clear,
-                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(Pressable())
-                            .onHover { hoveredModel = $0 ? model : nil }
-                            .help(model)
-                            .accessibilityLabel(model)
-                        }
-                    }
-                }
-                .frame(height: min(CGFloat(models.count) * 38, 228))
-                Divider().padding(.horizontal, 8)
-            }
-            Button {
-                refresh += 1
-            } label: {
-                HStack(spacing: 10) {
-                    Icon("refresh", size: 15)
-                    Text("Refresh models")
-                    Spacer(minLength: 0)
-                    if loading { ProgressView().controlSize(.mini) }
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(Pressable())
-            .disabled(AppSettings.openAIBaseURL(from: url) == nil || loading)
-        }
-        .font(Typo.body)
-        .foregroundStyle(Palette.text)
-        .padding(6)
-        .frame(width: modelFieldWidth)
-        .background(Palette.card)
-        .onExitCommand { showModels = false }
-    }
-
-    private func save() {
-        store.settings.openAIBaseURL = AppSettings.openAIBaseURL(from: url)
-    }
-
-    @MainActor private func loadModels() async {
-        models = []
-        error = nil
-        loading = false
-        guard let endpoint = AppSettings.openAIBaseURL(from: url) else { return }
-        let secret = Secret(key.text)
-        do {
-            // Coalesce typing and key edits. SwiftUI cancels the previous request on edits
-            // or dismissal; a late response must not replace the new server's model list.
-            try await Task.sleep(for: .milliseconds(600))
-            loading = true
-            defer { if !Task.isCancelled { loading = false } }
-            let found = try await OpenAICompatibleLLM(baseURL: endpoint, apiKey: secret, model: "").availableModels()
-            try Task.checkCancellation()
-            models = found
-            if found.isEmpty { error = String(localized: "The server returned no models. You can enter a model ID manually.") }
-        } catch is CancellationError {
-            // A newer URL/key or a closed view owns the UI now.
-        } catch {
-            guard !Task.isCancelled else { return }
-            if error is OpenAICompatibleLLM.ModelListingError {
-                self.error = String(localized: "This server does not support model listing. Enter a model ID manually.")
-            } else if let provider = error as? ProviderError {
-                self.error = provider.description
-            } else {
-                self.error = String(localized: "Couldn't load models. Check the server URL and API key, then try again.")
-            }
-        }
-    }
-}
-
 /// Connects meeting to-dos to Apple Reminders, mirroring the Apple Calendar row.
 private struct RemindersRow: View {
     let sync: RemindersSync
@@ -702,111 +454,13 @@ private struct LanguagePicker: View {
     }
 }
 
-struct IssueRow: View {
-    let issue: SetupIssue
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Icon("alert-triangle", size: 15).foregroundStyle(Palette.orange)
-            Text(Copy.issue(issue))
-        }
-    }
-}
-
-/// Keep model selection and download retries accessible while configuring local captions.
 private struct LiveCaptionsRow: View {
     let app: AppController
 
     var body: some View {
-        let available = app.hasConfiguredCaptionSource
-        Toggle("Live captions", isOn: Binding(
-            get: { available && app.settings.settings.liveCaptions },
-            set: { app.settings.settings.liveCaptions = $0 }))
-            .disabled(!available)
-        if available && app.settings.settings.liveCaptions {
-            if app.settings.settings.transcriptionOrder.contains(.local) {
-                SpeechModelPicker(store: app.settings, setup: app.setup, field: \.localCaptionModel)
-            }
-        }
-    }
-}
-
-private extension AppController {
-    var hasConfiguredCaptionSource: Bool {
-        settings.settings.transcriptionOrder.contains { source in
-            switch source {
-            case .selfHosted: settings.settings.selfHostedURL != nil
-            case .cloud:
-                switch setup.field(.elevenLabsAPIKey).state {
-                case .empty, .storageFailed: false
-                default: true
-                }
-            case .local: settings.settings.effectiveCaptionModel != nil
-            }
-        }
-    }
-}
-
-struct SourceToggle: View {
-    let source: TranscriptionSource
-    let store: SettingsStore
-
-    var body: some View {
-        Toggle(Copy.source(source), isOn: Binding(
-            get: { store.settings.transcriptionOrder.contains(source) },
-            set: { store.settings.setTranscriptionSource(source, enabled: $0) }))
-    }
-}
-
-struct CredentialFieldView: View {
-    @Bindable var field: CredentialField
-    let setup: SetupModel
-    /// Typing after a successful check brings the Save button back.
-    @State private var edited = false
-
-    /// A key that passed its check and has not been changed since shows a check mark where Save was.
-    private var verified: Bool {
-        field.state == .checked(.valid) && !edited
-    }
-
-    /// Saving and checking are one step: a key that was stored is a key that was tried.
-    private func save() {
-        edited = false
-        Task {
-            await field.validate()
-            setup.recheck()
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 8) {
-                Icon("key", size: 15).foregroundStyle(Palette.muted)
-                FieldBox {
-                    SecureField(Copy.credentialName(field.credential), text: $field.text)
-                        .onSubmit(save)
-                }
-                if verified {
-                    Icon("circle-check", size: 18).foregroundStyle(Palette.success)
-                        .frame(height: 30)
-                        .transition(.scale.combined(with: .opacity))
-                        .accessibilityElement()
-                        .accessibilityLabel(Copy.keyState(.checked(.valid)))
-                } else {
-                    PillButton("Save", action: save)
-                        .disabled(field.state == .validating)
-                        .transition(.opacity)
-                }
-            }
-            if field.state != .checked(.valid), !Copy.keyState(field.state).isEmpty {
-                Text(Copy.keyState(field.state)).font(Typo.caption).foregroundStyle(Palette.secondary)
-                    .padding(.leading, 23)
-                    .transition(.opacity)
-            }
-        }
-        .onChange(of: field.text) { if field.state == .checked(.valid) { edited = true } }
-        .motion(Motion.reveal, value: field.state)
-        .motion(Motion.reveal, value: verified)
+        @Bindable var store = app.settings
+        Toggle("Live captions", isOn: $store.settings.liveCaptions)
+        SpeechModelPicker(store: store, setup: app.setup)
     }
 }
 
@@ -843,25 +497,20 @@ struct SpeechModelPicker: View {
     @Bindable var store: SettingsStore
     let setup: SetupModel
 
-    var field: WritableKeyPath<AppSettings, LocalSpeechModel?> = \.localSpeechModel
-
-    private var isCaption: Bool { field == \.localCaptionModel }
-    private var label: LocalizedStringKey { isCaption ? "Live caption model" : "Transcription model" }
+    private let label: LocalizedStringKey = "Live caption model"
 
     var body: some View {
         picker
-        if let model = store.settings[keyPath: field], !isCaption || model != store.settings.localSpeechModel {
+        if let model = store.settings.effectiveCaptionModel {
             OfflineModelView(model: OfflineModel(model), setup: setup)
         }
     }
 
     private var picker: some View {
         let selection = Binding<LocalSpeechModel?>(
-            get: { isCaption ? store.settings.effectiveCaptionModel : store.settings.localSpeechModel },
+            get: { store.settings.effectiveCaptionModel },
             set: { choice in
-                if let choice {
-                    setup.selectSpeechModel(choice, for: field)
-                }
+                if let choice { setup.selectSpeechModel(choice, for: \.localCaptionModel) }
             }
         )
         let options = setup.speechModelChoices.map { choice in
@@ -905,11 +554,6 @@ struct OfflineModelView: View {
                     Text(error)
                     PillButton("Retry", icon: "refresh") { Task { await setup.prepareInstalledCoreML() } }
                 }
-            } else if model == .llm {
-                HStack(spacing: 8) {
-                    Icon("circle-check", size: 16).foregroundStyle(Palette.success)
-                    Text("Model installed")
-                }
             }
         case .downloading(let fraction):
             VStack(alignment: .leading, spacing: 8) {
@@ -917,13 +561,7 @@ struct OfflineModelView: View {
                 ProgressLine(fraction: fraction)
             }
         case .notDownloaded:
-            if model == .llm {
-                HStack {
-                    Text("Needs a model on this Mac (\(size)).")
-                    Spacer()
-                    PillButton("Download", icon: "download") { Task { await setup.downloadOfflineModel(model) } }
-                }
-            }
+            EmptyView()
         case .failed(let reason):
             HStack {
                 Text(reason).font(Typo.caption).foregroundStyle(Palette.danger)

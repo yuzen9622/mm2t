@@ -1,14 +1,41 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ · %lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 已分享 %lld / %lld 場會議"}}}},
+    "%@ · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · %lld 個模型"}}}},
+    "API key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "API 金鑰"}}}},
+    "API key (optional)": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "API 金鑰（選填）"}}}},
+    "Add key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "新增金鑰"}}}},
+    "Add your ElevenLabs API key.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請新增你的 ElevenLabs API 金鑰。"}}}},
+    "Add your Gemini API key.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請新增你的 Gemini API 金鑰。"}}}},
+    "Assistant": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "助理"}}}},
+    "Configured": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已設定"}}}},
+    "Connected": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已連線"}}}},
+    "Connected · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已連線 · %lld 個模型"}}}},
+    "Couldn't reach the OpenAI-compatible server.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法連線至 OpenAI 相容伺服器。"}}}},
+    "Couldn't reach your transcription server (%@).": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "無法連線至你的轉錄伺服器（%@）。"}}}},
+    "Free": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "免費版"}}}},
+    "Models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "模型"}}}},
+    "Models and services": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "模型與服務"}}}},
+    "OpenAI-compatible server": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "OpenAI 相容伺服器"}}}},
+    "Post-meeting transcription": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "會後逐字稿"}}}},
+    "Services": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "服務"}}}},
+    "Set the OpenAI-compatible server URL and model name.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請設定 OpenAI 相容伺服器的網址與模型名稱。"}}}},
+    "Set up": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "設定"}}}},
+    "Set up your transcription server.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請設定你的轉錄伺服器。"}}}},
+    "Sign in to use your mm2t plan.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請登入以使用 mm2t 方案。"}}}},
+    "Summaries and assistant": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "摘要與助理"}}}},
+    "Test connection": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "測試連線"}}}},
+    "Token": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "權杖"}}}},
+    "Token (optional)": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "權杖（選填）"}}}},
+    "Use an mm2t plan": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "使用 mm2t 方案"}}}},
+    "Use your own servers": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "使用自架伺服器"}}}},
+    "Your mm2t plan has no minutes left this month.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "你的 mm2t 方案本月分鐘數已用完。"}}}},
+    "Your transcription server and an OpenAI-compatible model": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "你的轉錄伺服器與 OpenAI 相容模型"}}}},
+    "mm2t plan": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "mm2t 方案"}}}},
+    "mm2t plan sign-in is unavailable.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "目前無法登入 mm2t 方案。"}}}},
     "Account": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "帳戶"}}}},
-    "Usage": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "使用方式"}}}},
-    "Plan": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "方案"}}}},
-    "Own API keys": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "自備 API 金鑰"}}}},
-    "Local and self-hosted": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本機與自架伺服器"}}}},
-    "Fallback": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "備援"}}}},
     "Free, 250 minutes a month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "免費，每月 250 分鐘"}}}},
-    "This Mac or your own server": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "這台 Mac 或你的伺服器"}}}},
     "Sign in to share meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "登入以分享會議"}}}},
     "Account and settings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "帳戶與設定"}}}},
     "Shared meetings this month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本月已分享的會議"}}}},
@@ -143,8 +170,6 @@
     },
     "Enable translation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "啟用翻譯" } } } },
     "Set up translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "設定翻譯模型" } } } },
-    "Model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "模型" } } } },
-    "Collaboration": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "協作" } } } },
     "Command": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "指令" } } } },
     "Copy Link": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "複製連結" } } } },
     "Ask to build or change something…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "要建立或修改什麼？" } } } },
@@ -175,29 +200,18 @@
     "Needs download": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "需要下載" } } } },
     "Remote audio": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "遠端音軌" } } } },
     "Live caption model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即時字幕模型" } } } },
-    "Transcription model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "轉錄模型" } } } },
     "About %lld MB in total.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "總共約 %lld MB。" } } } },
     "Microsoft 365 or Outlook.com": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Microsoft 365 或 Outlook.com" } } } },
     "Open your browser to grant it.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請先開啟瀏覽器再授權。" } } } },
     "Read this aloud at your normal speaking voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "用平常說話的聲音唸出這段文字。" } } } },
     "Your primary Google calendar": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你的 Google 主要日曆" } } } },
     "Allow microphone access to continue.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "允許使用麥克風後才能繼續。" } } } },
-    "Enter the language model server's URL and model name.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入語言模型伺服器的網址與模型名稱。" } } } },
-    "Enter your transcription server's URL.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請輸入轉錄伺服器的網址。" } } } },
-    "On-device language model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機語言模型" } } } },
-    "On-device transcription": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "本機轉錄" } } } },
     "Starting model downloads…": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在開始下載模型…" } } } },
     "Turn Off": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "關閉" } } } },
-    "Use ElevenLabs": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用 ElevenLabs" } } } },
-    "Use Your Server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用你的伺服器" } } } },
     "How do you want to use mm2t?": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "你想怎麼使用 mm2t？" } } } },
     "Sign in": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "登入" } } } },
-    "Coming soon": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "即將推出" } } } },
-    "Free plan, 250 minutes a month, processed after the meeting.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "免費方案，每月 250 分鐘，會議結束後處理。" } } } },
     "Use your own API keys": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用自己的 API 金鑰" } } } },
     "ElevenLabs and Gemini, billed to your accounts.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "ElevenLabs 與 Gemini，費用由你的帳戶支付。" } } } },
-    "Connect to your own server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連線到自己的伺服器" } } } },
-    "Audio only travels between your machines.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "音訊只在你自己的機器之間傳送。" } } } },
     "Let mm2t hear your meetings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 聽見你的會議。" } } } },
     "Download the models this Mac needs.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "下載這台 Mac 需要的模型。" } } } },
     "Speakers and voiceprints": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "說話者與聲紋" } } } },
@@ -205,9 +219,7 @@
     "Teach mm2t your voice.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "讓 mm2t 認識你的聲音。" } } } },
     "Waiting for the speaker model… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在等待說話者模型… %lld%%" } } } },
     "Connect your services.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的服務。" } } } },
-    "Connect your server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "連接你的伺服器" } } } },
     "Transcription server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "轉錄伺服器" } } } },
-    "Language model server": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "語言模型伺服器" } } } },
     "Continue": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "繼續" } } } },
     "Start Using mm2t": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "開始使用 mm2t" } } } },
     "Finishing model downloads… %lld%%": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "正在完成模型下載… %lld%%" } } } },
@@ -246,36 +258,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "請選擇模型"
-          }
-        }
-      }
-    },
-    "Choose a transcription model to continue.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請先選擇轉錄模型，再繼續。"
-          }
-        }
-      }
-    },
-    "Selecting a speech model downloads it to this Mac.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "選取語音模型後，會自動下載到這台 Mac。"
-          }
-        }
-      }
-    },
-    "Personalization": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "個人化"
           }
         }
       }
@@ -1010,16 +992,6 @@
         }
       }
     },
-    "Couldn't load models. Check the server URL and API key, then try again.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "無法載入模型。請檢查伺服器網址與 API 金鑰後重試。"
-          }
-        }
-      }
-    },
     "Couldn't reach %@.": {
       "localizations": {
         "zh-Hant": {
@@ -1200,26 +1172,6 @@
         }
       }
     },
-    "Download the on-device large language model.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下載本機大語言模型。"
-          }
-        }
-      }
-    },
-    "Download the on-device transcription model.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下載本機轉錄模型。"
-          }
-        }
-      }
-    },
     "Download the speaker separation model first.": {
       "localizations": {
         "zh-Hant": {
@@ -1272,26 +1224,6 @@
         }
       }
     },
-    "ElevenLabs (cloud)": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ElevenLabs（雲端）"
-          }
-        }
-      }
-    },
-    "ElevenLabs API key": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ElevenLabs API 金鑰"
-          }
-        }
-      }
-    },
     "Enter a full http:// or https:// address.": {
       "localizations": {
         "zh-Hant": {
@@ -1302,42 +1234,12 @@
         }
       }
     },
-    "Enter the self-hosted server URL, or turn that source off.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請輸入自架伺服器網址，或關閉這個來源。"
-          }
-        }
-      }
-    },
     "Enter the server URL first.": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "請先輸入伺服器網址。"
-          }
-        }
-      }
-    },
-    "Enter the large language model's server URL and model name, or switch back to Gemini.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請輸入大語言模型的伺服器網址與模型名稱，或改回使用 Gemini。"
-          }
-        }
-      }
-    },
-    "Enter your %@.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請輸入你的%@。"
           }
         }
       }
@@ -1362,16 +1264,6 @@
         }
       }
     },
-    "Gemini API key": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gemini API 金鑰"
-          }
-        }
-      }
-    },
     "General": {
       "localizations": {
         "zh-Hant": {
@@ -1382,32 +1274,12 @@
         }
       }
     },
-    "Generate on this Mac": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在這台 Mac 上產生"
-          }
-        }
-      }
-    },
     "Google Calendar": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "Google 日曆"
-          }
-        }
-      }
-    },
-    "Google Calendar sign-in": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Google 日曆登入"
           }
         }
       }
@@ -1722,16 +1594,6 @@
         }
       }
     },
-    "Model installed": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "模型已安裝"
-          }
-        }
-      }
-    },
     "Model name": {
       "localizations": {
         "zh-Hant": {
@@ -1778,16 +1640,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在會議中為說話者命名後，聲紋會存在這台 Mac 上。"
-          }
-        }
-      }
-    },
-    "Needs a model on this Mac (%@).": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "需要在這台 Mac 上安裝模型（%@）。"
           }
         }
       }
@@ -2012,16 +1864,6 @@
         }
       }
     },
-    "Local models": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本機模型"
-          }
-        }
-      }
-    },
     "One term at a time": {
       "localizations": {
         "zh-Hant": {
@@ -2068,16 +1910,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Outlook"
-          }
-        }
-      }
-    },
-    "Outlook sign-in": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Outlook 登入"
           }
         }
       }
@@ -2352,16 +2184,6 @@
         }
       }
     },
-    "Refresh models": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新整理模型"
-          }
-        }
-      }
-    },
     "Regenerate": {
       "localizations": {
         "zh-Hant": {
@@ -2518,26 +2340,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜尋"
-          }
-        }
-      }
-    },
-    "OpenAI-compatible": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OpenAI 相容"
-          }
-        }
-      }
-    },
-    "Self-hosted server": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自架伺服器"
           }
         }
       }
@@ -2822,16 +2624,6 @@
         }
       }
     },
-    "Large language model": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "大語言模型"
-          }
-        }
-      }
-    },
     "System": {
       "localizations": {
         "zh-Hant": {
@@ -2948,16 +2740,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "伺服器要求 Token。請在設定填入伺服器的 MM2T_SERVER_TOKEN。"
-          }
-        }
-      }
-    },
-    "The server returned no models. You can enter a model ID manually.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "伺服器未回傳模型。你可以手動輸入模型 ID。"
           }
         }
       }
@@ -3108,16 +2890,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "轉錄"
-          }
-        }
-      }
-    },
-    "Turn on at least one transcription source.": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請至少開啟一個轉錄來源。"
           }
         }
       }
@@ -3428,26 +3200,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "負責人：%@"
-          }
-        }
-      }
-    },
-    "self-hosted server token": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自架伺服器 Token"
-          }
-        }
-      }
-    },
-    "large language model API key": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "大語言模型 API 金鑰"
           }
         }
       }

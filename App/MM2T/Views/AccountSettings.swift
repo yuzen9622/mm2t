@@ -4,6 +4,7 @@ import SwiftUI
 
 struct CollabAccountSettings: View {
     let account: CollabAccount
+    var showsPlan = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -13,6 +14,7 @@ struct CollabAccountSettings: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(verbatim: user.name).font(Typo.bodyStrong)
                         Text(verbatim: user.email).foregroundStyle(Palette.secondary)
+                        if showsPlan { Text(verbatim: planName).font(Typo.captionStrong).foregroundStyle(Palette.secondary) }
                     }
                     Spacer()
                     PillButton("Sign Out") { Task { await account.signOut() } }
