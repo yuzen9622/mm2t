@@ -284,7 +284,7 @@ public final class AppController {
                 let segment = Diarization.Segment(cluster: voice, range: TimeRange(start: 0, end: duration))
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
-        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
+        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment, account: account)
         account?.onUserChanged = { [weak capture, weak setup] in
             setup?.recheck()
             capture?.collaboration?.accountChanged()

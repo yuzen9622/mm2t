@@ -97,8 +97,6 @@ struct OnboardingView: View {
             // Under the buttons, inside the bottom margin.
             Group {
                 switch flow.note {
-                case .chooseSpeechModel:
-                    Text("Choose a transcription model to continue.")
                 case .needsMicrophone:
                     Text("Allow microphone access to continue.")
                 case .finishingDownloads(let fraction):
@@ -107,10 +105,6 @@ struct OnboardingView: View {
                     Text("A model couldn't download. Go back to retry it.")
                 case .modelsNotDownloaded:
                     Text("Starting model downloads…")
-                case .issue(.missingSelfHostedURL):
-                    Text("Enter your transcription server's URL.")
-                case .issue(.missingLLMEndpoint):
-                    Text("Enter the language model server's URL and model name.")
                 case .issue(let issue):
                     Text(Copy.issue(issue))
                 case .needsVoice, nil:
@@ -269,8 +263,7 @@ private struct StepPage: View {
                 case .permissions: Text("Let mm2t hear your meetings.")
                 case .models: Text("Download the models this Mac needs.")
                 case .voice: Text("Teach mm2t your voice.")
-                case .services:
-                    if app.onboarding.choice == .ownServer { Text("Connect your server") } else { Text("Connect your services.") }
+                case .services: Text("Connect your services.")
                 }
             }
             .font(Typo.title)
@@ -281,12 +274,7 @@ private struct StepPage: View {
             if step == .models || step == .voice {
                 Group {
                     switch step {
-                    case .models:
-                        if showsSpeechPicker {
-                            Text("Selecting a speech model downloads it to this Mac.")
-                        } else {
-                            Text("About \(Self.megabytes(app.onboarding.modelBytes)) MB in total.")
-                        }
+                    case .models: Text("About \(Self.megabytes(app.onboarding.modelBytes)) MB in total.")
                     default: Text("Read this aloud at your normal speaking voice.")
                     }
                 }
@@ -313,17 +301,13 @@ private struct StepPage: View {
         .onAppear { shown = true }
     }
 
-    private var showsSpeechPicker: Bool {
-        !app.settings.settings.hasCompletedOnboarding || app.settings.settings.transcriptionOrder.contains(.local)
-    }
-
     @ViewBuilder private var rows: some View {
         Group {
             switch step {
             case .usage: UsageRows(flow: app.onboarding)
             case .permissions: PermissionRows(setup: app.setup, asSetupRows: true)
             case .models:
-                if showsSpeechPicker {
+                if app.settings.settings.liveCaptions {
                     VStack(alignment: .leading, spacing: 10) {
                         SpeechModelPicker(store: app.settings, setup: app.setup)
                     }
@@ -351,21 +335,21 @@ private struct UsageRows: View {
     let flow: OnboardingFlow
 
     var body: some View {
-        ChoiceRow(choice: .signIn, selected: false, title: UsageChoice.signIn.title,
-                  detail: "Free, 250 minutes a month", flow: flow)
+        ChoiceRow(choice: .plan, icon: "sparkles", title: "Use an mm2t plan", detail: "Free, 250 minutes a month", flow: flow)
             .arrives(2)
-        ChoiceRow(choice: .ownKeys, selected: flow.choice == .ownKeys, title: "Use your own API keys",
+        ChoiceRow(choice: .ownKeys, icon: "key", title: "Use your own API keys",
                   detail: "ElevenLabs and Gemini, billed to your accounts.", flow: flow)
             .arrives(3)
-        ChoiceRow(choice: .ownServer, selected: flow.choice == .ownServer, title: UsageChoice.ownServer.title,
-                  detail: "This Mac or your own server", flow: flow)
+        ChoiceRow(choice: .ownServer, icon: "server", title: "Use your own servers",
+                  detail: "Your transcription server and an OpenAI-compatible model", flow: flow)
             .arrives(4)
     }
 }
 
 private struct ChoiceRow: View {
-    let choice: UsageChoice
-    let selected: Bool
+    let choice: OnboardingChoice
+    let icon: String
+    private var selected: Bool { flow.choice == choice }
     let title: LocalizedStringKey
     let detail: LocalizedStringKey
     let flow: OnboardingFlow
@@ -374,14 +358,9 @@ private struct ChoiceRow: View {
     var body: some View {
         Button { flow.select(choice) } label: {
             HStack(spacing: 12) {
-                Icon(choice.icon, size: 20).foregroundStyle(selected ? Palette.orange : Palette.secondary)
+                Icon(icon, size: 20).foregroundStyle(selected ? Palette.orange : Palette.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(title).font(Typo.bodyStrong).lineLimit(1)
-                        if !choice.isAvailable {
-                            ComingSoonBadge()
-                        }
-                    }
+                    Text(title).font(Typo.bodyStrong).lineLimit(1)
                     Text(detail).font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 8)
@@ -392,7 +371,7 @@ private struct ChoiceRow: View {
             .setupRow()
             .background {
                 RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                    .fill(hovering && choice.isAvailable ? Palette.hover : .clear)
+                    .fill(hovering ? Palette.hover : .clear)
             }
             .overlay {
                 // The selection ring: a state of this control, drawn inside its shape.
@@ -404,9 +383,7 @@ private struct ChoiceRow: View {
         }
         .buttonStyle(Pressable())
         .focusEffectDisabled()
-        .disabled(!choice.isAvailable)
-        .opacity(choice.isAvailable ? 1 : 0.5)
-        .onHover { hovering = $0 && choice.isAvailable }
+        .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
         .motion(Motion.touch, value: selected)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -593,61 +570,18 @@ private struct ServiceRows: View {
     let app: AppController
 
     var body: some View {
-        let flow = app.onboarding
-        let setup = app.setup
-        let services = flow.services
-        ForEach(Array(services.enumerated()), id: \.element) { index, entry in
-            Group {
-                switch entry {
-                case .elevenLabs:
-                    ServiceRow(title: Text(verbatim: "ElevenLabs")) {
-                        CredentialFieldView(field: setup.field(.elevenLabsAPIKey), setup: setup)
-                    }
-                case .gemini:
-                    ServiceRow(title: Text(verbatim: "Gemini")) {
-                        CredentialFieldView(field: setup.field(.geminiAPIKey), setup: setup)
-                    }
-                case .transcriptionServer:
-                    ServiceRow(title: Text("Transcription server")) {
-                        ServerURLField(store: app.settings)
-                        CredentialFieldView(field: setup.field(.selfHostedToken), setup: setup)
-                    }
-                case .llmServer:
-                    ServiceRow(title: Text("Language model server")) {
-                        LLMServerFields(store: app.settings, key: setup.field(.openAICompatibleAPIKey))
-                        CredentialFieldView(field: setup.field(.openAICompatibleAPIKey), setup: setup)
-                    }
-                case .offlineModel(.llm):
-                    OfflineModelRow(model: .llm, setup: setup, flow: flow)
-                case .offlineModel, .speechModelPicker:
-                    ServiceRow(title: Text("On-device transcription")) {
-                        SpeechModelPicker(store: app.settings, setup: setup)
-                        PillButton("Turn Off") { flow.turnOff(.transcription) }
-                    }
-                case .transcriptionSource:
-                    ServiceRow(title: Text("Transcription"), purpose: Text(Copy.issue(.noTranscriptionSource))) {
-                        Group {
-                            if flow.choice == .ownServer {
-                                PillButton("Use Your Server", action: flow.turnOnTranscriptionSource)
-                            } else {
-                                PillButton("Use ElevenLabs", action: flow.turnOnTranscriptionSource)
-                            }
-                        }
-                    }
-                case .settings(let issue):
-                    // Never needed for processing today; kept so no issue is ever left without a way out.
-                    ServiceRow(title: Text("Settings"), purpose: Text(Copy.issue(issue))) {
-                        PillButton("Open Settings") {
-                            MainNavigation.shared.settingsOpen = true
-                            WindowOpener.open(WindowID.main)
-                        }
-                    }
-                }
+        let services = app.onboarding.services
+        ForEach(Array(services.enumerated()), id: \.element) { index, service in
+            VStack(alignment: .leading, spacing: 10) {
+                Text(verbatim: service.title).font(Typo.bodyStrong)
+                ServiceEditor(app: app, service: service)
             }
+            .setupRow()
             .arrives(2 + index)
         }
-        if let account = app.collabAccount {
-            ServiceRow(title: Text("Sign in to share meetings")) {
+        if !services.contains(.mm2t), let account = app.collabAccount {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Sign in to share meetings").font(Typo.bodyStrong)
                 if let user = account.user {
                     HStack(spacing: 8) {
                         AccountAvatar(name: user.name, size: 28)
@@ -659,61 +593,12 @@ private struct ServiceRows: View {
                 }
                 AccountErrorLine(account: account)
             }
+            .setupRow()
             .arrives(2 + services.count)
         }
     }
 }
 
-/// An on-device model a chosen source needs: download it here, or turn that source off the way
-/// its Settings switch does.
-private struct OfflineModelRow: View {
-    let model: OfflineModel
-    let setup: SetupModel
-    let flow: OnboardingFlow
-
-    var body: some View {
-        ModelRow(name: "On-device language model",
-                 state: setup.offlineModels[model] ?? .notDownloaded, failure: nil, detail: detail,
-                 offersDownload: true,
-                 retry: { Task { await setup.downloadOfflineModel(model) } },
-                 turnOff: { flow.turnOff(model) })
-    }
-
-    /// The size, or why this Mac is not suited, in the words Settings uses.
-    private var detail: Text {
-        if case .unsuited(let reason) = setup.fit(for: model) {
-            switch reason {
-            case .intelProcessor: return Text("Not recommended on a Mac with an Intel processor.")
-            case .memory(let minimumGB): return Text("Not recommended: needs at least \(minimumGB) GB of memory.")
-            }
-        }
-        let size = ByteCountFormatter.string(fromByteCount: setup.offlineModelBytes(model), countStyle: .file)
-        return Text("Needs a model on this Mac (\(size)).")
-    }
-}
-
-private struct ServiceRow<Fields: View>: View {
-    let title: Text
-    var purpose: Text?
-    @ViewBuilder let fields: Fields
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                title.font(Typo.bodyStrong).lineLimit(1)
-                purpose?.font(Typo.caption).foregroundStyle(Palette.secondary).lineLimit(2)
-            }
-            fields
-        }
-        .setupRow()
-    }
-}
-
-// MARK: 2. Permissions
-
-/// The permission list, shared by first-run setup and the settings page. macOS sends no
-/// notification when a switch is flipped in System Settings, so it re-reads them while on screen.
-/// In setup each permission is a row of its own and its request button gives way to the footer's.
 struct PermissionRows: View {
     let setup: SetupModel
     var asSetupRows = false
