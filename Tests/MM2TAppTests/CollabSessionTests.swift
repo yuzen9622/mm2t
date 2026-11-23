@@ -626,6 +626,80 @@ import Testing
         #expect(CollabBackend.document.get?.rev == original.rev + 1)
     }
 
+    @Test(arguments: [409, 503])
+    func retainedBatchRejectionOnlyUnblocksCommandsForClientErrors(status: Int) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let document = try #require(CollabBackend.document.get)
+        let ops: [CollabOp] = [.replaceText(id: document.id, field: .markdown, text: "更新"), .done(id: document.id)]
+        f.llm.answerChunks.set([try ops.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")])
+        CollabBackend.doneBodies.set([])
+        CollabBackend.doneRejection.set(503)
+        f.session.run(command: "第一次修改")
+        await f.session.waitForWork()
+        #expect(CollabBackend.doneBodies.get.count == 3)
+
+        let firstBody = try #require(CollabBackend.doneBodies.get.first)
+        CollabBackend.doneRejection.set(status)
+        f.session.retry()
+        await f.session.waitForWork()
+        #expect(f.session.commandStatus == .failed(.service(.server(status: status))))
+        let replayBodies = CollabBackend.doneBodies.get
+        #expect(replayBodies == Array(repeating: firstBody, count: status == 409 ? 4 : 6))
+
+        CollabBackend.doneRejection.set(nil)
+        let before = f.llm.answerInputs.get.count
+        f.session.run(command: "下一次修改")
+        await f.session.waitForWork()
+        if status == 409 {
+            #expect(f.llm.answerInputs.get.count == before + 1)
+            #expect(CollabBackend.doneBodies.get.count == replayBodies.count + 1)
+            #expect(CollabBackend.document.get?.content == "更新")
+        } else {
+            #expect(f.llm.answerInputs.get.count == before)
+            #expect(CollabBackend.doneBodies.get == replayBodies)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func nextTriggerReplaysBackgroundBatchBeforeGenerating(foreground: Bool) async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let document = try #require(CollabBackend.document.get)
+        let ops: [CollabOp] = [.replaceText(id: document.id, field: .markdown, text: "更新"), .done(id: document.id)]
+        f.llm.answerChunks.set([try ops.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")])
+        CollabBackend.doneBodies.set([])
+        CollabBackend.dropDoneResponse.set(true)
+        f.clock.update { $0.addTimeInterval(100) }
+        f.captions.receive(.final(String(repeating: "甲", count: 200)))
+        await f.session.waitForWork()
+        let firstBody = try #require(CollabBackend.doneBodies.get.first)
+        #expect(CollabBackend.doneBodies.get == Array(repeating: firstBody, count: 3))
+        #expect(try JSONDecoder().decode(CollabBackend.Batch.self, from: firstBody).ops == ops)
+
+        let before = f.llm.answerInputs.get.count
+        CollabBackend.dropDoneResponse.set(false)
+        CollabBackend.holdOps.set(true)
+        defer {
+            CollabBackend.holdOps.set(false)
+            CollabBackend.releaseOps()
+        }
+        if foreground { f.session.run(command: "接續指令") }
+        else { f.captions.receive(.final("乙")) }
+        try #require(await waitForCollabEvent { CollabBackend.deferredReply.get != nil })
+        #expect(CollabBackend.doneBodies.get == Array(repeating: firstBody, count: 4))
+        #expect(f.llm.answerInputs.get.count == before)
+        CollabBackend.holdOps.set(false)
+        CollabBackend.releaseOps()
+        await f.session.waitForWork()
+        if foreground {
+            #expect(f.llm.answerInputs.get.count == before + 1)
+        } else {
+            #expect(!f.llm.answerInputs.get.dropFirst(before).contains { $0.contains("\"component\":") })
+            #expect(CollabBackend.doneBodies.get.count == 4)
+        }
+    }
+
     @Test(arguments: [false, true])
     func modelPromptAndItemPatchesUseExactUTF8IDsFromRoomSnapshot(hasBothIDs: Bool) async throws {
         let f = try await Fixture()
@@ -912,6 +986,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let offlineEnd = Box(false)
     static let exchanges = Box<[[String: String]]>([])
     static let roomEnded = Box(false)
+    static let doneRejection = Box<Int?>(nil)
     static let rejectDone = Box(false)
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
@@ -924,7 +999,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
         quotaUsed.set(0); profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
-        offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
+        offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); doneRejection.set(nil); expired.set(false); holdOps.set(false); deferredReply.set(nil)
         holdCreation.set(false); deferredCreation.set(nil)
     }
 
@@ -1011,8 +1086,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             Self.ops.update { $0 += batch.ops }
             let hasDone = batch.ops.contains { if case .done = $0 { true } else { false } }
             if hasDone { Self.doneBodies.update { $0.append(wireBody) } }
-            if Self.rejectDone.get, hasDone {
-                reply(status: 503, body: Data())
+            if hasDone, let status = Self.doneRejection.get ?? (Self.rejectDone.get ? 503 : nil) {
+                reply(status: status, body: Data())
                 return
             }
             var duplicate = false

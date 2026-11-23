@@ -35,11 +35,22 @@ public final class CollabSession {
     }
 
     private struct CommandCleanup: Equatable {
+        enum Kind: Equatable {
+            case repair
+            case replay
+            case background(captionCount: Int)
+        }
+
         let owner: String
         let room: CollabRoom
         let target: String
         let batch: CollabOpBatch
-        let replaysOriginalBatch: Bool
+        let kind: Kind
+
+        var isBackground: Bool {
+            if case .background = kind { return true }
+            return false
+        }
     }
 
     private struct Caption {
@@ -53,7 +64,7 @@ public final class CollabSession {
     public private(set) var commandStatus: CommandStatus = .hidden
     public private(set) var suggestion: CollabSuggestion?
     public private(set) var card: SuggestionPolicy.Card?
-    public var showsCommandButton: Bool { state != .ended && pendingCleanup == nil }
+    public var showsCommandButton: Bool { state != .ended && (pendingCleanup?.isBackground ?? true) }
     public var wantsKeyboard: Bool { commandStatus == .input || state == .confirmingStart }
     public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
     public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
@@ -102,7 +113,7 @@ public final class CollabSession {
     }
 
     public func dismissCommand() {
-        guard pendingCleanup == nil else { return }
+        guard pendingCleanup?.isBackground ?? true else { return }
         switch commandStatus {
         case .building: return
         default: break
@@ -159,7 +170,7 @@ public final class CollabSession {
         if let ownedRoom {
             if ownedRoom.owner == user.id {
                 state = .live(ownedRoom.room)
-                cleanupRequested = true
+                if pendingCleanup != nil { cleanupRequested = true }
                 if pendingCommand != nil { commandStatus = .building(nil) }
                 pump()
                 return
@@ -334,15 +345,37 @@ public final class CollabSession {
     private func pump() {
         guard work == nil, draining == nil, state != .ended, !account.signingOut else { return }
         if let cleanup = pendingCleanup {
-            guard cleanupRequested, room == cleanup.room, account.user?.id == cleanup.owner else { return }
+            let captionTriggered = cleanup.isBackground && needsCaptions && commandStatus != .input
+            let commandTriggered = cleanup.isBackground && pendingCommand != nil
+            let automatic = captionTriggered && !commandTriggered && !cleanupRequested
+            guard cleanupRequested || captionTriggered || commandTriggered,
+                  room == cleanup.room, account.user?.id == cleanup.owner else { return }
             cleanupRequested = false
+            if captionTriggered { needsCaptions = false }
             launch { session in
                 do {
                     try await session.cleanUpCommand(cleanup, checkingServer: true)
-                    if session.pendingCleanup == cleanup { session.pendingCleanup = nil }
-                    if !Task.isCancelled { session.commandStatus = .hidden }
-                } catch where !Task.isCancelled { session.fail(error) }
-                catch {}
+                    guard session.pendingCleanup == cleanup else { return }
+                    session.pendingCleanup = nil
+                    if case .background(let captionCount) = cleanup.kind,
+                       cleanup.batch.ops.contains(.done(id: cleanup.target)) {
+                        session.marks[cleanup.target] = UpdateMark(time: session.now(), captionCount: captionCount)
+                        session.failedUpdates.removeValue(forKey: cleanup.target)
+                        session.pruneCaptions()
+                    }
+                    if captionTriggered { session.needsCaptions = true }
+                    if !automatic, !Task.isCancelled, session.pendingCommand == nil, session.commandStatus != .input {
+                        session.commandStatus = .hidden
+                    }
+                } catch where !Task.isCancelled {
+                    let rejected = (error as? CollabError)?.isDefinitiveBatchRejection == true
+                    if rejected, session.pendingCleanup == cleanup { session.pendingCleanup = nil }
+                    if automatic, !rejected, session.pendingCommand == nil {
+                        Self.logger.debug("Could not replay a collaboration update")
+                    } else {
+                        session.fail(error)
+                    }
+                } catch {}
             }
             return
         }
@@ -360,7 +393,8 @@ public final class CollabSession {
             guard suggest || update else { return }
             launch(background: true) { session in
                 if update, let room = session.room { await session.update(room: room) }
-                if suggest, !Task.isCancelled, session.pendingCommand == nil, session.commandStatus == .hidden {
+                if suggest, !Task.isCancelled, session.pendingCleanup == nil,
+                   session.pendingCommand == nil, session.commandStatus == .hidden {
                     await session.askForSuggestion()
                 }
             }
@@ -452,7 +486,7 @@ public final class CollabSession {
         let captions = recent(300, at: time)
         let snapshot = totalCharacters
         let result = try await stream(room: room, system: CollabPrompts.command(source: command.source, newID: newID, retryTarget: retrying?.id),
-                                      route: { .init(components: components, newID: newID, source: command.source, retrying: retrying) }, showTitle: true) {
+                                      route: { .init(components: components, newID: newID, source: command.source, retrying: retrying) }) {
             ["instruction": .string(command.text), "captions": .string(captions.joined(separator: "\n")),
              "components": .array(components.map { .object(CollabModelWork.promptFields($0)) }),
              "date": .string(time.formatted(Date.ISO8601FormatStyle(timeZone: .current).timeZone(separator: .colon))), "timeZone": .string(TimeZone.current.identifier)]
@@ -505,7 +539,8 @@ public final class CollabSession {
                 let snapshot = totalCharacters
                 let captions = transcript.lazy.filter { $0.position > mark.captionCount }.map(\.segment.text)
                 let texts = Array(captions)
-                _ = try await stream(room: room, system: CollabPrompts.update, route: { .init(updating: component) }) {
+                _ = try await stream(room: room, system: CollabPrompts.update, route: { .init(updating: component) },
+                                     updateCaptionCount: snapshot) {
                     ["component": .object(CollabModelWork.promptFields(component)), "captions": .string(texts.joined(separator: "\n"))]
                 }
                 try Task.checkCancellation()
@@ -519,7 +554,7 @@ public final class CollabSession {
         }
     }
 
-    private func stream(room: CollabRoom, system: String, route: @Sendable () -> CollabGeneration, showTitle: Bool = false,
+    private func stream(room: CollabRoom, system: String, route: @Sendable () -> CollabGeneration, updateCaptionCount: Int? = nil,
                         input: @escaping @Sendable () -> [String: CollabJSON]) async throws -> CollabGeneration {
         guard let binding = ownedRoom, binding.room == room else { throw CollabError.notSignedIn }
         try Task.checkCancellation()
@@ -529,25 +564,32 @@ public final class CollabSession {
         let model = CollabModelWork(makeLLM: llmSnapshot())
         do {
             return try await model.stream(system: system, route: route, input: input, sender: sender) { [weak self] title in
-                if showTitle, !Task.isCancelled { self?.commandStatus = .building(title) }
+                if updateCaptionCount == nil, !Task.isCancelled { self?.commandStatus = .building(title) }
             }
         } catch {
             await sender.close()
             let original = await sender.unconfirmedBatch
-            if showTitle, let route = await model.generation, let target = route.target,
+            if let route = await model.generation, let target = route.target,
                ownedRoom?.room == room, ownedRoom?.owner == binding.owner {
-                if !route.created, let command = retryCommand {
-                    retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
-                }
-                if route.needsCleanup {
-                    let replay = !route.created && original?.ops.contains(.done(id: target)) == true ? original : nil
-                    let batch = replay ?? CollabOpBatch([route.created ? .remove(id: target) : .done(id: target)])
-                    let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: batch,
-                                                 replaysOriginalBatch: replay != nil)
-                    pendingCleanup = cleanup
-                    if replay == nil, !Task.isCancelled, !Self.lostAuthorization(error) {
-                        try await cleanUpCommand(cleanup, checkingServer: route.created || route.removed)
-                        if pendingCleanup == cleanup { pendingCleanup = nil }
+                if let updateCaptionCount {
+                    if let original {
+                        pendingCleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: original,
+                                                        kind: .background(captionCount: updateCaptionCount))
+                    }
+                } else {
+                    if !route.created, let command = retryCommand {
+                        retryCommand = Command(text: command.text, source: command.source, retryTarget: target)
+                    }
+                    if route.needsCleanup {
+                        let replay = !route.created && original?.ops.contains(.done(id: target)) == true ? original : nil
+                        let batch = replay ?? CollabOpBatch([route.created ? .remove(id: target) : .done(id: target)])
+                        let cleanup = CommandCleanup(owner: binding.owner, room: room, target: target, batch: batch,
+                                                     kind: replay == nil ? .repair : .replay)
+                        pendingCleanup = cleanup
+                        if replay == nil, !Task.isCancelled, !Self.lostAuthorization(error) {
+                            try await cleanUpCommand(cleanup, checkingServer: route.created || route.removed)
+                            if pendingCleanup == cleanup { pendingCleanup = nil }
+                        }
                     }
                 }
             }
@@ -562,9 +604,9 @@ public final class CollabSession {
 
     private func cleanUpCommand(_ intent: CommandCleanup, checkingServer: Bool) async throws {
         guard account.user?.id == intent.owner else { throw CollabError.notSignedIn }
-        if checkingServer {
+        if checkingServer, intent.kind == .repair {
             let components = try await roomComponents(intent.room)
-            guard intent.replaysOriginalBatch || components.contains(where: { $0.id == intent.target }) else { return }
+            guard components.contains(where: { $0.id == intent.target }) else { return }
         }
         try Task.checkCancellation()
         let cleanup = makeSender(intent.room, owner: intent.owner)

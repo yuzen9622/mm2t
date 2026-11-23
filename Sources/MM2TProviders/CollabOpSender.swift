@@ -158,6 +158,9 @@ public actor CollabOpSender {
                         switch error as? CollabError {
                         case .unreachable, .server(status: 200...299), .server(status: 500...599): unconfirmedBatch = batch
                         case .server(status: 429): break
+                        case let error? where error.isDefinitiveBatchRejection:
+                            unconfirmedBatch = nil
+                            throw error
                         default: throw error
                         }
                         if isSealed { return }
@@ -169,6 +172,15 @@ public actor CollabOpSender {
             failure = error
             discardQueued()
             throw error
+        }
+    }
+}
+
+extension CollabError {
+    package var isDefinitiveBatchRejection: Bool {
+        switch self {
+        case .server(status: 400...499), .quotaExceeded: true
+        default: false
         }
     }
 }
