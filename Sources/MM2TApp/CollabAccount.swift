@@ -34,6 +34,7 @@ public struct CollabConfiguration: Sendable {
 
 @MainActor @Observable
 public final class CollabAccount {
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     public private(set) var user: CollabUser? {
         didSet {
             if user == nil { quota = nil }
@@ -57,9 +58,10 @@ public final class CollabAccount {
     @ObservationIgnored private var roomEndWrites: [CollabPendingEnds.Room: Task<Void, Never>] = [:]
 
     init(configuration: CollabConfiguration, credentials: any CredentialStoring, pendingEndsFile: URL,
-         session: URLSession = .shared, endRetrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+         session: URLSession = .shared, endRetrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         pendingEndsWrite: @escaping @Sendable (Data, URL) throws -> Void = CollabPendingEnds.writeAtomically) {
         self.configuration = configuration
-        self.pendingEnds = CollabPendingEnds(file: pendingEndsFile, sleep: endRetrySleep)
+        self.pendingEnds = CollabPendingEnds(file: pendingEndsFile, sleep: endRetrySleep, write: pendingEndsWrite)
         self.service = CollabService(baseURL: configuration.apiURL, session: session,
             load: { try credentials.read(.collabAccount) }, save: { try credentials.save($0, for: .collabAccount) })
     }
@@ -175,37 +177,40 @@ public final class CollabAccount {
     public var hasPendingRoomEndWrites: Bool { roomEndWrite != nil || pendingEnds.hasUnpersistedClosures }
 
     public func waitForRoomEndWrites() async {
-        while let write = roomEndWrite { await write.value }
-        if pendingEnds.hasUnpersistedClosures {
-            await retryRoomEndWrites()
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(2)
+        let (completion, signal) = AsyncStream<Void>.makeStream()
+        let preparation = Task { [weak self] in
+            defer { signal.finish() }
+            while !Task.isCancelled, clock.now < deadline, let write = self?.roomEndWrite { await write.value }
+            await self?.retryRoomEndWrites(until: deadline, clock: clock)
+            while !Task.isCancelled, clock.now < deadline, let write = self?.roomEndWrite { await write.value }
         }
-        while let write = roomEndWrite { await write.value }
-        if pendingEnds.hasUnpersistedClosures {
+        let timeout = Task {
+            try? await clock.sleep(until: deadline)
+            signal.finish()
+        }
+        defer { preparation.cancel(); timeout.cancel() }
+        for await _ in completion {}
+
+        let ids = pendingEnds.unpersistedRoomIDs.union(roomEndWrites.keys.map(\.id)).sorted()
+        if !ids.isEmpty || !roomEndPreparations.isEmpty {
             error = .pendingEndPersistence
-            Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
-                .error("Quitting with unsaved collaboration room closures")
+            Self.logger.error("Quitting with unsaved collaboration room closures: \(ids.joined(separator: ", "), privacy: .private); pending preparations: \(self.roomEndPreparations.count)")
         }
     }
 
-    private func retryRoomEndWrites() async {
-        let (completion, signal) = AsyncStream<Void>.makeStream()
-        let retry = Task {
-            defer { signal.finish() }
-            for delay in [Duration.zero, .milliseconds(100), .milliseconds(250)] {
-                do {
-                    try await Task.sleep(for: delay)
-                    try await pendingEnds.retryUnpersistedClosures()
-                    return
-                } catch where Task.isCancelled { return }
-                catch { continue }
-            }
+    private func retryRoomEndWrites(until deadline: ContinuousClock.Instant, clock: ContinuousClock) async {
+        guard pendingEnds.hasUnpersistedClosures else { return }
+        for delay in [Duration.zero, .milliseconds(100), .milliseconds(250)] {
+            do {
+                try await Task.sleep(for: delay)
+                guard clock.now < deadline else { return }
+                try await pendingEnds.retryUnpersistedClosures()
+                return
+            } catch where Task.isCancelled { return }
+            catch { continue }
         }
-        let timeout = Task {
-            try? await Task.sleep(for: .seconds(2))
-            signal.finish()
-        }
-        defer { retry.cancel(); timeout.cancel() }
-        for await _ in completion {}
     }
 
     func prepareRoomEnd(_ prepare: @escaping @MainActor () async -> Void) -> Task<Void, Never> {

@@ -256,6 +256,46 @@ import Testing
         await ending?.value
     }
 
+    @Test func quitReturnsWhileRegisteredWorkIsStillWaiting() async throws {
+        let f = try await Fixture()
+        let gate = Gate<Bool>()
+        let entered = Box(false)
+        let preparation = f.account.prepareRoomEnd {
+            entered.set(true)
+            _ = await gate.wait()
+        }
+        defer { Task { await gate.open(true) } }
+        try #require(await waitForCollabEvent { entered.get })
+
+        let quitReturned = Box(false)
+        let quit = Task {
+            await f.account.waitForRoomEndWrites()
+            quitReturned.set(true)
+        }
+        #expect(await waitForCollabEvent(until: .milliseconds(2_500)) { quitReturned.get })
+        #expect(f.account.hasPendingRoomEndWrites)
+        await gate.open(true)
+        await preparation.value
+        await quit.value
+    }
+
+    @Test func quitAttemptsExactlyThreeLocalWritesOnPermanentFailure() async throws {
+        let writes = Box(0)
+        let f = try await Fixture(pendingEndsWrite: { _, _ in
+            writes.update { $0 += 1 }
+            throw CocoaError(.fileWriteNoPermission)
+        })
+        try await f.makeRoom()
+        CollabBackend.offlineEnd.set(true)
+        await f.session.end()?.value
+        #expect(writes.get == 1)
+        writes.set(0)
+
+        await f.account.waitForRoomEndWrites()
+        #expect(writes.get == 3)
+        #expect(f.account.hasPendingRoomEndWrites)
+    }
+
     @Test(arguments: [false, true])
     func quitRetriesUnpersistedRoomClosureAndReturnsOnPermanentFailure(repairFile: Bool) async throws {
         let f = try await Fixture()
@@ -914,7 +954,8 @@ import Testing
         let configuration = CollabConfiguration(apiURL: URL(string: "https://test.collab.invalid")!,
                                                 webURL: URL(string: "https://web.collab.invalid")!)
 
-        init(waitOnRetry: @escaping @Sendable () async -> Void = {}) async throws {
+        init(waitOnRetry: @escaping @Sendable () async -> Void = {},
+             pendingEndsWrite: @escaping @Sendable (Data, URL) throws -> Void = CollabPendingEnds.writeAtomically) async throws {
             CollabBackend.reset()
             let config = URLSessionConfiguration.ephemeral
             config.protocolClasses = [CollabBackend.self]
@@ -924,7 +965,7 @@ import Testing
                                     session: http, endRetrySleep: { [retryDelays] delay in
                 retryDelays.update { $0.append(delay) }
                 await waitOnRetry()
-            })
+            }, pendingEndsWrite: pendingEndsWrite)
             captions = LiveCaptions(now: { [clock] in clock.get })
             session = CollabSession(account: account, title: "Test", now: { [clock] in clock.get }, llmSnapshot: { [llm, providerRanOnMain] in
                 { providerRanOnMain.set(Thread.isMainThread); return .ready(llm) }

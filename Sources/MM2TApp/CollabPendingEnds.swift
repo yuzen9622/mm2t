@@ -16,11 +16,17 @@ final class CollabPendingEnds {
     private var pending: Set<Room> = []
     private var unpersisted: Set<Room> = []
     var hasUnpersistedClosures: Bool { !unpersisted.isEmpty }
+    var unpersistedRoomIDs: Set<String> { Set(unpersisted.map(\.id)) }
     private var draining: Set<Room> = []
     private var inFlight: Set<Room> = []
 
-    init(file: URL, sleep: @escaping @Sendable (Duration) async throws -> Void) {
-        store = FileStore(file: file)
+    nonisolated static func writeAtomically(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+    }
+
+    init(file: URL, sleep: @escaping @Sendable (Duration) async throws -> Void,
+         write: @escaping @Sendable (Data, URL) throws -> Void = CollabPendingEnds.writeAtomically) {
+        store = FileStore(file: file, write: write)
         self.sleep = sleep
     }
 
@@ -96,9 +102,13 @@ final class CollabPendingEnds {
 
     private actor FileStore {
         let file: URL
+        private let write: @Sendable (Data, URL) throws -> Void
         private var unwritten: Set<Room> = []
 
-        init(file: URL) { self.file = file }
+        init(file: URL, write: @escaping @Sendable (Data, URL) throws -> Void) {
+            self.file = file
+            self.write = write
+        }
 
         func read() throws -> Set<Room> {
             do { return try JSONDecoder().decode(Set<Room>.self, from: Data(contentsOf: file)) }
@@ -114,7 +124,7 @@ final class CollabPendingEnds {
                 if let removed { rooms.remove(removed) }
                 if rooms != stored {
                     try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try JSONEncoder().encode(rooms).write(to: file, options: .atomic)
+                    try write(JSONEncoder().encode(rooms), file)
                 }
                 let saved = unwritten
                 unwritten.removeAll()
