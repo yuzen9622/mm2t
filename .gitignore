@@ -27,3 +27,4 @@ promo/
 
 # Local evaluation data, scripts, and reports
 /Evaluation/
+/.artifacts/
