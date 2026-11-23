@@ -1,20 +1,22 @@
 import type { Metadata } from "next";
 import type { Locale } from "./messages";
-import { guidePages, sitePath, type GuidePage } from "./guide";
+import { guidePages, policyPages, sitePath, type SitePage } from "./guide";
 
-export function siteMetadata(locale: Locale, page?: GuidePage): Metadata {
+export function siteMetadata(locale: Locale, page?: SitePage): Metadata {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   const en = locale === "en";
-  const guide = page && guidePages[page];
-  const title = guide ? (en ? guide.en : guide.label) + " · mm2t" : en
+  const pages = { ...guidePages, ...policyPages };
+  const details = page && pages[page];
+  const title = details ? ("heading" in details ? details.heading[locale] : en ? details.en : details.label) + " · mm2t" : en
     ? "mm2t — Meeting notes for Mac that know who spoke"
     : "mm2t — Mac 會議記錄，認得每位說話者";
-  const description = guide ? (en ? guide.enDescription : guide.description) : en
+  const description = details ? (en ? details.enDescription : details.description) : en
     ? "mm2t records your microphone and meeting audio with no bot in the call, tells the speakers apart on your Mac, and writes the transcript and summary. Free and open source for macOS 14.2 or later."
     : "mm2t 直接錄下麥克風與會議 App 的聲音，不需要機器人進會議，在 Mac 上分出說話者，整理成逐字稿與摘要。免費開源，支援 macOS 14.2 以上。";
   return {
     title,
     description,
+    ...(page && Object.hasOwn(policyPages, page) ? { robots: { index: false } } : {}),
     ...(siteUrl
       ? {
           metadataBase: new URL(siteUrl),

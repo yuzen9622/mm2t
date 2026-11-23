@@ -10,7 +10,7 @@ import {
   SheetDescription,
   SheetClose,
 } from "@/components/ui/sheet";
-import { guidePageKeys, guidePages, sitePath, type GuidePage } from "@/lib/guide";
+import { guidePageKeys, guidePages, sitePath, type SitePage } from "@/lib/guide";
 import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
@@ -51,7 +51,7 @@ function useGroundUnderHeader() {
   return ground;
 }
 
-export function Header({ page }: { page?: GuidePage }) {
+export function Header({ page }: { page?: SitePage }) {
   const { t, locale } = useCopy();
   const links = [
     { label: "首頁", href: sitePath(locale) },

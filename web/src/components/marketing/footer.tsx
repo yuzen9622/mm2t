@@ -1,19 +1,13 @@
 "use client";
 import { useCopy } from "@/components/i18n";
 import { Icon } from "@/components/icon";
-import { sitePath } from "@/lib/guide";
+import { FooterLinks } from "./footer-links";
 import { cn } from "@/lib/utils";
 import { Brand, DownloadButton, REPO, wrap } from "./shared";
 
 /** The close and the footer as one dark screen: the ask, then the links and the legal row. */
 export function Footer() {
-  const { t, locale } = useCopy();
-  const links = [
-    { label: "隱私權政策", href: `${REPO}/blob/main/PRIVACY.md` },
-    { label: "使用條款", href: `${REPO}/blob/main/TERMS.md` },
-    { label: "版本紀錄", href: sitePath(locale, "changelog") },
-    { label: "原始碼", href: REPO },
-  ];
+  const { t } = useCopy();
   return (
     <footer
       id="download"
@@ -44,19 +38,7 @@ export function Footer() {
         </div>
         <div className="mt-auto flex flex-wrap items-center gap-x-8 gap-y-2 pt-16">
           <Brand tone="stage" />
-          <nav aria-label={t("頁尾連結")} className="flex flex-wrap gap-x-6 lg:ml-6">
-            {links.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                target={link.href.startsWith("/") ? undefined : "_blank"}
-                rel={link.href.startsWith("/") ? undefined : "noreferrer"}
-                className="link-draw inline-flex min-h-11 items-center text-sm text-stage-muted hover:text-stage-ink"
-              >
-                {t(link.label)}
-              </a>
-            ))}
-          </nav>
+          <FooterLinks tone="stage" />
           <span className="text-sm text-stage-muted lg:ml-auto">
             © {new Date().getFullYear()} mm2t · AGPL-3.0
           </span>

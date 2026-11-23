@@ -5,7 +5,8 @@ import { guidePages, type GuidePage } from "@/lib/guide";
 import type { Locale } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { Header } from "./header";
-import { Brand, wrap } from "./shared";
+import { CompactFooter } from "./footer-links";
+import { wrap } from "./shared";
 
 export function Guide({ locale, page, children }: { locale: Locale; page: GuidePage; children: ReactNode }) {
   return (
@@ -15,10 +16,7 @@ export function Guide({ locale, page, children }: { locale: Locale; page: GuideP
         <GuideIntro page={page} />
         {children}
       </main>
-      <footer className={cn(wrap, "flex items-center justify-between gap-4 border-t border-border py-6")}>
-        <Brand />
-        <span className="text-xs text-muted-foreground">mm2t · AGPL-3.0</span>
-      </footer>
+      <CompactFooter />
     </LanguageProvider>
   );
 }

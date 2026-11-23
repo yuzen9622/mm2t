@@ -174,7 +174,6 @@ export const english: Record<string, string> = {
   "API 金鑰存在 macOS 鑰匙圈": "API keys are kept in the macOS Keychain",
   "聲紋辨識在 Mac 本機完成": "Speaker recognition runs on your Mac",
   "不錄螢幕，視窗也不會出現在螢幕分享": "No screen recording, and its windows stay out of screen shares",
-  閱讀隱私權政策: "Read the privacy policy",
 
   // FAQ
   "安裝步驟、支援的服務與每項設定，都寫在 GitHub 的使用文件。":
@@ -205,8 +204,6 @@ export const english: Record<string, string> = {
   "交給 mm2t 記錄": "noted by mm2t",
   "在 GitHub 查看原始碼": "View the source on GitHub",
   頁尾連結: "Footer links",
-  隱私權政策: "Privacy policy",
-  使用條款: "Terms of use",
   版本紀錄: "Changelog",
   原始碼: "Source code",
 

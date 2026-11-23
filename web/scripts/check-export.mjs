@@ -7,6 +7,16 @@ import ts from "typescript";
 const root = fileURLToPath(new URL("../out/", import.meta.url));
 const changelogSource = fs.readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8");
 const guidePages = ["models", "pricing", "changelog"];
+const policyPages = {
+  terms: { "zh-Hant": "雲端服務條款", en: "Terms for Cloud Services", sections: 16, required: ["app", "account", "cloud-access", "resale-and-redistribution", "acceptable-use", "enforcement-and-remedies", "plans", "subscriptions-and-payment", "cancellation-and-refunds", "liability"] },
+  privacy: { "zh-Hant": "雲端服務隱私權政策", en: "Privacy Policy for Cloud Services", sections: 12, required: ["account-and-billing", "cloud-processing", "sharing", "deleting-data", "rights", "security", "contact"] },
+  refunds: { "zh-Hant": "雲端服務退款政策", en: "Refund Policy for Cloud Services", sections: 7, required: ["transactions", "cancellation", "requesting-a-refund", "refund-processing", "consumer-rights"] },
+};
+const policyPaths = Object.keys(policyPages);
+const chapterIdsByPage = new Map();
+const revisionByPage = new Map();
+const policyLink = /^(?:\/en)?\/(?:terms|privacy|refunds)\/$/;
+const linksIn = (html) => [...html.matchAll(/<a\b[^>]*\bhref="([^"]+)"[^>]*>/g)];
 for (const [route, lang] of [
   ["index.html", "zh-Hant"],
   ["en/index.html", "en"],
@@ -16,6 +26,7 @@ for (const [route, lang] of [
   ["en/pricing/index.html", "en"],
   ["changelog/index.html", "zh-Hant"],
   ["en/changelog/index.html", "en"],
+  ...policyPaths.flatMap(page => [[`${page}/index.html`, "zh-Hant"], [`en/${page}/index.html`, "en"]]),
 ]) {
   const html = fs.readFileSync(path.join(root, route), "utf8");
   assert.match(html, /<svg\b[^>]*\btabler-icon\b/, `${route}: missing Tabler React icons`);
@@ -50,21 +61,90 @@ for (const [route, lang] of [
     html.includes("https://github.com/yuzen9622/mm2t/releases/latest"),
     "Download must reach the official release",
   );
-  assert(
-    html.includes("data-enter") && html.includes("m-enter"),
-    "The hero entrance must be gated by the m-enter head script",
-  );
   const page = route.split("/").at(-2);
   const guide = guidePages.includes(page);
+  const policy = policyPages[page];
+  if (!policy) {
+    assert(
+      html.includes("data-enter") && html.includes("m-enter"),
+      "The hero entrance must be gated by the m-enter head script",
+    );
+  }
   const localRoot = lang === "en" ? "/en/" : "/";
   const otherRoot = lang === "en" ? "/" : "/en/";
   for (const name of guidePages)
     assert(html.includes(`href="${localRoot}${name}/"`), `${route}: missing ${name} navigation`);
+  const header = html.match(/<header\b[^>]*>[\s\S]*?<\/header>/)?.[0] ?? "";
+  const switchHref = `${otherRoot}${guide || policy ? page + "/" : ""}`;
   assert(
-    html.includes(`href="${otherRoot}${guide ? page + "/" : ""}"`),
+    linksIn(header).some(([tag, href]) => href === switchHref && /\bhrefLang=/i.test(tag)),
     `${route}: missing language switch`,
   );
-  if (!guide) {
+
+  const footer = html.match(/<footer\b[^>]*>[\s\S]*?<\/footer>/)?.[0] ?? "";
+  const footerPolicies = linksIn(footer).filter(([, href]) => policyLink.test(href));
+  assert.deepEqual(
+    footerPolicies.map(([, href]) => href),
+    policyPaths.map(name => `${localRoot}${name}/`),
+    `${route}: expected three local policy links in footer order`,
+  );
+  assert(footerPolicies.every(([tag]) => !/\btarget=/.test(tag)), `${route}: policy links must open in the same tab`);
+  const outsideFooter = linksIn(html.replace(footer, "")).filter(([, href]) => policyLink.test(href));
+  assert.deepEqual(
+    outsideFooter.map(([, href]) => href),
+    policy ? [switchHref] : [],
+    `${route}: policy navigation must stay in the footer except for the same-document language switch`,
+  );
+  assert(
+    linksIn(html).every(([, href]) => !/(?:TERMS|PRIVACY)\.md(?:$|[?#])/.test(href)),
+    `${route}: old policy document link`,
+  );
+
+  if (policy) {
+    assert(html.includes(`<title>${policy[lang]} · mm2t</title>`), `${route}: incorrect policy title`);
+    assert(html.includes(`>${policy[lang]}</h1>`), `${route}: incorrect policy heading`);
+    const description = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
+    assert(description, `${route}: missing policy description`);
+    assert.match(html, /<meta name="robots" content="noindex"/, `${route}: draft must not be indexed`);
+    const main = html.match(/<main\b[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";
+    assert.equal([...main.matchAll(/data-policy-status="draft"/g)].length, 1, `${route}: expected one draft status`);
+    assert(main.includes(lang === "en" ? ">Draft</dd>" : ">草稿</dd>"), `${route}: missing localized draft status`);
+    const date = main.match(/<time dateTime="(\d{4}-\d{2}-\d{2})"/)?.[1];
+    assert(date && main.includes(lang === "en" ? ">Revision date</dt>" : ">修訂日期</dt>"), `${route}: missing revision date`);
+    if (revisionByPage.has(page)) assert.equal(date, revisionByPage.get(page), `${route}: inconsistent revision date`);
+    revisionByPage.set(page, date);
+
+    const copy = main.replace(/<[^>]+>/g, " ");
+    const cloudServices = lang === "en" ? /cloud services/i : /雲端服務/;
+    assert.match(copy, cloudServices, `${route}: missing cloud services scope`);
+    assert.match(description, cloudServices, `${route}: missing cloud services description`);
+    assert.doesNotMatch(copy + description, /託管|自架|本機|自備金鑰|聲紋|網站|\b(?:hosted|byok|on-device|open.source|agpl|sparkle|github|website|voiceprints?)\b|macOS/i, `${route}: policy includes material outside cloud services`);
+    const contactLinks = linksIn(main).filter(([, href]) => href.startsWith("mailto:"));
+    assert.deepEqual(contactLinks.map(([, href]) => href), ["mailto:oscar48079@gmail.com"], `${route}: missing approved support email`);
+    assert.doesNotMatch(copy, /但書|除非|尚待|待確認|未經確認|未涵蓋|沒有自己的伺服器|沒有帳號系統|原始碼|\b(?:unless|however|except|pending confirmation|source code|endpoint)\b|no servers of its own|no account system|paid cloud services fall outside/i, `${route}: exception, implementation detail, or superseded policy text`);
+
+    const chapters = [...html.matchAll(/<h2 id="([^"]+)"/g)].map(([, id]) => id);
+    assert.equal(chapters.length, policy.sections, `${route}: incorrect chapter count`);
+    for (const id of policy.required) assert(chapters.includes(id), `${route}: missing required chapter #${id}`);
+    assert.equal(new Set(chapters).size, chapters.length, `${route}: duplicate chapter anchors`);
+    if (chapterIdsByPage.has(page)) {
+      assert.deepEqual(chapters, chapterIdsByPage.get(page), `${route}: chapter anchors changed between languages`);
+    }
+    chapterIdsByPage.set(page, chapters);
+
+    const contentsLinks = linksIn(main).map(([, href]) => href).filter(href => chapters.includes(href.slice(1)));
+    const chapterLinks = chapters.map(id => `#${id}`);
+    assert.deepEqual(contentsLinks, [...chapterLinks, ...chapterLinks], `${route}: missing desktop or mobile contents links`);
+
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    if (siteUrl) {
+      assert(html.includes(`rel="canonical" href="${new URL(`${localRoot}${page}/`, siteUrl)}"`), `${route}: incorrect canonical`);
+      for (const [language, prefix] of [["zh-Hant", "/"], ["en", "/en/"], ["x-default", "/"]]) {
+        const href = new URL(`${prefix}${page}/`, siteUrl);
+        assert(html.includes(`rel="alternate" hrefLang="${language}" href="${href}"`), `${route}: incorrect ${language} alternate`);
+      }
+    }
+  } else if (!guide) {
     assert.equal([...html.matchAll(/data-product-scene="/g)].length, 1, "Expected one product scene");
   } else if (page === "pricing") {
     const pricing = html.replaceAll("<!-- -->", "");
