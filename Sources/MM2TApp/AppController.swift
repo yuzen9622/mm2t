@@ -175,34 +175,47 @@ public final class AppController {
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let mic = directory.appending(path: RecordingManifest.micFile)
                 let remote = directory.appending(path: RecordingManifest.remoteFile)
-                guard current.transcriptionService != .mm2t, current.summaryService != .mm2t else { return nil }
-                guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
-                      let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
-                let pipeline: MeetingProcessingPipeline
-                if let gemini = configured.llm as? GeminiLLM {
-                    pipeline = configured.withLLM(gemini.forRecording())
-                } else if let compatible = configured.llm as? OpenAICompatibleLLM {
-                    pipeline = configured.withLLM(compatible.forRecording())
-                } else { pipeline = configured }
-                let credentialKinds: [Credential] = [
-                    current.transcriptionService == .elevenLabs ? .elevenLabsAPIKey : .selfHostedToken,
-                    current.summaryService == .gemini ? .geminiAPIKey : .openAICompatibleAPIKey,
-                ]
+                guard current.transcriptionService != .mm2t else { return nil }
+                let pipeline: MeetingProcessingPipeline?
+                if case .ready(let configured)? = try? pipelineSetup.build(current, accountURL: accountURL) {
+                    if let gemini = configured.llm as? GeminiLLM {
+                        pipeline = configured.withLLM(gemini.forRecording())
+                    } else if current.summaryService == .openAICompatible, let compatible = configured.llm as? OpenAICompatibleLLM {
+                        pipeline = configured.withLLM(compatible.forRecording())
+                    } else { pipeline = configured }
+                } else { pipeline = nil }
+                let transcription: TranscriptionChain
+                if let pipeline {
+                    transcription = pipeline.transcription
+                } else {
+                    guard let route = try? pipelineSetup.transcriptionRoute(current, accountURL: nil) else { return nil }
+                    transcription = TranscriptionChain([route])
+                }
+                guard let chain = LiveTranscriber.recordingChain(transcription) else { return nil }
+                let transcriptionCredential: Credential = current.transcriptionService == .elevenLabs ? .elevenLabsAPIKey : .selfHostedToken
+                let summaryCredential: Credential = switch current.summaryService {
+                case .gemini: .geminiAPIKey
+                case .openAICompatible: .openAICompatibleAPIKey
+                case .mm2t: .collabAccount
+                }
+                let credentialKinds = pipeline == nil ? [transcriptionCredential] : [transcriptionCredential, summaryCredential]
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
                     settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
                 let processing: LiveRecordingProcessor?
-                if let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
+                let diarizer = pipeline?.diarizer ?? catalog.localSpeakerModels()?.diarizer
+                if let factory = diarizer as? any StreamingDiarizerFactory,
                    let session = try? await factory.makeStreamingSession() {
                     processing = LiveRecordingProcessor(pipeline: pipeline, session: session,
-                        scratch: scratch.appending(path: "speakers"), configurationIsCurrent: configurationIsCurrent)
+                        scratch: scratch.appending(path: "speakers"), checkpointsEnabled: current.summaryService != .mm2t,
+                        configurationIsCurrent: configurationIsCurrent)
                 } else { processing = nil }
                 let names = await voiceprints.spokenNames()
                 guard configurationIsCurrent(), !Task.isCancelled else { await processing?.discard(); return nil }
                 return LiveTranscriber(
                     mic: mic, remote: remote,
-                    chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
+                    chain: chain, hints: names + current.vocabulary.filter { !names.contains($0) },
                     scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
             },
             makeCollaboration: { title in

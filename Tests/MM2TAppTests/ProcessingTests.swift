@@ -76,6 +76,49 @@ import Testing
         #expect(world.catalog.keysUsed.get == ["hosted-stt:test-bearer"])
     }
 
+    @Test(arguments: [TranscriptionService.elevenLabs, .server, .mm2t])
+    func hostedSummariesDoNotPreventOwnTranscriptionDuringRecording(source: TranscriptionService) async throws {
+        let api = URL(string: "https://collab.example")!
+        let world = try World(collabConfiguration: .init(apiURL: api, webURL: api))
+        try world.credentials.save(Secret(#"{"apiURL":"https://collab.example","tokens":{"accessToken":"plan-token","refreshToken":"refresh"}}"#), for: .collabAccount)
+        world.catalog.selfHosted.behavior.set(.words)
+        let diarizer = RecordingTestDiarizer()
+        world.catalog.recordingDiarizer.set(diarizer)
+        world.app.settings.settings.transcriptionService = source
+        world.app.settings.settings.summaryService = .mm2t
+        world.app.settings.settings.selfHostedURL = URL(string: "https://speech.example")
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "預算會議", platform: .zoom))
+        let directory = try #require(world.recorder.last?.configuration.directory)
+        let samples = (0..<(16_000 * 65)).map { Int16($0 % 32 < 16 ? 2200 : -2200) }
+        try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: samples), to: directory.appending(path: RecordingManifest.micFile))
+        try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: Array(repeating: 0, count: samples.count)),
+                            to: directory.appending(path: RecordingManifest.remoteFile))
+        var progress: LiveProcessingProgress?
+        let deadline = ContinuousClock.now + .seconds(source == .mm2t ? 3 : 8)
+        repeat {
+            try await Task.sleep(for: .milliseconds(50))
+            progress = await world.capture.liveProgress()
+        } while (progress?.diarizedSeconds ?? 0) < 30 && ContinuousClock.now < deadline
+        switch source {
+        case .elevenLabs:
+            #expect(!world.catalog.cloud.calls.get.isEmpty)
+            #expect(world.catalog.selfHosted.calls.get.isEmpty)
+        case .server:
+            #expect(!world.catalog.selfHosted.calls.get.isEmpty)
+            #expect(world.catalog.cloud.calls.get.isEmpty)
+        case .mm2t:
+            #expect(world.catalog.selfHosted.calls.get.isEmpty)
+            #expect(progress == nil)
+        }
+        if source != .mm2t {
+            #expect((progress?.transcribedSeconds ?? 0) >= 30)
+            #expect((progress?.diarizedSeconds ?? 0) >= 30)
+        }
+        #expect(await diarizer.session.checkpoints == 0)
+        #expect(world.catalog.llm.calls.get.isEmpty)
+        await world.capture.stop()
+    }
+
     @Test func speakersAreToldApartOnThisMacEvenWhenOldSettingsPreferredTheServicesLabels() async throws {
         let world = try World()
         let old = Data(#"{"transcriptionOrder":["cloud"],"diarizationOrder":["transcription","local"]}"#.utf8)
@@ -231,4 +274,26 @@ func silentTrack(in directory: URL, _ name: String, seconds: Int = 1) throws -> 
     writer.appendSilence(frames: 16_000 * seconds)
     try writer.close()
     return url
+}
+
+private struct RecordingTestDiarizer: Diarizer, StreamingDiarizerFactory {
+    let session = RecordingTestDiarizationSession()
+    func diarize(track: URL) async throws -> Diarization { Script.diarization }
+    func makeStreamingSession() async throws -> any StreamingDiarizationSession { session }
+}
+
+private actor RecordingTestDiarizationSession: StreamingDiarizationSession {
+    private var seconds: [Track: TimeInterval] = [:]
+    private(set) var checkpoints = 0
+
+    func append(samples: [Float], track: Track) async throws {
+        seconds[track, default: 0] += Double(samples.count) / 16_000
+    }
+
+    func processedSeconds() async -> [Track: TimeInterval] { seconds }
+
+    func snapshot(tracks: [Track: URL], final: Bool) async throws -> StreamingDiarizationSnapshot {
+        if !final { checkpoints += 1 }
+        return .init(diarizations: [.me: Script.diarization, .remote: Script.diarization], processedSeconds: seconds)
+    }
 }

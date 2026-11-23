@@ -133,7 +133,7 @@ public struct PipelineSetup: Sendable {
             runsConcurrently: true, transcribesConcurrently: true, micCleaner: EchoRemover()))
     }
 
-    private func transcriptionRoute(_ settings: AppSettings, accountURL: URL?) throws -> TranscriptionChain.Route? {
+    func transcriptionRoute(_ settings: AppSettings, accountURL: URL?) throws -> TranscriptionChain.Route? {
         let language = settings.transcriptionLanguage
         switch settings.transcriptionService {
         case .elevenLabs:

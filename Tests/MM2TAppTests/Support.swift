@@ -292,6 +292,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let cloud = FakeSTT()
     let llm = FakeLLM()
     let diarizer = ScriptedDiarizer()
+    let recordingDiarizer = Box<(any Diarizer)?>(nil)
     let modelsDownloaded = Box(true)
     let onDeviceSTT = FakeSTT()
     let offlineDownloaded: [OfflineModel: Box<Bool>] = Dictionary(uniqueKeysWithValues: OfflineModel.allCases.map { ($0, Box(false)) })
@@ -340,7 +341,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     }
 
     func localSpeakerModels() -> LocalSpeakerModels? {
-        modelsDownloaded.get ? LocalSpeakerModels(diarizer: diarizer, embedder: ScriptedEmbedder()) : nil
+        modelsDownloaded.get ? LocalSpeakerModels(diarizer: recordingDiarizer.get ?? diarizer, embedder: ScriptedEmbedder()) : nil
     }
 
     func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)? {

@@ -28,7 +28,8 @@ public struct LiveProcessingProgress: Sendable {
 /// Failed speculation cannot mark a meeting complete: the ordinary pipeline remains the fallback.
 public actor LiveRecordingProcessor {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
-    public let pipeline: MeetingProcessingPipeline
+    public let pipeline: MeetingProcessingPipeline?
+    private let checkpointsEnabled: Bool
     private let session: any StreamingDiarizationSession
     private let scratch: URL
     private let configurationIsCurrent: @MainActor @Sendable () -> Bool
@@ -52,9 +53,11 @@ public actor LiveRecordingProcessor {
     private var checkpointAudioSeconds: TimeInterval = 0
     private var diarizedSeconds: TimeInterval = 0
 
-    public init(pipeline: MeetingProcessingPipeline, session: any StreamingDiarizationSession, scratch: URL,
+    public init(pipeline: MeetingProcessingPipeline?, session: any StreamingDiarizationSession, scratch: URL,
+                checkpointsEnabled: Bool = true,
                 configurationIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) {
         self.pipeline = pipeline
+        self.checkpointsEnabled = checkpointsEnabled
         self.session = session
         self.scratch = scratch
         self.configurationIsCurrent = configurationIsCurrent
@@ -101,7 +104,7 @@ public actor LiveRecordingProcessor {
 
     public func checkpoint(_ transcription: Transcription, manifest: RecordingManifest) async {
         let seconds = Double(frames) / 16_000
-        guard !failed, !isFinishing, !checkpointsStopped, seconds - lastSuccessfulInputSeconds >= 30 else { return }
+        guard checkpointsEnabled, pipeline != nil, !failed, !isFinishing, !checkpointsStopped, seconds - lastSuccessfulInputSeconds >= 30 else { return }
         // A slow LLM must not lose the newest prefix when recording pauses or no further
         // piece arrives. Retain one latest request, rather than a queue of obsolete drafts.
         pendingCheckpoint = CheckpointRequest(transcription: transcription, manifest: manifest, seconds: seconds)
@@ -111,7 +114,7 @@ public actor LiveRecordingProcessor {
     }
 
     private func startNextCheckpoint() async {
-        guard !failed, !isFinishing, !checkpointsStopped, let request = pendingCheckpoint else {
+        guard let pipeline, !failed, !isFinishing, !checkpointsStopped, let request = pendingCheckpoint else {
             pendingCheckpoint = nil
             checkpointInProgress = false
             return
@@ -140,7 +143,6 @@ public actor LiveRecordingProcessor {
                 echo: echo, metadata: metadata, highlights: manifest.highlights.map(Highlight.init(time:)))
             guard await canCheckpoint() else { checkpointInProgress = false; return }
             let preparedThrough = draft.utterances.map(\.range.end).max() ?? 0
-            let pipeline = self.pipeline
             checkpointTask = Task {
                 guard await self.canCheckpoint() else {
                     self.checkpointTask = nil
@@ -218,7 +220,7 @@ public actor LiveRecordingProcessor {
 
     /// Returns false when the ordinary full-audio separation must run instead.
     public func attach(_ transcription: Transcription, to id: MeetingID) async throws -> Bool {
-        guard !failed, let finalSnapshot else { return false }
+        guard let pipeline, !failed, let finalSnapshot else { return false }
         try await pipeline.attachRecording(transcription, diarizations: finalSnapshot.diarizations, echo: echo, to: id)
         return true
     }
