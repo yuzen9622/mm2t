@@ -701,6 +701,35 @@ import Testing
         }
     }
 
+    @Test func retryResumesTheForegroundCommandAfterARejectedBackgroundReplay() async throws {
+        let f = try await Fixture()
+        try await f.makeRoom()
+        let document = try #require(CollabBackend.document.get)
+        let ops: [CollabOp] = [.replaceText(id: document.id, field: .markdown, text: "更新"), .done(id: document.id)]
+        f.llm.answerChunks.set([try ops.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")])
+        CollabBackend.doneBodies.set([])
+        CollabBackend.doneRejection.set(503)
+        f.clock.update { $0.addTimeInterval(100) }
+        f.captions.receive(.final(String(repeating: "甲", count: 200)))
+        await f.session.waitForWork()
+        let before = f.llm.answerInputs.get.count
+        let batch = try #require(CollabBackend.doneBodies.get.first)
+
+        f.session.run(command: "接續指令")
+        await f.session.waitForWork()
+        #expect(f.session.commandStatus == .failed(.service(.server(status: 503))))
+        #expect(f.llm.answerInputs.get.count == before)
+        let attempts = CollabBackend.doneBodies.get.count
+        #expect(CollabBackend.doneBodies.get == Array(repeating: batch, count: 6))
+
+        CollabBackend.doneRejection.set(nil)
+        f.session.retry()
+        await f.session.waitForWork()
+        #expect(CollabBackend.doneBodies.get.dropFirst(attempts).first == batch)
+        #expect(f.llm.answerInputs.get.count == before + 1)
+        #expect(f.llm.answerInputs.get.last?.contains("接續指令") == true)
+    }
+
     @Test(arguments: [false, true])
     func nextTriggerReplaysBackgroundBatchBeforeGenerating(foreground: Bool) async throws {
         let f = try await Fixture()

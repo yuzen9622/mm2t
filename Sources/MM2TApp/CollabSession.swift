@@ -150,6 +150,7 @@ public final class CollabSession {
     public func retry() {
         if pendingCleanup != nil {
             cleanupRequested = true
+            if pendingCommand != nil { commandStatus = .building(nil) }
             pump()
             return
         }
@@ -345,8 +346,8 @@ public final class CollabSession {
     private func pump() {
         guard work == nil, draining == nil, state != .ended, !account.signingOut else { return }
         if let cleanup = pendingCleanup {
-            let captionTriggered = cleanup.isBackground && needsCaptions && commandStatus != .input
-            let commandTriggered = cleanup.isBackground && pendingCommand != nil
+            let captionTriggered = cleanup.isBackground && needsCaptions && commandStatus != .input && pendingCommand == nil
+            let commandTriggered = cleanup.isBackground && pendingCommand != nil && commandStatus == .building(nil)
             let automatic = captionTriggered && !commandTriggered && !cleanupRequested
             guard cleanupRequested || captionTriggered || commandTriggered,
                   room == cleanup.room, account.user?.id == cleanup.owner else { return }
@@ -373,7 +374,7 @@ public final class CollabSession {
                     if automatic, !rejected, session.pendingCommand == nil {
                         Self.logger.debug("Could not replay a collaboration update")
                     } else {
-                        session.fail(error)
+                        session.fail(error, preservingPendingCommand: cleanup.isBackground && !rejected)
                     }
                 } catch {}
             }
@@ -412,8 +413,8 @@ public final class CollabSession {
         }
     }
 
-    private func fail(_ error: any Error) {
-        pendingCommand = nil
+    private func fail(_ error: any Error, preservingPendingCommand: Bool = false) {
+        if !preservingPendingCommand { pendingCommand = nil }
         let failure: Failure
         if let error = error as? CollabError { failure = .service(error) }
         else if case CollabModelWork.Failure.modelNotConfigured = error { failure = .modelNotConfigured }
