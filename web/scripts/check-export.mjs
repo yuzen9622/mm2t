@@ -69,16 +69,23 @@ for (const [route, lang] of [
   } else if (page === "pricing") {
     const pricing = html.replaceAll("<!-- -->", "");
     assert(pricing.includes("<table"), `${route}: missing plan comparison`);
-    for (const fee of ["NT$0", "NT$199", "NT$299", "NT$449", "NT$499"])
-      assert(pricing.includes(fee), `${route}: missing price ${fee}`);
+    const english = lang === "en";
+    const currency = english ? "USD" : "TWD";
+    const expected = english
+      ? [["Free", "0"], ["Standard", "9", "7.5"], ["Pro", "21", "18"]]
+      : [["Free", "0"], ["Standard", "299", "249"], ["Pro", "699", "599"]];
     const cards = [...pricing.matchAll(/<article\b[^>]*>[\s\S]*?<\/article>/g)];
-    const standardCard = cards.find(([card]) => card.includes(">Standard</h2>"))?.[0] ?? "";
-    assert(/<strong\b[^>]*>NT\$199<\/strong>/.test(standardCard) && standardCard.includes("<s>NT$299</s>"),
-      `${route}: Standard must emphasize the introductory price and strike the regular price`);
-    const proCard = cards.find(([card]) => card.includes(">Pro</h2>"))?.[0] ?? "";
-    assert(proCard.includes("NT$499") && proCard.includes(lang === "en" ? "40 hours" : "40 小時"), `${route}: incorrect Pro price or allowance`);
-    assert(/<strong\b[^>]*>NT\$449<\/strong>/.test(proCard) && proCard.includes("<s>NT$499</s>"),
-      `${route}: Pro must emphasize the introductory price and strike the regular price`);
+    const table = pricing.match(/<table\b[^>]*>[\s\S]*?<\/table>/)?.[0] ?? "";
+    for (const [name, regular, intro] of expected) {
+      const card = cards.find(([content]) => content.includes(`>${name}</h2>`))?.[0] ?? "";
+      const headline = card.match(/<strong\b[^>]*>([^<]*)<\/strong>/)?.[1];
+      assert.equal(headline, `${currency} ${intro ?? regular}`, `${route}: incorrect ${name} headline price`);
+      assert(table.includes(`${currency} ${regular}`), `${route}: missing ${name} comparison price`);
+      if (intro) {
+        assert(card.includes(`<s>${currency} ${regular}</s>`), `${route}: incorrect ${name} regular price`);
+      }
+      if (name === "Pro") assert(card.includes(english ? "40 hours" : "40 小時"), `${route}: incorrect Pro allowance`);
+    }
   } else if (page === "changelog") {
     const articles = [...html.matchAll(/<article id="release-([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)];
     const sections = changelogSource.split(/^## (?=\[)/m).slice(1);

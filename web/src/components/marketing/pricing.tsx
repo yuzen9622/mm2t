@@ -6,15 +6,15 @@ import { cn } from "@/lib/utils";
 import { wrap } from "./shared";
 
 const plans = [
-  { name: "Free", storedMeetings: null, fee: 0, firstMonthFee: null, minutes: 120, sessionMinutes: 30, ai: 30,
+  { name: "Free", storedMeetings: null, fee: { zh: 0, en: 0 }, firstMonthFee: null, minutes: 120, sessionMinutes: 30, ai: 30,
     headline: "偶爾開會，會後整理重點",
     features: ["基礎模型轉錄，逐字稿標示每位說話者", "回放原音核對細節", "從會議摘要找回決議"],
   },
-  { name: "Standard", storedMeetings: 200, fee: 299, firstMonthFee: 199, minutes: 900, sessionMinutes: 120, ai: "unlimited",
+  { name: "Standard", storedMeetings: 200, fee: { zh: 299, en: 9 }, firstMonthFee: { zh: 249, en: 7.5 }, minutes: 900, sessionMinutes: 120, ai: "unlimited",
     headline: "每週例會，開會當下就跟上討論",
     features: ["進階模型提供更好的轉錄品質", "更快的轉錄速度", "邊聽邊看即時字幕", "用即時翻譯跟上外語發言", "會後不限次數向 AI 追問"],
   },
-  { name: "Pro", storedMeetings: 1000, fee: 499, firstMonthFee: 449, minutes: 2400, sessionMinutes: 200, ai: "unlimited",
+  { name: "Pro", storedMeetings: 1000, fee: { zh: 699, en: 21 }, firstMonthFee: { zh: 599, en: 18 }, minutes: 2400, sessionMinutes: 200, ai: "unlimited",
     headline: "長時間訪談，留足整月的處理時數",
     features: ["使用與 Standard 相同的進階轉錄模型", "更快的轉錄速度", "包含 Standard 的所有即時功能", "會後不限次數改寫訪談紀錄"],
   },
@@ -48,7 +48,9 @@ function GroupTitle({ children }: { children: ReactNode }) {
 }
 
 export function Pricing() {
-  const { t } = useCopy();
+  const { t, locale } = useCopy();
+  const price = (fee: Record<typeof locale, number>) =>
+    `${locale === "en" ? "USD" : "TWD"} ${fee[locale]}`;
   const minutes = (plan: Plan) => plan.minutes + " " + t("分鐘");
   const comparisonDuration = (totalMinutes: number) => {
     if (totalMinutes % 30 === 0) return `${totalMinutes / 60} ${t("小時")}`;
@@ -79,19 +81,19 @@ export function Pricing() {
                   <>
                     <p className="mb-2 text-base font-semibold text-primary">{t("首次訂購・首月優惠")}</p>
                     <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <strong className="text-5xl leading-none font-semibold tracking-[-0.05em] xl:text-6xl">NT${plan.firstMonthFee}</strong>
+                      <strong className="text-5xl leading-none font-semibold tracking-[-0.05em] xl:text-6xl">{price(plan.firstMonthFee)}</strong>
                       <span className="text-lg text-stage-muted">
-                        <span className="sr-only">{t("原價")} </span><s>NT${plan.fee}</s>
+                        <span className="sr-only">{t("原價")} </span><s>{price(plan.fee)}</s>
                       </span>
                     </p>
                     <p className="mt-3 text-sm leading-relaxed text-stage-muted">
-                      {t("次月起每人每月")} NT${plan.fee}{t("（含稅）")}
+                      {t("次月起每人每月")} {price(plan.fee)}{t("（含稅）")}
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <strong className="text-4xl font-medium tracking-[-0.05em] xl:text-5xl">NT${plan.fee}</strong>
+                      <strong className="text-4xl font-medium tracking-[-0.05em] xl:text-5xl">{price(plan.fee)}</strong>
                       <span className="text-sm text-stage-muted">{t("每人每月・含稅")}</span>
                     </p>
                     {plan.name === "Free" && <p className="mt-2 text-sm leading-relaxed text-stage-muted">{t("免費額度每月重置")}</p>}
@@ -133,7 +135,7 @@ export function Pricing() {
                 {plans.map(plan => (
                   <th key={plan.name} scope="col" className={cn("border-y border-r border-white/20 bg-stage px-1 py-3 font-medium",
                     plan.name === "Pro" && "bg-secondary text-foreground")}>
-                    {plan.name}<span className="mt-1 block text-xs font-normal">NT${plan.fee}{t("／月")}</span>
+                    {plan.name}<span className="mt-1 block text-xs font-normal">{price(plan.fee)}{t("／月")}</span>
                   </th>
                 ))}
               </tr>
