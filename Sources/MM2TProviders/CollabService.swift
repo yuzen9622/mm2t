@@ -29,7 +29,64 @@ public struct CollabProfile: Decodable, Sendable {
     }
     public let user: CollabUser
     public let quota: Quota
-    public let planName: String?
+    public let plan: CollabPlan?
+
+    private enum CodingKeys: String, CodingKey { case user, quota, plan }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        user = try values.decode(CollabUser.self, forKey: .user)
+        quota = try values.decode(Quota.self, forKey: .quota)
+        plan = try? values.decodeIfPresent(CollabPlan.self, forKey: .plan)
+    }
+}
+
+public struct CollabPlan: Decodable, Sendable, Equatable {
+    public struct ScheduledChange: Decodable, Sendable, Equatable {
+        public let plan: String
+        public let at: Date
+
+        private enum CodingKeys: String, CodingKey { case plan, at }
+
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            plan = try values.decode(String.self, forKey: .plan)
+            at = try CollabPlan.date(values.decode(String.self, forKey: .at))
+        }
+    }
+
+    public let name: String
+    public let status: String
+    public let periodEnd: Date
+    public let minutesLimit: Int
+    public let usedSeconds: Int
+    public let asksLimit: Int?
+    public let asksUsed: Int
+    public let scheduledChange: ScheduledChange?
+
+    private enum CodingKeys: String, CodingKey { case name, status, period, minutes, ai, scheduledChange }
+    private struct Period: Decodable { let end: String }
+    private struct Minutes: Decodable { let limit: Int; let usedSeconds: Int }
+    private struct AI: Decodable { let asksLimit: Int?; let asksUsed: Int }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        status = try values.decode(String.self, forKey: .status)
+        periodEnd = try Self.date(values.decode(Period.self, forKey: .period).end)
+        let minutes = try values.decode(Minutes.self, forKey: .minutes)
+        minutesLimit = minutes.limit
+        usedSeconds = minutes.usedSeconds
+        let ai = try values.decode(AI.self, forKey: .ai)
+        asksLimit = ai.asksLimit
+        asksUsed = ai.asksUsed
+        scheduledChange = try values.decodeIfPresent(ScheduledChange.self, forKey: .scheduledChange)
+    }
+
+    private static func date(_ value: String) throws -> Date {
+        if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(value) { return date }
+        return try Date.ISO8601FormatStyle().parse(value)
+    }
 }
 
 public struct CollabRoom: Decodable, Equatable, Sendable {
@@ -227,6 +284,14 @@ public actor CollabService {
         guard version == generation else { throw CollabError.notSignedIn }
         signedInUser = profile.user
         return profile
+    }
+
+    public func billingHandoff() async throws -> URL {
+        struct Handoff: Decodable { let url: URL }
+        let version = generation
+        let handoff = try parse(Handoff.self, from: await authorized(Request(post: ["billing", "handoff"])))
+        guard version == generation else { throw CollabError.notSignedIn }
+        return handoff.url
     }
 
     public func createRoom(title: String, owner: String) async throws -> CollabRoom {

@@ -32,22 +32,39 @@ public struct CollabConfiguration: Sendable {
     }
 }
 
+public extension CollabPlan {
+    static func displayName(for name: String) -> String? {
+        switch name {
+        case "free": "Free"
+        case "standard": "Standard"
+        case "pro": "Pro"
+        default: nil
+        }
+    }
+
+    var usedMinutes: Int { max(0, usedSeconds / 60) }
+}
+
 @MainActor @Observable
 public final class CollabAccount {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     public private(set) var user: CollabUser? {
         didSet {
-            if user == nil { quota = nil; planName = nil }
+            if user == nil { quota = nil; plan = nil }
             if user != oldValue { onUserChanged?() }
         }
     }
     public private(set) var quota: CollabProfile.Quota?
-    public private(set) var planName: String?
+    public private(set) var plan: CollabPlan?
+    public var planName: String? { plan.flatMap { CollabPlan.displayName(for: $0.name) } }
     public var planAndQuotaLabel: String? {
-        guard let quota else { return planName }
-        if let planName {
-            return String(localized: "\(planName) · \(quota.used) / \(quota.limit) shared meetings", bundle: .main)
+        if let plan {
+            if let planName {
+                return String(localized: "\(planName) · \(plan.usedMinutes) / \(plan.minutesLimit) min", bundle: .main)
+            }
+            return String(localized: "\(plan.usedMinutes) / \(plan.minutesLimit) min", bundle: .main)
         }
+        guard let quota else { return nil }
         return String(localized: "\(quota.used) / \(quota.limit) shared meetings", bundle: .main)
     }
     public private(set) var busy = false
@@ -137,9 +154,25 @@ public final class CollabAccount {
     func completeSignIn(code: String, verifier: String) async throws {
         let verified = try await service.exchange(code: code, codeVerifier: verifier)
         quota = nil
-        planName = nil
+        plan = nil
         didSignIn(verified)
         try? await loadProfile(for: profileSession)
+    }
+
+    public func openAccountPage(open: (URL) -> Void) async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let url = try await service.billingHandoff()
+            guard configuration.accepts(url) else { throw CollabError.server(status: 0) }
+            open(url)
+        } catch CollabError.notSignedIn {
+            user = nil
+        } catch {
+            self.error = error as? CollabError ?? .unreachable
+        }
     }
 
     public func refreshProfile() async {
@@ -169,8 +202,7 @@ public final class CollabAccount {
 
     private func applyPlan(_ profile: CollabProfile) {
         quota = profile.quota
-        let name = profile.planName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        planName = name?.isEmpty == false ? name : nil
+        plan = profile.plan
     }
 
     private func didSignIn(_ verified: CollabUser) {

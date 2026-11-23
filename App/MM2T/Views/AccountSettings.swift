@@ -23,6 +23,7 @@ struct CollabAccountSettings: View {
                         .disabled(account.busy)
                 }
                 if let quota = account.quota { SharedMeetingsQuota(quota: quota) }
+                if let plan = account.plan { PlanUsage(plan: plan, account: account) }
             } else {
                 HStack(spacing: 12) {
                     AccountAvatar(name: nil, size: 40)
@@ -41,17 +42,68 @@ struct CollabAccountSettings: View {
 struct SharedMeetingsQuota: View {
     let quota: CollabProfile.Quota
 
-    private var fraction: Double {
-        guard quota.limit > 0 else { return 0 }
-        return min(1, max(0, Double(quota.used) / Double(quota.limit)))
+    var body: some View {
+        UsageBar(title: "Shared meetings this month", value: String(localized: "\(quota.used) / \(quota.limit)"),
+                 fraction: UsageBar.fraction(used: quota.used, limit: quota.limit))
+    }
+}
+
+struct PlanUsage: View {
+    let plan: CollabPlan
+    let account: CollabAccount
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            UsageBar.transcription(plan: plan)
+            if let limit = plan.asksLimit {
+                UsageBar(title: "AI questions this month", value: String(localized: "\(plan.asksUsed) / \(limit)"),
+                         fraction: UsageBar.fraction(used: plan.asksUsed, limit: limit))
+            }
+            if plan.status == "past_due" {
+                Text("Payment didn't go through.").font(Typo.caption).foregroundStyle(Palette.danger)
+            }
+            HStack {
+                changeDate.font(Typo.caption).foregroundStyle(Palette.secondary)
+                Spacer(minLength: 8)
+                PillButton("Manage Account") {
+                    Task { await account.openAccountPage { openURL($0) } }
+                }
+                .disabled(account.busy)
+            }
+        }
+    }
+
+    private var changeDate: Text {
+        if let change = plan.scheduledChange {
+            let name = CollabPlan.displayName(for: change.plan) ?? change.plan
+            return Text("Changes to \(name) on \(change.at.formatted(date: .abbreviated, time: .omitted))")
+        }
+        return Text("Resets on \(plan.periodEnd.formatted(date: .abbreviated, time: .omitted))")
+    }
+}
+
+struct UsageBar: View {
+    let title: LocalizedStringKey
+    let value: String
+    let fraction: Double
+
+    static func fraction(used: Int, limit: Int) -> Double {
+        guard limit > 0 else { return 0 }
+        return min(1, max(0, Double(used) / Double(limit)))
+    }
+
+    static func transcription(plan: CollabPlan) -> Self {
+        Self(title: "Transcription this month", value: String(localized: "\(plan.usedMinutes) / \(plan.minutesLimit) min"),
+             fraction: fraction(used: plan.usedMinutes, limit: plan.minutesLimit))
     }
 
     var body: some View {
         VStack(spacing: 6) {
             HStack {
-                Text("Shared meetings this month")
+                Text(title)
                 Spacer(minLength: 8)
-                Text("\(quota.used) / \(quota.limit)")
+                Text(verbatim: value)
                     .monospacedDigit()
                     .foregroundStyle(Palette.secondary)
                     .fixedSize()

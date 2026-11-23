@@ -12,7 +12,7 @@ struct AccountMenuButton: View {
         let user = account?.user
         let settings = app.settings.settings
         let usesPlan = settings.transcriptionService == .mm2t || settings.summaryService == .mm2t
-        let subtitle = user.map { usesPlan ? (account?.planName ?? account?.planAndQuotaLabel ?? $0.email) : $0.email } ?? settings.transcriptionService.connection.title
+        let subtitle = user.map { usesPlan ? (account?.planAndQuotaLabel ?? $0.email) : $0.email } ?? settings.transcriptionService.connection.title
         Button { open.toggle() } label: {
             HStack(spacing: 8) {
                 AccountAvatar(name: user?.name, size: 28)
@@ -40,7 +40,7 @@ struct AccountMenuButton: View {
                 if let user {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(verbatim: user.email).foregroundStyle(Palette.secondary)
-                        if let quota = account?.quota { SharedMeetingsQuota(quota: quota) }
+                        if let plan = account?.plan { UsageBar.transcription(plan: plan) }
                     }
                     .font(Typo.caption)
                     .padding(8)

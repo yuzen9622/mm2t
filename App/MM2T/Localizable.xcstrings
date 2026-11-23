@@ -1,7 +1,8 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ · %lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 已分享 %lld / %lld 場會議"}}}},
+    "%@ · %lld / %lld min": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%1$@ · %2$lld / %3$lld 分鐘"}}}},
+    "%lld / %lld min": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%1$lld / %2$lld 分鐘"}}}},
     "%lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已分享 %lld / %lld 場會議"}}}},
     "%@ · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · %lld 個模型"}}}},
     "%@ · Unavailable": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ · 無法使用"}}}},
@@ -48,6 +49,12 @@
     "Sign in to share meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "登入以分享會議"}}}},
     "Account and settings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "帳戶與設定"}}}},
     "Shared meetings this month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本月已分享的會議"}}}},
+    "Transcription this month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本月轉錄"}}}},
+    "AI questions this month": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "本月 AI 提問"}}}},
+    "Changes to %@ on %@": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%2$@ 改為 %1$@"}}}},
+    "Manage Account": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "管理帳號"}}}},
+    "Payment didn't go through.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "付款未完成。"}}}},
+    "Resets on %@": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ 重置"}}}},
     "%lld / %lld": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%lld / %lld"}}}},
     "Reviewed meeting folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "檢查會議歸檔"}}}},
     "Checked %lld meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已檢查 %lld 篇會議"}}}},

@@ -35,7 +35,9 @@ struct CollabServiceTests {
             ])
         }
         #expect(try await service.exchange(code: "one-time", codeVerifier: Self.verifier).name == "Host")
-        let quota = try await service.me().quota
+        let profile = try await service.me()
+        #expect(profile.plan == nil)
+        let quota = profile.quota
         #expect(quota.used == 3 && quota.limit == 10 && quota.period == "2026-11")
         let room = try await service.createRoom(title: "會議", owner: "u")
         #expect(room.roomId == "r" && room.shareUrl.absoluteString == "https://web.invalid/r/share" && room.hostUrl.fragment == "host=code")
@@ -71,6 +73,79 @@ struct CollabServiceTests {
         #expect(wire.ops == [.done(id: "doc")])
         #expect(calls[4].headers["Content-Type"] == "application/json")
         #expect(calls[1].body.isEmpty && calls[3].body.isEmpty && calls[5].body.isEmpty && calls[6].body.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func profileDecodesPlanForKnownAndUnknownValues(scheduled: Bool) async throws {
+        let change = scheduled ? #"{"plan":"free","at":"2026-12-01T00:00:00.125Z"}"# : "null"
+        let status = scheduled ? "future_status" : "active"
+        let name = scheduled ? "future_plan" : "pro"
+        let plan = #"{"name":"\#(name)","status":"\#(status)","period":{"start":"2026-11-01T00:00:00.000Z","end":"2026-12-01T00:00:00.000Z"},"minutes":{"limit":900,"usedSeconds":18720},"ai":{"asksLimit":null,"asksUsed":4},"storedMeetings":{"limit":200},"scheduledChange":\#(change)}"#
+        let profile = String(Self.profile.dropLast()) + #", "plan":\#(plan)}"#
+        let server = StubServer { call in
+            switch call.url.path {
+            case "/v1/auth/exchange": .status(200, Self.login)
+            case "/v1/me": .status(200, profile)
+            default: .status(500, "")
+            }
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let result = try await service.me()
+        let decoded = try #require(result.plan)
+        let periodEnd = Date(timeIntervalSince1970: 1_796_083_200)
+        #expect(result.user.id == "u")
+        #expect(decoded.name == name && decoded.status == status)
+        #expect(decoded.periodEnd == periodEnd)
+        #expect(decoded.minutesLimit == 900 && decoded.usedSeconds == 18720)
+        #expect(decoded.asksLimit == nil && decoded.asksUsed == 4)
+        if scheduled {
+            #expect(decoded.scheduledChange?.plan == "free")
+            #expect(decoded.scheduledChange?.at == periodEnd.addingTimeInterval(0.125))
+        } else {
+            #expect(decoded.scheduledChange == nil)
+        }
+    }
+
+    @Test func profileIgnoresPlanMissingPeriod() async throws {
+        let plan = #"{"name":"pro","status":"active","minutes":{"limit":900,"usedSeconds":18720},"ai":{"asksLimit":null,"asksUsed":4}}"#
+        let profile = String(Self.profile.dropLast()) + #", "plan":\#(plan)}"#
+        let server = StubServer { call in
+            switch call.url.path {
+            case "/v1/auth/exchange": .status(200, Self.login)
+            case "/v1/me": .status(200, profile)
+            default: .status(500, "")
+            }
+        }
+        let service = MemoryTokens().service(using: server)
+        let user = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        let result = try await service.me()
+        #expect(result.user == user)
+        #expect(result.quota.used == 3 && result.quota.limit == 10 && result.quota.period == "2026-11")
+        #expect(result.plan == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func billingHandoffPostsWithoutBodyAndRenewsOnlyOnUnauthorized(renew: Bool) async throws {
+        let body = #"{"url":"https://web.invalid/account#handoff=code","expiresAt":"2026-12-01T00:00:00.000Z"}"#
+        let server = StubServer { call in
+            switch call.url.path {
+            case "/v1/auth/exchange": .status(200, Self.login)
+            case "/v1/auth/refresh": .status(200, Self.rotated)
+            case "/v1/billing/handoff" where renew && call.headers["Authorization"] == "Bearer a1": .status(401, "")
+            case "/v1/billing/handoff": .status(200, body)
+            default: .status(500, "")
+            }
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        #expect(try await service.billingHandoff().absoluteString == "https://web.invalid/account#handoff=code")
+        let calls = server.requests
+        let handoff = "/v1/billing/handoff"
+        #expect(calls.map(\.url.path) == ["/v1/auth/exchange", handoff] + (renew ? ["/v1/auth/refresh", handoff] : []))
+        let handoffs = calls.filter { $0.url.path == handoff }
+        #expect(handoffs.allSatisfy { $0.method == "POST" && $0.body.isEmpty })
+        #expect(handoffs.map { $0.headers["Authorization"] } == (renew ? ["Bearer a1", "Bearer a2"] : ["Bearer a1"]))
     }
 
     @Test func refreshRotatesCredentialsAndRetryOnlyOnce() async throws {

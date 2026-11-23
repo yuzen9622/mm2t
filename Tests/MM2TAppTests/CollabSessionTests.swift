@@ -23,22 +23,58 @@ import Testing
         #expect(restored.quota == nil)
     }
 
-    @Test func planLabelUsesTheServerNameOrTheQuotaAlone() async throws {
+    @Test func planLabelUsesWholeMinutesAndFallsBackToSharedMeetings() async throws {
         let fixture = try await Fixture()
         let account = fixture.account
         #expect(account.planName == nil)
         #expect(account.planAndQuotaLabel == "0 / 10 shared meetings")
-        CollabBackend.planName.set("Pro")
         CollabBackend.quotaUsed.set(3)
-        await account.refreshProfile()
-        #expect(account.planName == "Pro")
-        #expect(account.planAndQuotaLabel == "Pro · 3 / 10 shared meetings")
-        CollabBackend.planName.set(nil)
+        for (seconds, label) in [(18720, "Pro · 312 / 900 min"), (59, "Pro · 0 / 900 min"), (-120, "Pro · 0 / 900 min")] {
+            CollabBackend.planUsedSeconds.set(seconds)
+            await account.refreshProfile()
+            #expect(account.planName == "Pro")
+            #expect(account.planAndQuotaLabel == label)
+        }
+        CollabBackend.planUsedSeconds.set(nil)
         await account.refreshProfile()
         #expect(account.planName == nil)
         #expect(account.planAndQuotaLabel == "3 / 10 shared meetings")
+
+        CollabBackend.planUsedSeconds.set(18720)
+        await account.refreshProfile()
+        try #require(account.plan != nil)
         await account.signOut()
+        #expect(account.plan == nil)
         #expect(account.planAndQuotaLabel == nil)
+    }
+
+    @Test(arguments: ["web.collab.invalid", "other.invalid"])
+    func openAccountPageOnlyOpensTheConfiguredWebOrigin(host: String) async throws {
+        let fixture = try await Fixture()
+        let account = fixture.account
+        let url = try #require(URL(string: "https://\(host)/account#handoff=code"))
+        CollabBackend.handoffURL.set(url.absoluteString)
+        var opened: [URL] = []
+        await account.openAccountPage {
+            #expect(account.busy)
+            opened.append($0)
+        }
+        #expect(!account.busy)
+        if host == "web.collab.invalid" {
+            #expect(opened == [url])
+            #expect(account.error == nil)
+        } else {
+            #expect(opened.isEmpty)
+            #expect(account.error == .server(status: 0))
+        }
+    }
+
+    @Test func openAccountPageReportsUnavailableWithoutOpening() async throws {
+        let fixture = try await Fixture()
+        await fixture.account.openAccountPage { _ in Issue.record("Unexpected URL") }
+        #expect(fixture.account.error == .server(status: 503))
+        #expect(fixture.account.user != nil)
+        #expect(!fixture.account.busy)
     }
 
     @Test func refreshUpdatesQuotaAndKeepsTheProfileOnServerError() async throws {
@@ -1084,7 +1120,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
 
     static let requests = Box<[String]>([])
     static let quotaUsed = Box(0)
-    static let planName = Box<String?>(nil)
+    static let planUsedSeconds = Box<Int?>(nil)
+    static let handoffURL = Box<String?>(nil)
     static let profileUnavailable = Box(false)
     static let holdNextProfile = Box(false)
     static let deferredProfile = Box<(@Sendable () -> Void)?>(nil)
@@ -1110,7 +1147,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
-        quotaUsed.set(0); planName.set(nil); profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
+        quotaUsed.set(0); planUsedSeconds.set(nil); handoffURL.set(nil)
+        profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); doneRejection.set(nil); expired.set(false); holdOps.set(false); deferredReply.set(nil)
@@ -1165,7 +1203,9 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             Self.expired.set(false)
             response = (200, Data("{\"accessToken\":\"\(id)-access\",\"refreshToken\":\"\(id)-refresh\",\"user\":\(identity(id))}".utf8))
         case "/v1/me":
-            let plan = Self.planName.get.map { ",\"planName\":\"\($0)\"" } ?? ""
+            let plan = Self.planUsedSeconds.get.map {
+                #", "plan":{"name":"pro","status":"active","period":{"start":"2026-11-01T00:00:00.000Z","end":"2026-12-01T00:00:00.000Z"},"minutes":{"limit":900,"usedSeconds":\#($0)},"ai":{"asksLimit":null,"asksUsed":4},"storedMeetings":{"limit":200}}"#
+            } ?? ""
             response = Self.profileUnavailable.get ? (503, Data()) : (200, Data(
                 "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}\(plan)}".utf8))
             var hold = false
@@ -1174,6 +1214,12 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 let (status, body) = response
                 Self.deferredProfile.set { [self] in reply(status: status, body: body) }
                 return
+            }
+        case "/v1/billing/handoff":
+            if let handoffURL = Self.handoffURL.get {
+                response = (200, Data(#"{"url":"\#(handoffURL)"}"#.utf8))
+            } else {
+                response = (503, Data(#"{"error":"billing_unavailable"}"#.utf8))
             }
         case "/v1/rooms":
             let body = Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8)
