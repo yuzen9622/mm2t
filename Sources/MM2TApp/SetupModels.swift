@@ -121,32 +121,46 @@ public final class CredentialField: Identifiable {
     }
 
     public func validate() async {
-        save()
-        guard state == .saved else { return }
         let secret = Secret(text)
+        guard !secret.isEmpty else { save(); return }
         let request: KeyValidation
         switch credential {
         case .elevenLabsAPIKey: request = .elevenLabs(secret)
         case .geminiAPIKey: request = .gemini(secret)
         case .selfHostedToken:
             guard let url = selfHostedURL() else {
-                state = .needsServerURL
+                save()
+                if state == .saved { state = .needsServerURL }
                 return
             }
             request = .selfHosted(url: url, token: secret)
         case .openAICompatibleAPIKey:
             guard let endpoint = openAIEndpoint() else {
-                state = .needsServerURL
+                save()
+                if state == .saved { state = .needsServerURL }
                 return
             }
             request = .openAICompatible(baseURL: endpoint.baseURL, apiKey: secret, model: endpoint.model)
         case .googleCalendarRefreshToken, .microsoftCalendarRefreshToken, .collabAccount:
+            save()
             return  // Written by account sign-in, never typed into a key field.
         }
         checkedSecret = secret
         state = .validating
         let result = await validator.validate(request)
         guard checkedSecret == secret else { return }
+        guard Secret(text) == secret else {
+            checkedSecret = nil
+            state = hasSavedValue ? .saved : .empty
+            return
+        }
+        if case .rejected = result {
+            state = .checked(result)
+            return
+        }
+        save()
+        guard state == .saved else { return }
+        checkedSecret = secret
         state = .checked(result)
     }
 }

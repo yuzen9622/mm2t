@@ -54,7 +54,7 @@ import Testing
         #expect(world.offlineInstallers.values.allSatisfy { $0.downloads.get == 0 })
     }
 
-    @Test func aRejectedSavedKeyBlocksContinueButAnUnverifiedKeyDoesNot() async throws {
+    @Test func aRejectedKeyBlocksContinueEvenAfterRebuildingSetup() async throws {
         let world = try firstRun()
         let setup = world.app.setup
         let flow = world.app.onboarding
@@ -65,18 +65,52 @@ import Testing
         let gemini = setup.field(.geminiAPIKey)
         gemini.text = "bad"
         await gemini.validate()
-        #expect(gemini.hasSavedValue)
+        #expect(try world.credentials.read(.geminiAPIKey) == nil)
+        #expect(!gemini.hasSavedValue)
+        #expect(gemini.text == "bad")
+        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
         #expect(!setup.isConfigured(.gemini, signedIn: false))
         #expect(!flow.canContinue && !flow.advance())
-        gemini.load()
-        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
-        #expect(!flow.canContinue)
+
+        let rebuiltSetup = SetupModel(permissions: world.permissions, installer: world.speakerInstaller,
+            offlineInstallers: world.offlineInstallers, translationInstaller: { _, _ in world.translationInstaller },
+            suitability: setup.suitability, credentials: world.credentials, validator: world.validator,
+            settings: world.app.settings, runningBrowsers: { [] }, checkSetup: { [] })
+        let rebuiltFlow = OnboardingFlow(setup: rebuiltSetup, settings: world.app.settings,
+            enrollment: world.app.enrollment, account: nil)
+        #expect(rebuiltFlow.advance())
+        #expect(!rebuiltSetup.field(.geminiAPIKey).isConfigured)
+        #expect(!rebuiltSetup.isConfigured(.gemini, signedIn: false))
+        #expect(!rebuiltFlow.canContinue && !rebuiltFlow.advance())
 
         gemini.text = "timeout"
         await gemini.validate()
         #expect(gemini.state == .checked(.inconclusive("Could not reach Gemini")))
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("timeout"))
         #expect(setup.isConfigured(.gemini, signedIn: false))
         #expect(flow.canContinue)
+    }
+
+    @Test func aRejectedReplacementKeepsThePreviouslySavedKey() async throws {
+        let world = try World()
+        let gemini = world.app.setup.field(.geminiAPIKey)
+        gemini.text = "bad"
+        await gemini.validate()
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("gemini-key"))
+        #expect(gemini.text == "bad")
+        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
+    }
+
+    @Test func aValidKeyIsConfiguredAfterRebuildingTheField() async throws {
+        let world = try firstRun()
+        let gemini = world.app.setup.field(.geminiAPIKey)
+        gemini.text = "valid-key"
+        await gemini.validate()
+        #expect(gemini.state == .checked(.valid))
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("valid-key"))
+        let rebuilt = CredentialField(credential: .geminiAPIKey, store: world.credentials,
+            validator: world.validator, selfHostedURL: { nil })
+        #expect(rebuilt.isConfigured)
     }
 
     @Test func independentSelectionsDownloadSharedWeightsOnlyOnce() async throws {
