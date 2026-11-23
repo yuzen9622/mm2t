@@ -73,7 +73,8 @@ struct FloatingContent: View {
     /// the pointer.
     private var staysOpen: Bool {
         if let session = app.capture.collaboration,
-           session.suggestion != nil || session.commandStatus != .hidden || session.state == .confirmingStart || session.state == .needsSignIn { return true }
+           (session.allowsRoomCommands && (session.suggestion != nil || session.state == .confirmingStart))
+            || session.commandStatus != .hidden || session.state == .needsSignIn { return true }
         return switch app.capture.state {
         case .prompting, .awaitingMicrophone, .endingSoon, .failed: true
         case .idle: app.queue.activeJob == nil && banner.outcome != nil

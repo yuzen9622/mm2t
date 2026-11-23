@@ -5,6 +5,7 @@ import OSLog
 public enum CollabError: Error, Equatable, Sendable {
     case notSignedIn
     case quotaExceeded(used: Int, limit: Int)
+    case planRequired
     case roomEnded
     case unreachable
     case server(status: Int)
@@ -428,6 +429,7 @@ public actor CollabService {
         guard !(200..<300).contains(status) else { return (result.0, status) }
         let failure = try? JSONDecoder().decode(Failure.self, from: result.0)
         if status == 401 { throw CollabError.notSignedIn }
+        if status == 403, failure?.error == "plan_required" { throw CollabError.planRequired }
         if status == 429, failure?.error == "quota_exceeded", let used = failure?.used, let limit = failure?.limit {
             throw CollabError.quotaExceeded(used: used, limit: limit)
         }

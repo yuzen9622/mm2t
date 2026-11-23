@@ -11,7 +11,7 @@ struct CollabCapsuleRows: View {
     var body: some View {
         VStack(spacing: 8) {
             commandRow
-            if let suggestion = session.suggestion, let card = session.card {
+            if session.allowsRoomCommands, let suggestion = session.suggestion, let card = session.card {
                 VStack(spacing: 6) {
                     HStack(spacing: 10) {
                         Icon(suggestion.kind.icon, size: 16)
@@ -36,6 +36,11 @@ struct CollabCapsuleRows: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .onChange(of: session.allowsRoomCommands) { _, allowed in
+            if !allowed && (session.state == .confirmingStart || session.commandStatus == .input) {
+                session.dismissCommand()
+            }
+        }
         .motion(Motion.reveal, value: session.commandStatus)
         .motion(Motion.reveal, value: session.suggestion != nil)
         .motion(Motion.reveal, value: session.state)
@@ -43,7 +48,7 @@ struct CollabCapsuleRows: View {
 
     @ViewBuilder private var commandRow: some View {
         switch session.state {
-        case .confirmingStart:
+        case .confirmingStart where session.allowsRoomCommands:
             HStack(spacing: 10) {
                 Text("Start sharing for this meeting?")
                 CapsulePill("Start", filled: true, action: session.startSharing).keyboardShortcut(.defaultAction)
@@ -53,15 +58,14 @@ struct CollabCapsuleRows: View {
             HStack(spacing: 10) {
                 Text("Sign in to share")
                 CapsulePill("Sign In") {
-                    MainNavigation.shared.settingsSection = .account
-                    MainNavigation.shared.open(.settings)
+                    MainNavigation.shared.open(.settings, settingsSection: .account)
                 }
                 CircleButton("Cancel", icon: "x", action: session.dismissCommand)
             }
         default:
             switch session.commandStatus {
             case .hidden: EmptyView()
-            case .input:
+            case .input where session.allowsRoomCommands:
                 HStack(spacing: 9) {
                     Icon("sparkles", size: 15).foregroundStyle(.white.opacity(0.65))
                     TextField("Ask to build or change something…", text: $command)
@@ -81,6 +85,7 @@ struct CollabCapsuleRows: View {
                 .frame(width: 420, height: 36)
                 .background(.white.opacity(0.12), in: Capsule())
                 .transition(.opacity.combined(with: .move(edge: .top)))
+            case .input: EmptyView()
             case .building(let title):
                 HStack(spacing: 8) {
                     Spinner()
@@ -96,7 +101,7 @@ struct CollabCapsuleRows: View {
                     Icon("alert-triangle", size: 16).foregroundStyle(Palette.danger)
                     Text(verbatim: error.message).lineLimit(1)
                     Spacer(minLength: 0)
-                    CapsulePill("Retry", action: session.retry)
+                    if error != .service(.planRequired) { CapsulePill("Retry", action: session.retry) }
                     CircleButton("Close", icon: "x", action: session.dismissCommand)
                 }.frame(width: 420, height: 36)
             }
@@ -144,20 +149,6 @@ private extension CollabSession.Failure {
         case .provider(let error): error.description
         case .modelNotConfigured: String(localized: "Set up a language model in Settings.")
         case .generation: String(localized: "Couldn’t finish building the component.")
-        }
-    }
-}
-
-extension CollabError {
-    var collabMessage: String {
-        switch self {
-        case .notSignedIn: String(localized: "Sign in to share")
-        case .quotaExceeded(let used, let limit): String(localized: "Room limit reached (\(used)/\(limit)).")
-        case .roomEnded: String(localized: "This room has ended.")
-        case .pendingEndPersistence: String(localized: "Couldn’t save the pending collaboration room closure.")
-        case .credentialCleanup: String(localized: "Couldn’t remove the saved collaboration sign-in.")
-        case .unreachable: String(localized: "Can’t connect to the collaboration service.")
-        case .invalidBatch, .server: String(localized: "The collaboration service couldn’t complete the request.")
         }
     }
 }

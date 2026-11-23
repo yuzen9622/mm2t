@@ -203,6 +203,7 @@
     "Set up a language model in Settings.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "請在設定中設定語言模型。" } } } },
     "Couldn’t finish building the component.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法完成元件。" } } } },
     "Room limit reached (%lld/%lld).": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "已達房間上限（%lld／%lld）。" } } } },
+    "Hosting a room needs a Standard or Pro plan.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "主持協作會議室需要 Standard 或 Pro 方案。" } } } },
     "This room has ended.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "這個房間已結束。" } } } },
     "Couldn’t remove the saved collaboration sign-in.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法清除已儲存的協作登入資料。" } } } },
     "Couldn’t save the pending collaboration room closure.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法儲存待關閉的協作房間。" } } } },

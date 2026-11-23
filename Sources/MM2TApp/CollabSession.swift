@@ -64,8 +64,9 @@ public final class CollabSession {
     public private(set) var commandStatus: CommandStatus = .hidden
     public private(set) var suggestion: CollabSuggestion?
     public private(set) var card: SuggestionPolicy.Card?
-    public var showsCommandButton: Bool { state != .ended && (pendingCleanup?.isBackground ?? true) }
-    public var wantsKeyboard: Bool { commandStatus == .input || state == .confirmingStart }
+    public var allowsRoomCommands: Bool { room != nil || account.user == nil || account.plan?.name != "free" }
+    public var showsCommandButton: Bool { allowsRoomCommands && state != .ended && (pendingCleanup?.isBackground ?? true) }
+    public var wantsKeyboard: Bool { allowsRoomCommands && (commandStatus == .input || state == .confirmingStart) }
     public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
     public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
     private var ownedRoom: OwnedRoom?
@@ -245,7 +246,7 @@ public final class CollabSession {
     }
 
     public func startSharing() {
-        guard state == .confirmingStart, creation == nil, pendingCommand != nil else { return }
+        guard allowsRoomCommands, state == .confirmingStart, creation == nil, pendingCommand != nil else { return }
         guard let owner = account.user?.id, !account.signingOut else { state = .needsSignIn; return }
         state = .starting
         commandStatus = .building(nil)

@@ -5,6 +5,30 @@ import Testing
 @testable import MM2TApp
 
 @Suite(.serialized) @MainActor struct CollabSessionTests {
+    @Test(arguments: [nil, "", "https://marketing.invalid:8443/en/account/"] as [String?])
+    func accountConfigurationLoadsFromPlistOrFallsBack(accountValue: String?) throws {
+        let directory = try temporaryDirectory().appending(path: "Account.bundle")
+        let contents = directory.appending(path: "Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let web = try #require(URL(string: "https://web.collab.invalid"))
+        var info = ["MM2TCollabAPIURL": "https://api.collab.invalid", "MM2TCollabWebURL": web.absoluteString]
+        info["MM2TAccountWebURL"] = accountValue
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: contents.appending(path: "Info.plist"))
+        let bundle = try #require(Bundle(url: directory))
+        let config = try #require(CollabConfiguration.live(bundle: bundle, environment: [:]))
+        let expected = accountValue.flatMap { $0.isEmpty ? nil : URL(string: $0) } ?? web
+        #expect(config.accountURL == expected)
+        #expect(config.accepts(web))
+        #expect(config.acceptsAccountPage(expected))
+        #expect(!config.acceptsAccountPage(try #require(URL(string: "http://\(expected.host!)"))))
+        #if DEBUG
+        let override = "http://localhost:8081/account/"
+        let overridden = try #require(CollabConfiguration.live(bundle: bundle, environment: ["MM2T_ACCOUNT_WEB_URL": override]))
+        #expect(overridden.accountURL.absoluteString == override)
+        #endif
+    }
+
     @Test func accountRestoresQuotaAndClearsItOnSignOut() async throws {
         let fixture = try await Fixture()
         #expect(fixture.account.quota?.limit == 10)
@@ -21,6 +45,43 @@ import Testing
         await restored.signOut()
         #expect(restored.user == nil)
         #expect(restored.quota == nil)
+    }
+
+    @Test func onlyKnownFreeAccountsHideTheHostingEntry() async throws {
+        let fixture = try await Fixture()
+        let session = fixture.session
+        #expect(session.showsCommandButton, "unknown plans keep the existing entry")
+        session.run(command: "建立文件")
+        #expect(session.state == .confirmingStart)
+
+        CollabBackend.planName.set("free")
+        CollabBackend.planUsedSeconds.set(0)
+        await fixture.account.refreshProfile()
+        #expect(!session.allowsRoomCommands)
+        #expect(!session.showsCommandButton)
+        #expect(!session.wantsKeyboard)
+        session.startSharing()
+        #expect(!CollabBackend.requests.get.contains("/v1/rooms"))
+        session.dismissCommand()
+        session.run(command: "建立文件")
+        #expect(session.state == .idle)
+
+        for plan in ["standard", "pro"] {
+            CollabBackend.planName.set(plan)
+            await fixture.account.refreshProfile()
+            #expect(session.allowsRoomCommands)
+            #expect(session.showsCommandButton)
+        }
+        await fixture.account.signOut()
+        #expect(session.showsCommandButton)
+    }
+
+    @Test func roomCreationPlanRequiredShowsThePaidPlanMessage() async throws {
+        let fixture = try await Fixture()
+        CollabBackend.blockRoomCreation.set(true)
+        fixture.begin()
+        #expect(await eventually { fixture.session.commandStatus == .failed(.service(.planRequired)) })
+        #expect(CollabError.planRequired.collabMessage == "Hosting a room needs a Standard or Pro plan.")
     }
 
     @Test func planLabelUsesWholeMinutesAndFallsBackToSharedMeetings() async throws {
@@ -48,8 +109,8 @@ import Testing
         #expect(account.planAndQuotaLabel == nil)
     }
 
-    @Test(arguments: ["web.collab.invalid", "other.invalid"])
-    func openAccountPageOnlyOpensTheConfiguredWebOrigin(host: String) async throws {
+    @Test(arguments: ["account.invalid", "web.collab.invalid", "other.invalid", "account.invalid:443", "user:pass@account.invalid"])
+    func openAccountPageOnlyOpensTheConfiguredAccountOrigin(host: String) async throws {
         let fixture = try await Fixture()
         let account = fixture.account
         let url = try #require(URL(string: "https://\(host)/account#handoff=code"))
@@ -60,7 +121,7 @@ import Testing
             opened.append($0)
         }
         #expect(!account.busy)
-        if host == "web.collab.invalid" {
+        if host == "account.invalid" {
             #expect(opened == [url])
             #expect(account.error == nil)
         } else {
@@ -1060,7 +1121,8 @@ import Testing
         let credentials = MemoryCredentials()
         let http: URLSession
         let configuration = CollabConfiguration(apiURL: URL(string: "https://test.collab.invalid")!,
-                                                webURL: URL(string: "https://web.collab.invalid")!)
+                                                webURL: URL(string: "https://web.collab.invalid")!,
+                                                accountURL: URL(string: "https://account.invalid/account/")!)
 
         init(waitOnRetry: @escaping @Sendable () async -> Void = {},
              pendingEndsWrite: @escaping @Sendable (Data, URL) throws -> Void = CollabPendingEnds.writeAtomically) async throws {
@@ -1121,6 +1183,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let requests = Box<[String]>([])
     static let quotaUsed = Box(0)
     static let planUsedSeconds = Box<Int?>(nil)
+    static let planName = Box("pro")
+    static let blockRoomCreation = Box(false)
     static let handoffURL = Box<String?>(nil)
     static let profileUnavailable = Box(false)
     static let holdNextProfile = Box(false)
@@ -1147,7 +1211,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
-        quotaUsed.set(0); planUsedSeconds.set(nil); handoffURL.set(nil)
+        quotaUsed.set(0); planUsedSeconds.set(nil); planName.set("pro"); handoffURL.set(nil)
+        blockRoomCreation.set(false)
         profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
@@ -1204,7 +1269,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             response = (200, Data("{\"accessToken\":\"\(id)-access\",\"refreshToken\":\"\(id)-refresh\",\"user\":\(identity(id))}".utf8))
         case "/v1/me":
             let plan = Self.planUsedSeconds.get.map {
-                #", "plan":{"name":"pro","status":"active","period":{"start":"2026-11-01T00:00:00.000Z","end":"2026-12-01T00:00:00.000Z"},"minutes":{"limit":900,"usedSeconds":\#($0)},"ai":{"asksLimit":null,"asksUsed":4},"storedMeetings":{"limit":200}}"#
+                #", "plan":{"name":"\#(Self.planName.get)","status":"active","period":{"start":"2026-11-01T00:00:00.000Z","end":"2026-12-01T00:00:00.000Z"},"minutes":{"limit":900,"usedSeconds":\#($0)},"ai":{"asksLimit":null,"asksUsed":4},"storedMeetings":{"limit":200}}"#
             } ?? ""
             response = Self.profileUnavailable.get ? (503, Data()) : (200, Data(
                 "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}\(plan)}".utf8))
@@ -1222,6 +1287,10 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 response = (503, Data(#"{"error":"billing_unavailable"}"#.utf8))
             }
         case "/v1/rooms":
+            if Self.blockRoomCreation.get {
+                reply(status: 403, body: Data(#"{"error":"plan_required"}"#.utf8))
+                return
+            }
             let body = Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8)
             if Self.holdCreation.get {
                 Self.deferredCreation.set { [self] in reply(status: 201, body: body) }
