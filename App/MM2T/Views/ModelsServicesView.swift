@@ -190,7 +190,6 @@ struct ModelsServicesPage: View {
                             updated.openAIModel = model
                             updated.summaryService = source
                             app.settings.settings = updated
-                            app.setup.recheck()
                             picker = nil
                         }
                     }
@@ -246,13 +245,11 @@ struct ModelsServicesPage: View {
 
     private func choose(_ service: TranscriptionService) {
         app.settings.settings.transcriptionService = service
-        app.setup.recheck()
         picker = nil
     }
 
     private func choose(_ service: SummaryService) {
         app.settings.settings.summaryService = service
-        app.setup.recheck()
         picker = nil
     }
 

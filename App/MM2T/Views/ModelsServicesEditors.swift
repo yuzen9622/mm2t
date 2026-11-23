@@ -151,11 +151,12 @@ private struct ServiceServerEditor: View {
         } else {
             updated.selfHostedURL = endpoint
         }
-        app.settings.settings = updated
-        app.setup.recheck()
+        if updated != app.settings.settings { app.settings.settings = updated }
+        else if credentialChanged { app.setup.recheck() }
     }
 
     private func remove() {
+        let credentialChanged = field.hasSavedValue
         error = nil
         field.text = ""
         field.save()
@@ -172,8 +173,8 @@ private struct ServiceServerEditor: View {
         } else {
             updated.selfHostedURL = nil
         }
-        app.settings.settings = updated
-        app.setup.recheck()
+        if updated != app.settings.settings { app.settings.settings = updated }
+        else if credentialChanged { app.setup.recheck() }
         connection.address = ""
         connection.key = ""
         model = ""
