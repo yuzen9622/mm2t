@@ -5,6 +5,45 @@ import Testing
 @testable import MM2TApp
 
 @Suite(.serialized) @MainActor struct CollabSessionTests {
+    @Test func accountRestoresQuotaAndClearsItOnSignOut() async throws {
+        let fixture = try await Fixture()
+        #expect(fixture.account.quota?.limit == 10)
+
+        CollabBackend.quotaUsed.set(3)
+        let restored = fixture.newAccount()
+        restored.observeSignIn()
+        let didRestore = await waitForCollabEvent { restored.user != nil }
+        try #require(didRestore)
+        #expect(restored.quota?.used == 3)
+        #expect(restored.quota?.limit == 10)
+        #expect(restored.quota?.period == "2026-11")
+
+        await restored.signOut()
+        #expect(restored.user == nil)
+        #expect(restored.quota == nil)
+    }
+
+    @Test func refreshUpdatesQuotaAndKeepsTheProfileOnServerError() async throws {
+        let fixture = try await Fixture()
+        let account = fixture.account
+        let signedInUser = try #require(account.user)
+
+        CollabBackend.quotaUsed.set(4)
+        await account.refreshProfile()
+        #expect(account.quota?.used == 4)
+
+        CollabBackend.profileUnavailable.set(true)
+        await account.refreshProfile()
+        #expect(account.user == signedInUser)
+        #expect(account.quota?.used == 4)
+        #expect(!account.busy)
+
+        let newAccount = fixture.newAccount()
+        try await newAccount.completeSignIn(code: "fixture", verifier: Fixture.verifier)
+        #expect(newAccount.user == signedInUser)
+        #expect(newAccount.quota == nil)
+    }
+
     @Test func eachSignInUsesASeparateVerifierAndCancelledLoginDoesNotExchange() async throws {
         let f = try await Fixture()
         let account = f.newAccount()
@@ -820,6 +859,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     }
 
     static let requests = Box<[String]>([])
+    static let quotaUsed = Box(0)
+    static let profileUnavailable = Box(false)
     static let document = Box<Document?>(nil)
     static let extraComponent = Box<String?>(nil)
     static let appliedBatches = Box<Set<UUID>>([])
@@ -841,6 +882,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
+        quotaUsed.set(0); profileUnavailable.set(false)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
         extraComponent.set(nil); appliedBatches.set([]); doneBodies.set([]); opBodySizes.set([]); dropDoneResponse.set(false); malformedDoneResponse.set(false)
         offlineEnd.set(false); roomEnded.set(false); rejectDone.set(false); expired.set(false); holdOps.set(false); deferredReply.set(nil)
@@ -889,7 +931,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
             Self.expired.set(false)
             response = (200, Data("{\"accessToken\":\"\(id)-access\",\"refreshToken\":\"\(id)-refresh\",\"user\":\(identity(id))}".utf8))
         case "/v1/me":
-            response = (200, Data("{\"user\":\(user),\"quota\":{\"used\":0,\"limit\":10,\"period\":\"2026-11\"}}".utf8))
+            response = Self.profileUnavailable.get ? (503, Data()) : (200, Data(
+                "{\"user\":\(user),\"quota\":{\"used\":\(Self.quotaUsed.get),\"limit\":10,\"period\":\"2026-11\"}}".utf8))
         case "/v1/rooms":
             let body = Data(#"{"roomId":"room","shareUrl":"https://web.collab.invalid/r/share","hostUrl":"https://web.collab.invalid/r/share#host=code"}"#.utf8)
             if Self.holdCreation.get {

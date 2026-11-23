@@ -34,7 +34,13 @@ public struct CollabConfiguration: Sendable {
 
 @MainActor @Observable
 public final class CollabAccount {
-    public private(set) var user: CollabUser? { didSet { if user != oldValue { onUserChanged?() } } }
+    public private(set) var user: CollabUser? {
+        didSet {
+            if user == nil { quota = nil }
+            if user != oldValue { onUserChanged?() }
+        }
+    }
+    public private(set) var quota: CollabProfile.Quota?
     public private(set) var busy = false
     public private(set) var error: CollabError?
     private(set) var signingOut = false
@@ -43,6 +49,7 @@ public final class CollabAccount {
     let configuration: CollabConfiguration
     @ObservationIgnored var onUserChanged: (() -> Void)?
     @ObservationIgnored var beforeSignOut: (() async -> Void)?
+    @ObservationIgnored private var profileSession = UUID()
     @ObservationIgnored private var monitoring: Task<Void, Never>?
     @ObservationIgnored private var replaying: Task<Void, Never>?
     @ObservationIgnored private var roomEndPreparations: [UUID: Task<Void, Never>] = [:]
@@ -63,7 +70,9 @@ public final class CollabAccount {
         monitoring = Task { [weak self, service] in
             for await signedIn in await service.signInChanges() {
                 guard let self else { return }
-                if !signedIn, !(await service.isAuthenticated) {
+                let session = profileSession
+                if !signedIn, !(await service.isAuthenticated), session == profileSession {
+                    profileSession = UUID()
                     replaying?.cancel()
                     user = nil
                 } else if user == nil, !busy {
@@ -79,7 +88,11 @@ public final class CollabAccount {
         busy = true
         error = nil
         defer { busy = false }
-        do { didSignIn(try await service.me().user) }
+        do {
+            let profile = try await service.me()
+            quota = profile.quota
+            didSignIn(profile.user)
+        }
         catch CollabError.notSignedIn { user = nil }
         catch { self.error = error as? CollabError ?? .unreachable }
     }
@@ -111,10 +124,31 @@ public final class CollabAccount {
     }
 
     func completeSignIn(code: String, verifier: String) async throws {
-        didSignIn(try await service.exchange(code: code, codeVerifier: verifier))
+        let verified = try await service.exchange(code: code, codeVerifier: verifier)
+        quota = nil
+        didSignIn(verified)
+        try? await loadProfile(for: profileSession)
+    }
+
+    public func refreshProfile() async {
+        guard !signingOut else { return }
+        let session = profileSession
+        do {
+            try await loadProfile(for: session)
+        } catch CollabError.notSignedIn where session == profileSession && !Task.isCancelled {
+            user = nil
+        } catch {}
+    }
+
+    private func loadProfile(for session: UUID) async throws {
+        let profile = try await service.me()
+        guard session == profileSession, !Task.isCancelled else { return }
+        quota = profile.quota
+        user = profile.user
     }
 
     private func didSignIn(_ verified: CollabUser) {
+        profileSession = UUID()
         user = verified
         let previous = replaying
         previous?.cancel()
@@ -202,6 +236,7 @@ public final class CollabAccount {
         busy = true
         error = nil
         signingOut = true
+        profileSession = UUID()
         replaying?.cancel()
         defer { user = nil; signingOut = false; busy = false }
         await beforeSignOut?()
