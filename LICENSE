@@ -12,8 +12,6 @@ icon, wordmark, and their source artwork and exported variants, including:
   - App/DesignAssets/mm2t-icon/
   - App/DesignAssets/mm2t-brand/
   - docs/assets/icon.png
-  - web/src/app/icon.png
-  - web/public/media/icon.png
   - Copies of the same brand artwork in app bundles and asset catalogs.
 
 This definition does not include source code, third-party interface icons,
