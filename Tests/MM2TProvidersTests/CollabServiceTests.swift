@@ -39,7 +39,7 @@ struct CollabServiceTests {
         #expect(profile.plan == nil)
         let quota = profile.quota
         #expect(quota.used == 3 && quota.limit == 10 && quota.period == "2026-11")
-        let room = try await service.createRoom(title: "會議", owner: "u")
+        let room = try await service.createRoom(title: "會議", owner: "u", aiSource: .own)
         #expect(room.roomId == "r" && room.shareUrl.absoluteString == "https://web.invalid/r/share" && room.hostUrl.fragment == "host=code")
         let components = try await service.components(in: room.roomId, owner: "u")
         let document = try #require(components.components.first)
@@ -331,7 +331,7 @@ struct CollabServiceTests {
         }
         let service = MemoryTokens().service(using: server)
         _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
-        await #expect(throws: CollabError.quotaExceeded(used: 10, limit: 10)) { try await service.createRoom(title: "A", owner: "u") }
+        await #expect(throws: CollabError.quotaExceeded(used: 10, limit: 10)) { try await service.createRoom(title: "A", owner: "u", aiSource: .hosted) }
         await #expect(throws: CollabError.roomEnded) { try await service.sendOps(.init([.done(id: "doc")]), to: "r", owner: "u") }
         await #expect(throws: CollabError.server(status: 403)) { try await service.endRoom("r", owner: "u") }
         await #expect(throws: CollabError.unreachable) { try await service.me() }

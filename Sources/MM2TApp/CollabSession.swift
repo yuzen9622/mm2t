@@ -80,7 +80,8 @@ public final class CollabSession {
     @ObservationIgnored private let account: CollabAccount
     @ObservationIgnored private let title: String
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let llmSnapshot: () -> (@Sendable () throws -> LLMBuild)
+    typealias LLMSnapshot = (source: CollabService.RoomAISource, build: @Sendable () throws -> LLMBuild)
+    @ObservationIgnored private let llmSnapshot: () -> LLMSnapshot
     @ObservationIgnored private var policy: SuggestionPolicy
     @ObservationIgnored private var transcript: [Caption] = []
     @ObservationIgnored private var totalCharacters = 0
@@ -97,7 +98,7 @@ public final class CollabSession {
     @ObservationIgnored private var expiry: Task<Void, Never>?
     @ObservationIgnored private var completion: Task<Void, Never>?
 
-    init(account: CollabAccount, title: String, now: @escaping () -> Date, llmSnapshot: @escaping () -> (@Sendable () throws -> LLMBuild)) {
+    init(account: CollabAccount, title: String, now: @escaping () -> Date, llmSnapshot: @escaping () -> LLMSnapshot) {
         self.account = account
         self.title = title
         self.now = now
@@ -250,8 +251,9 @@ public final class CollabSession {
         guard let owner = account.user?.id, !account.signingOut else { state = .needsSignIn; return }
         state = .starting
         commandStatus = .building(nil)
+        let source = llmSnapshot().source
         let creation = Task { [service = account.service, title] in
-            OwnedRoom(room: try await service.createRoom(title: title, owner: owner), owner: owner)
+            OwnedRoom(room: try await service.createRoom(title: title, owner: owner, aiSource: source), owner: owner)
         }
         self.creation = creation
         creationOwner = owner
@@ -466,7 +468,7 @@ public final class CollabSession {
             let titles = components.map(\.title)
             let captions = recent(180, at: now())
             let previousTitles = policy.titles
-            let model = CollabModelWork(makeLLM: llmSnapshot())
+            let model = CollabModelWork(makeLLM: llmSnapshot().build)
             let offer = try await model.suggestion {
                 ["captions": .string(captions.joined(separator: "\n")), "existingTitles": .array(titles.map(CollabJSON.string)),
                  "previousTitles": .array(previousTitles.sorted().map(CollabJSON.string))]
@@ -564,7 +566,7 @@ public final class CollabSession {
         let sender = makeSender(room, owner: binding.owner)
         self.sender = sender
         defer { self.sender = nil }
-        let model = CollabModelWork(makeLLM: llmSnapshot())
+        let model = CollabModelWork(makeLLM: llmSnapshot().build)
         do {
             return try await model.stream(system: system, route: route, input: input, sender: sender) { [weak self] title in
                 if updateCaptionCount == nil, !Task.isCancelled { self?.commandStatus = .building(title) }

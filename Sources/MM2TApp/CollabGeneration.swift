@@ -112,6 +112,9 @@ struct CollabGeneration: Sendable {
             case (.whiteboard, .nodes), (.whiteboard, .edges), (.poll, .options), (.gantt, .tasks), (.actions, .rows): return true
             default: return false
             }
+        case .setElement, .removeElement:
+            if case .command(_, .command) = mode { return kind == .whiteboard && !created }
+            return false
         case .appendText(_, let field, _):
             if case .update = mode { return false }
             return Self.allows(field, for: kind)
@@ -145,11 +148,47 @@ actor CollabModelWork {
     }
 
     static func promptFields(_ component: CollabComponent) -> [String: CollabJSON] {
-        var fields = component.fields.filter { !["votes", "elements", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
+        var fields = component.fields.filter { !["votes", "elements", "aiCursor", "createdAt", "updatedAt", "rev", "building"].contains($0.key) }
         for (collection, items) in component.itemsByWireID {
             fields[collection.rawValue] = .array(items.sorted { $0.key.lexicographicallyPrecedes($1.key) }.map { .object($0.value) })
         }
+        if component.kind == .whiteboard { fields["drawn"] = .array(drawnElements(component.fields["elements"])) }
         return fields
+    }
+
+    private static func drawnElements(_ field: CollabJSON?) -> [CollabJSON] {
+        guard case .object(let encoded) = field else { return [] }
+        let decoder = JSONDecoder()
+        let elements = encoded.compactMapValues { value -> [String: CollabJSON]? in
+            guard case .string(let json) = value, let element = try? decoder.decode([String: CollabJSON].self, from: Data(json.utf8)),
+                  case .string = element["type"], element["isDeleted"] != .bool(true) else { return nil }
+            return element
+        }
+        var labels: [String: (id: String, text: CollabJSON)] = [:]
+        for id in elements.keys.sorted() {
+            guard let element = elements[id], element["type"] == .string("text"),
+                  case .string(let container) = element["containerId"],
+                  case .array(let bindings) = elements[container]?["boundElements"],
+                  bindings.contains(where: { binding in
+                      guard case .object(let ref) = binding else { return false }
+                      return ref["id"] == .string(id) && ref["type"] == .string("text")
+                  }), let text = element["originalText"] ?? element["text"] else { continue }
+            labels[container] = (id, text)
+        }
+        let folded = Set(labels.values.map(\.id))
+        return elements.keys.sorted().compactMap { id in
+            guard !folded.contains(id), let element = elements[id], case .string(let type) = element["type"] else { return nil }
+            var summary: [String: CollabJSON] = ["id": .string(id), "type": .string(type)]
+            for (key, source) in [("x", "x"), ("y", "y"), ("w", "width"), ("h", "height")] {
+                guard case .number(let number) = element[source] else { return nil }
+                summary[key] = .number(number.rounded())
+            }
+            if let label = labels[id] {
+                summary["text"] = label.text
+                summary["inside"] = .string(id)
+            } else if type == "text" { summary["text"] = element["originalText"] ?? element["text"] }
+            return .object(summary)
+        }
     }
 
     private func provider() async throws -> any LLMProvider {

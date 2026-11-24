@@ -170,3 +170,23 @@ struct CollabParserLimitTests {
         #expect(ratio < 15)
     }
 }
+
+@Test func drawnOpsRoundTripAndRejectInvalidPayloads() throws {
+    let decoder = JSONDecoder()
+    let edits: [CollabOp] = [
+        .setElement(id: "board", elementId: "mark", shape: .diamond, text: "Updated", strokeColor: "#A533de", backgroundColor: nil),
+        .removeElement(id: "board", elementId: "mark"),
+    ]
+    for edit in edits {
+        #expect(try decoder.decode(CollabOp.self, from: JSONEncoder().encode(edit)) == edit)
+        #expect(edit.targeting("other").id == "other")
+    }
+    for json in [
+        #"{"op":"setElement","id":"board","elementId":"mark","strokeColor":"red"}"#,
+        #"{"op":"setElement","id":"board","elementId":"mark","shape":"arrow"}"#,
+        #"{"op":"setElement","id":"board","elementId":"mark","text":null}"#,
+        #"{"op":"removeElement","id":"board","elementId":""}"#,
+    ] {
+        #expect(throws: DecodingError.self) { try decoder.decode(CollabOp.self, from: Data(json.utf8)) }
+    }
+}

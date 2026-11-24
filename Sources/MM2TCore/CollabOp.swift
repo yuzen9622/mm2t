@@ -160,6 +160,9 @@ public enum CollabOp: Codable, Equatable, Sendable {
     case set(id: String, field: Field, value: CollabJSON)
     case upsertItem(id: String, collection: Collection, item: [String: CollabJSON])
     case removeItem(id: String, collection: Collection, itemId: String)
+    public enum ElementShape: String, Codable, Sendable { case rectangle, ellipse, diamond }
+    case setElement(id: String, elementId: String, shape: ElementShape?, text: String?, strokeColor: String?, backgroundColor: String?)
+    case removeElement(id: String, elementId: String)
     case appendText(id: String, field: TextField, text: String)
     case replaceText(id: String, field: TextField, text: String)
     case done(id: String)
@@ -168,7 +171,7 @@ public enum CollabOp: Codable, Equatable, Sendable {
     public var id: String {
         switch self {
         case .create(let id, _, _, _), .set(let id, _, _), .upsertItem(let id, _, _), .removeItem(let id, _, _),
-             .appendText(let id, _, _), .replaceText(let id, _, _), .done(let id), .remove(let id): id
+             .setElement(let id, _, _, _, _, _), .removeElement(let id, _), .appendText(let id, _, _), .replaceText(let id, _, _), .done(let id), .remove(let id): id
         }
     }
 
@@ -178,6 +181,9 @@ public enum CollabOp: Codable, Equatable, Sendable {
         case .set(_, let f, let v): .set(id: id, field: f, value: v)
         case .upsertItem(_, let c, let i): .upsertItem(id: id, collection: c, item: i)
         case .removeItem(_, let c, let i): .removeItem(id: id, collection: c, itemId: i)
+        case .setElement(_, let elementID, let shape, let text, let stroke, let background):
+            .setElement(id: id, elementId: elementID, shape: shape, text: text, strokeColor: stroke, backgroundColor: background)
+        case .removeElement(_, let elementID): .removeElement(id: id, elementId: elementID)
         case .appendText(_, let f, let t): .appendText(id: id, field: f, text: t)
         case .replaceText(_, let f, let t): .replaceText(id: id, field: f, text: t)
         case .done: .done(id: id)
@@ -185,9 +191,9 @@ public enum CollabOp: Codable, Equatable, Sendable {
         }
     }
 
-    private enum Key: String, CodingKey { case op, id, kind, title, source, field, value, collection, item, itemId, text }
+    private enum Key: String, CodingKey { case op, id, kind, title, source, field, value, collection, item, itemId, text, elementId, shape, strokeColor, backgroundColor }
     private enum Tag: String, Codable {
-        case create, set, upsertItem, removeItem, appendText, replaceText, done, remove
+        case create, set, upsertItem, removeItem, setElement, removeElement, appendText, replaceText, done, remove
 
         var payloadKeys: [Key] {
             switch self {
@@ -195,6 +201,8 @@ public enum CollabOp: Codable, Equatable, Sendable {
             case .set: [.field, .value]
             case .upsertItem: [.collection, .item]
             case .removeItem: [.collection, .itemId]
+            case .setElement: [.elementId, .shape, .text, .strokeColor, .backgroundColor]
+            case .removeElement: [.elementId]
             case .appendText, .replaceText: [.field, .text]
             case .done, .remove: []
             }
@@ -233,6 +241,23 @@ public enum CollabOp: Codable, Equatable, Sendable {
             let itemID = try c.decode(String.self, forKey: .itemId)
             guard !itemID.isEmpty else { throw invalid(.itemId) }
             self = try .removeItem(id: id, collection: c.decode(Collection.self, forKey: .collection), itemId: itemID)
+        case .setElement, .removeElement:
+            let elementID = try c.decode(String.self, forKey: .elementId)
+            guard !elementID.isEmpty else { throw invalid(.elementId) }
+            if tag == .removeElement {
+                self = .removeElement(id: id, elementId: elementID)
+            } else {
+                func optional<T: Decodable>(_ type: T.Type, _ key: Key) throws -> T? {
+                    try c.contains(key) ? c.decode(type, forKey: key) : nil
+                }
+                func color(_ key: Key) throws -> String? {
+                    let value = try optional(String.self, key)
+                    if let value, value.wholeMatch(of: /#[0-9a-fA-F]{6}/) == nil { throw invalid(key) }
+                    return value
+                }
+                self = try .setElement(id: id, elementId: elementID, shape: optional(ElementShape.self, .shape),
+                                       text: optional(String.self, .text), strokeColor: color(.strokeColor), backgroundColor: color(.backgroundColor))
+            }
         case .appendText, .replaceText:
             let field = try c.decode(TextField.self, forKey: .field)
             let text = try c.decode(String.self, forKey: .text)
@@ -264,6 +289,16 @@ public enum CollabOp: Codable, Equatable, Sendable {
             tag = .removeItem
             try c.encode(collection, forKey: .collection)
             try c.encode(itemID, forKey: .itemId)
+        case .setElement(_, let elementID, let shape, let text, let stroke, let background):
+            tag = .setElement
+            try c.encode(elementID, forKey: .elementId)
+            try c.encodeIfPresent(shape, forKey: .shape)
+            try c.encodeIfPresent(text, forKey: .text)
+            try c.encodeIfPresent(stroke, forKey: .strokeColor)
+            try c.encodeIfPresent(background, forKey: .backgroundColor)
+        case .removeElement(_, let elementID):
+            tag = .removeElement
+            try c.encode(elementID, forKey: .elementId)
         case .appendText(_, let field, let text), .replaceText(_, let field, let text):
             if case .appendText = self { tag = .appendText } else { tag = .replaceText }
             try c.encode(field, forKey: .field)

@@ -1,7 +1,26 @@
+import MM2TCore
 import Testing
 @testable import MM2TProviders
 
 @Suite struct LLMPromptsTests {
+    @Test func collaborationPromptsShowValidSingleItemOperations() {
+        let prompts = [CollabPrompts.command(source: .command, newID: "room-component", retryTarget: nil),
+                       CollabPrompts.update]
+        for prompt in prompts {
+            let examples = prompt.split(separator: "\n").filter { $0.hasPrefix("{") }
+            var parser = CollabOpStreamParser()
+            let ops = parser.feed(examples.joined(separator: "\n") + "\n")
+            let collections = ops.compactMap { operation -> CollabOp.Collection? in
+                guard case .upsertItem(let id, let collection, let item) = operation,
+                      id == "component-id", collection.validates(item) else { return nil }
+                return collection
+            }
+            #expect(parser.rejectedLines == 0)
+            #expect(collections == [.tasks, .nodes, .edges])
+            #expect(prompt.contains("不可把項目包成陣列或使用 kind 名稱當 op"))
+        }
+    }
+
     @Test func theCleanPromptTurnsSpokenEnumerationsIntoANumberedList() {
         let prompt = LLMPrompts.cleanTranscript
         #expect(prompt.contains("第一……第二"), "names the spoken-enumeration trigger")

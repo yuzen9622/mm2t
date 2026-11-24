@@ -47,6 +47,49 @@ import Testing
         #expect(restored.quota == nil)
     }
 
+    @Test(arguments: SummaryService.allCases)
+    func roomRequestReportsTheSelectedSummaryService(service: SummaryService) async throws {
+        let world = try await recordingWithCollaboration(summaryService: service, plan: "pro")
+        let session = try #require(world.capture.collaboration)
+        session.run(command: "建立文件")
+        session.startSharing()
+        try #require(await eventually { session.room != nil })
+        #expect(CollabBackend.roomAISources.get == [service == .mm2t ? "hosted" : "own"])
+        await world.capture.stop()
+    }
+
+    @Test func freeAccountWithItsOwnGeminiKeyCannotHost() async throws {
+        let world = try await recordingWithCollaboration(summaryService: .gemini, plan: "free")
+        #expect(try world.credentials.read(.geminiAPIKey) != nil)
+        let session = try #require(world.capture.collaboration)
+        #expect(!session.allowsRoomCommands)
+        #expect(!session.showsCommandButton)
+        session.run(command: "建立文件")
+        session.startSharing()
+        #expect(session.state == .idle)
+        #expect(CollabBackend.roomAISources.get.isEmpty)
+        await world.capture.stop()
+    }
+
+    private func recordingWithCollaboration(summaryService: SummaryService, plan: String) async throws -> World {
+        CollabBackend.reset()
+        CollabBackend.planName.set(plan)
+        CollabBackend.planUsedSeconds.set(0)
+        let configuration = CollabConfiguration(apiURL: URL(string: "https://test.collab.invalid")!,
+                                                webURL: URL(string: "https://web.collab.invalid")!)
+        let http = URLSessionConfiguration.ephemeral
+        http.protocolClasses = [CollabBackend.self]
+        let world = try World(collabConfiguration: configuration, collabSession: URLSession(configuration: http))
+        world.app.settings.settings.summaryService = summaryService
+        world.app.settings.settings.openAIBaseURL = URL(string: "https://llm.example.test/v1")!
+        world.app.settings.settings.openAIModel = "test-model"
+        let account = try #require(world.app.collabAccount)
+        try await account.completeSignIn(code: "fixture", verifier: "fixture")
+        try #require(account.plan?.name == plan)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "Test", platform: .zoom))
+        return world
+    }
+
     @Test func onlyKnownFreeAccountsHideTheHostingEntry() async throws {
         let fixture = try await Fixture()
         let session = fixture.session
@@ -1138,7 +1181,7 @@ import Testing
             }, pendingEndsWrite: pendingEndsWrite)
             captions = LiveCaptions(now: { [clock] in clock.get })
             session = CollabSession(account: account, title: "Test", now: { [clock] in clock.get }, llmSnapshot: { [llm, providerRanOnMain] in
-                { providerRanOnMain.set(Thread.isMainThread); return .ready(llm) }
+                (.own, { providerRanOnMain.set(Thread.isMainThread); return .ready(llm) })
             })
             captions.set(.live)
             session.captionsActive = { [weak captions] in captions?.isActive == true }
@@ -1206,12 +1249,14 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let expired = Box(false)
     static let endBearers = Box<[String]>([])
     static let holdOps = Box(false)
+    static let roomAISources = Box<[String]>([])
     static let holdCreation = Box(false)
     static let deferredCreation = Box<(@Sendable () -> Void)?>(nil)
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
 
     static func reset() {
         quotaUsed.set(0); planUsedSeconds.set(nil); planName.set("pro"); handoffURL.set(nil)
+        roomAISources.set([])
         blockRoomCreation.set(false)
         profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
@@ -1287,6 +1332,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 response = (503, Data(#"{"error":"billing_unavailable"}"#.utf8))
             }
         case "/v1/rooms":
+            let payload = (try? JSONSerialization.jsonObject(with: body())) as? [String: String]
+            Self.roomAISources.update { $0.append(payload?["aiSource"] ?? "") }
             if Self.blockRoomCreation.get {
                 reply(status: 403, body: Data(#"{"error":"plan_required"}"#.utf8))
                 return

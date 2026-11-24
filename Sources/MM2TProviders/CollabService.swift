@@ -119,6 +119,8 @@ public struct CollabOpsResult: Decodable, Sendable {
 }
 
 public actor CollabService {
+    public enum RoomAISource: String, Sendable { case own, hosted }
+
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
     private struct Tokens: Codable, Equatable, Sendable {
         let accessToken: String
@@ -295,8 +297,8 @@ public actor CollabService {
         return handoff.url
     }
 
-    public func createRoom(title: String, owner: String) async throws -> CollabRoom {
-        let request = try Request(post: ["rooms"], body: ["title": title, "aiSource": "own"])
+    public func createRoom(title: String, owner: String, aiSource: RoomAISource) async throws -> CollabRoom {
+        let request = try Request(post: ["rooms"], body: ["title": title, "aiSource": aiSource.rawValue])
         return try parse(CollabRoom.self, from: await authorized(request, owner: owner))
     }
 
