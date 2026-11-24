@@ -48,7 +48,7 @@ struct AccountMenuButton: View {
                 }
                 if account != nil { row("Account", icon: "user-circle") { showSettings(.account) } }
                 row("Settings", icon: "settings") { showSettings(.general) }
-                row("Models and services", icon: "sparkles") { showSettings(.models) }
+                row("Models and services", icon: SettingsSection.models.icon) { showSettings(.models) }
                 row("Help", icon: "help-circle") { openURL(AppLinks.help) }
                 if let account {
                     Divider()

@@ -31,7 +31,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: String(localized: "General")
-        case .assistant: String(localized: "Assistant")
+        case .assistant: String(localized: "Personalization")
         case .privacy: String(localized: "Privacy")
         case .account: String(localized: "Account")
         case .models: String(localized: "Models and services")
@@ -41,10 +41,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .general, .assistant: "adjustments-horizontal"
+        case .general: "adjustments-horizontal"
+        case .assistant: "signature"
         case .privacy: "shield-check"
         case .account: "user-circle"
-        case .models: "sparkles"
+        case .models: "lambda"
         case .about: "info-circle"
         }
     }

@@ -17,7 +17,7 @@ struct AssistantComposer: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            Icon("sparkles", size: 17)
+            Icon("input-ai", size: 17)
                 .foregroundStyle(showsPlaceholder ? Palette.muted : Palette.orange)
                 .frame(height: 30)
             AssistantInput(text: $model.draft, references: $model.draftReferences, focused: $focused, height: $height, hasMarkedText: $hasMarkedText,
