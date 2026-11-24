@@ -215,6 +215,23 @@ import Testing
         await world.capture.stop()
     }
 
+    @Test func signedOutMM2TCaptionsUseLocalWithoutOpeningHostedCaptions() async throws {
+        let api = URL(string: "https://captions.invalid")!
+        let world = try World(collabConfiguration: .init(apiURL: api, webURL: api))
+        var settings = world.app.settings.settings
+        settings.transcriptionService = .mm2t
+        settings.initializeCaptionSources(for: .mm2t)
+        settings.localCaptionModel = .breeze
+        settings.liveCaptions = true
+        world.app.settings.settings = settings
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.localStreaming.sessions.get.count == 1)
+        #expect(world.catalog.hostedStreaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
     @Test func withNoTranscriptionSourceSetUpCaptionsOpenNothing() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true

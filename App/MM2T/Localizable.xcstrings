@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Meeting type": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "會議類型"}}}},
+    "In-person meeting": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "實體會議"}}}},
+    "Online meeting": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "線上會議"}}}},
     "%@ · %lld / %lld min": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%1$@ · %2$lld / %3$lld 分鐘"}}}},
     "%lld / %lld min": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%1$lld / %2$lld 分鐘"}}}},
     "%lld / %lld shared meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已分享 %lld / %lld 場會議"}}}},
@@ -11,7 +14,7 @@
     "Add key": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "新增金鑰"}}}},
     "Add your ElevenLabs API key.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請新增你的 ElevenLabs API 金鑰。"}}}},
     "Add your Gemini API key.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "請新增你的 Gemini API 金鑰。"}}}},
-    "Assistant": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "助理"}}}},
+    "Personalization": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "個人化"}}}},
     "Configured": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已設定"}}}},
     "Connected": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已連線"}}}},
     "Connected · %lld models": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已連線 · %lld 個模型"}}}},

@@ -174,6 +174,7 @@ public final class AppController {
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
             rules: { settings.settings.detectionRules },
+            recordingMode: { settings.settings.recordingMode },
             saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
                 let current = settings.settings
@@ -226,12 +227,13 @@ public final class AppController {
             makeCollaboration: { title in
                 account.map { CollabSession(account: $0, title: title, now: now, llmSnapshot: {
                     let snapshot = settings.settings
-                    return { try pipelineSetup.buildLLM(snapshot, accountURL: accountURL) }
+                    return (snapshot.summaryService == .mm2t ? .hosted : .own,
+                            { try pipelineSetup.buildLLM(snapshot, accountURL: accountURL) })
                 }) }
             },
             makeCaptions: { captions in
                 let current = settings.settings
-                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
+                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current, accountURL: accountURL) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
                 let source = current.captionEngine == .apple ? current.transcriptionLanguage.fixedCaptionSource : nil
                 if current.translationEnabled, let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
@@ -242,7 +244,8 @@ public final class AppController {
                 return CaptionStream(
                     provider: provider,
                     languageCode: current.transcriptionLanguage.code,
-                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
+                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions,
+                    retainHostedLease: { settings.settings.transcriptionService == .mm2t })
             },
             enqueueRecording: { id, live in
                 folders.recorded(id)
@@ -305,9 +308,12 @@ public final class AppController {
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
         onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment, account: account)
-        account?.onUserChanged = { [weak capture, weak setup] in
+        account?.onUserChanged = { [weak account, weak capture, weak queue, weak setup] in
             setup?.recheck()
             capture?.collaboration?.accountChanged()
+            if account?.user != nil {
+                Task { await queue?.resumeDeferredAI() }
+            }
         }
         account?.beforeSignOut = { [weak capture] in await capture?.signOutOfCollaboration() }
     }

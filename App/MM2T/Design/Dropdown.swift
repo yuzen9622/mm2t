@@ -19,12 +19,17 @@ struct DropdownOption<ID: Hashable>: Identifiable {
 /// which open a list under it. The list is drawn by the nearest `dropdownLayer()`, so no card,
 /// scroll view or clip around the trigger cuts it off. One list is open at a time.
 struct Dropdown<ID: Hashable>: View {
+    enum Trigger: Equatable {
+        case selection, recordingChevron
+    }
+
     /// What the trigger is, for accessibility.
     let label: LocalizedStringKey
     let options: [DropdownOption<ID>]
     @Binding var selection: ID
     var placeholder = ""
     var showsSelectedLeading = true
+    var trigger: Trigger = .selection
     @State private var id = UUID()
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
@@ -33,37 +38,64 @@ struct Dropdown<ID: Hashable>: View {
     private var selected: DropdownOption<ID>? { options.first { $0.id == selection } }
 
     var body: some View {
-        Button { DropdownState.shared.open = isOpen ? nil : id } label: {
-            HStack(spacing: 6) {
-                if showsSelectedLeading, let leading = selected?.leading { Text(verbatim: leading) }
-                Text(verbatim: selected?.title ?? placeholder)
-                if let detail = selected?.detail {
-                    Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary)
-                }
-                Icon("chevron-down", size: 12).foregroundStyle(Palette.secondary)
+        styledTrigger
+            .onHover { hovering = $0 && enabled }
+            .motion(Motion.touch, value: hovering)
+            .modifier(RecordingChevronHelp(label: label, applies: trigger == .recordingChevron))
+            .accessibilityLabel(label)
+            .accessibilityValue(Text(verbatim: selected?.selectedTitle ?? placeholder))
+            .anchorPreference(key: DropdownKey.self, value: .bounds) { anchor in
+                isOpen ? DropdownRequest(id: id, anchor: anchor, idealHeight: CGFloat(options.count * 30 + 12),
+                                         dismissesOnScroll: trigger == .selection, list: { AnyView(list(maxHeight: $0)) }) : nil
             }
-            .font(Typo.body)
-            .lineLimit(1)
-            // The hover tint reaches past the text without moving it.
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(hovering || isOpen ? Palette.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .padding(.horizontal, -6)
-            .padding(.vertical, -3)
-            .contentShape(Rectangle())
+            .onDisappear { if isOpen { DropdownState.shared.open = nil } }
+            .onChange(of: enabled) { if !enabled, isOpen { DropdownState.shared.open = nil } }
+    }
+
+    @ViewBuilder
+    private var styledTrigger: some View {
+        switch trigger {
+        case .selection:
+            triggerButton
+                .buttonStyle(Pressable())
+                .focusEffectDisabled()
+                .opacity(enabled ? 1 : 0.5)
+        case .recordingChevron:
+            triggerButton
+                .buttonStyle(SegmentPress(hovering: hovering || isOpen))
+                .focusEffectDisabled()
         }
-        .buttonStyle(Pressable())
-        .focusEffectDisabled()
-        .opacity(enabled ? 1 : 0.5)
-        .onHover { hovering = $0 && enabled }
-        .motion(Motion.touch, value: hovering)
-        .accessibilityLabel(label)
-        .accessibilityValue(Text(verbatim: selected?.selectedTitle ?? placeholder))
-        .anchorPreference(key: DropdownKey.self, value: .bounds) { anchor in
-            isOpen ? DropdownRequest(id: id, anchor: anchor, idealHeight: CGFloat(options.count * 30 + 12), list: { AnyView(list(maxHeight: $0)) }) : nil
+    }
+
+    private var triggerButton: some View {
+        Button { DropdownState.shared.open = isOpen ? nil : id } label: {
+            switch trigger {
+            case .selection:
+                HStack(spacing: 6) {
+                    if showsSelectedLeading, let leading = selected?.leading { Text(verbatim: leading) }
+                    Text(verbatim: selected?.title ?? placeholder)
+                    if let detail = selected?.detail {
+                        Text(verbatim: detail).font(Typo.caption).foregroundStyle(Palette.secondary)
+                    }
+                    Icon("chevron-down", size: 12).foregroundStyle(Palette.secondary)
+                }
+                .font(Typo.body)
+                .lineLimit(1)
+                // The hover tint reaches past the text without moving it.
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(hovering || isOpen ? Palette.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.horizontal, -6)
+                .padding(.vertical, -3)
+                .contentShape(Rectangle())
+            case .recordingChevron:
+                Icon("chevron-down", size: 12)
+                    .foregroundStyle(.white)
+                    .frame(width: 32)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
         }
-        .onDisappear { if isOpen { DropdownState.shared.open = nil } }
-        .onChange(of: enabled) { if !enabled, isOpen { DropdownState.shared.open = nil } }
     }
 
     private func list(maxHeight: CGFloat) -> some View {
@@ -71,6 +103,15 @@ struct Dropdown<ID: Hashable>: View {
             selection = choice
             DropdownState.shared.open = nil
         }
+    }
+}
+
+private struct RecordingChevronHelp: ViewModifier {
+    let label: LocalizedStringKey
+    let applies: Bool
+
+    func body(content: Content) -> some View {
+        if applies { content.help(label) } else { content }
     }
 }
 
@@ -85,6 +126,7 @@ struct DropdownRequest {
     let id: UUID
     let anchor: Anchor<CGRect>
     let idealHeight: CGFloat
+    let dismissesOnScroll: Bool
     let list: (CGFloat) -> AnyView
 }
 
@@ -193,8 +235,8 @@ private struct DropdownList<ID: Hashable>: View {
     }
 }
 
-/// Draws the open dropdown of the views inside it, above all of them, and closes it on a click
-/// or scroll anywhere else. Apply at the root of a surface whose content is clipped or scrolls.
+/// Draws the open dropdown above the views inside this layer. Apply at the root of a surface
+/// whose content is clipped or scrolls.
 private struct DropdownLayer: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -207,7 +249,7 @@ private struct DropdownLayer: ViewModifier {
                 ZStack(alignment: .topLeading) {
                     Color.clear.frame(width: proxy.size.width, height: proxy.size.height)
                     if let request {
-                        DismissCatcher { DropdownState.shared.open = nil }
+                        DismissCatcher(dismissesOnScroll: request.dismissesOnScroll) { DropdownState.shared.open = nil }
                             .frame(width: proxy.size.width, height: proxy.size.height)
                         list(request, rect: proxy[request.anchor], bounds: proxy.size)
                     }
@@ -235,24 +277,29 @@ private struct DropdownLayer: ViewModifier {
     }
 }
 
-/// Covers the layer while a list is open: a click or a scroll there closes the list and goes no further.
+/// Covers the layer while a list is open and consumes outside clicks and scrolls.
 private struct DismissCatcher: NSViewRepresentable {
+    let dismissesOnScroll: Bool
     let dismiss: () -> Void
 
     func makeNSView(context: Context) -> CatcherView {
         let view = CatcherView()
-        view.dismiss = dismiss
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: CatcherView, context: Context) { view.dismiss = dismiss }
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.dismiss = dismiss
+        view.dismissesOnScroll = dismissesOnScroll
+    }
 
     final class CatcherView: NSView {
         var dismiss: () -> Void = {}
+        var dismissesOnScroll = false
         override func mouseDown(with event: NSEvent) { dismiss() }
         override func rightMouseDown(with event: NSEvent) { dismiss() }
         override func otherMouseDown(with event: NSEvent) { dismiss() }
-        override func scrollWheel(with event: NSEvent) { dismiss() }
+        override func scrollWheel(with event: NSEvent) { if dismissesOnScroll { dismiss() } }
     }
 }
 

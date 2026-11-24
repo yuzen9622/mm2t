@@ -19,16 +19,24 @@ public struct StreamingTranscriptionChain: StreamingTranscriptionProvider {
     }
 
     public func open(_ request: StreamingTranscriptionRequest) async throws -> any StreamingTranscriptionSession {
-        var lastError = TranscriptionError.unreachable("no transcription source configured")
+        var lastError: TranscriptionError?
         for route in routes {
             do {
+                try Task.checkCancellation()
                 return try await route.provider.open(request)
+            } catch StreamingTranscriptionAvailability.ineligible {
+                continue
             } catch let error as TranscriptionError {
                 guard case .unreachable = error else { throw error }
                 lastError = error
             }
         }
-        throw lastError
+        if let lastError { throw lastError }
+        throw StreamingTranscriptionAvailability.ineligible
+    }
+
+    public func stop(retainingLeaseFor meeting: MeetingID?) async {
+        for route in routes { await route.provider.stop(retainingLeaseFor: meeting) }
     }
 }
 

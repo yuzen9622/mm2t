@@ -72,6 +72,10 @@ public struct ServerConnectionDraft {
     }
 }
 
+public enum RecordingMode: String, Codable, Sendable, CaseIterable {
+    case online, inPerson
+}
+
 /// Everything the user configures except secrets, which live only in the Keychain.
 public struct AppSettings: Codable, Equatable, Sendable {
     /// Speakers are always told apart on this Mac. Settings saved by an older build may still hold a
@@ -96,13 +100,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
     private var speechModels = SpeechModels()
     var captionSources: [TranscriptionSource] { captionSourceOrder }
-    private var captionSourceOrder: [TranscriptionSource] = [.local, .cloud]
+    private var captionSourceOrder: [TranscriptionSource] = [.mm2t, .local]
 
     mutating func initializeCaptionSources(for service: TranscriptionService) {
         switch service {
         case .elevenLabs: captionSourceOrder = [.local, .cloud]
         case .server: captionSourceOrder = [.local, .selfHosted]
-        case .mm2t: captionSourceOrder = [.local]
+        case .mm2t: captionSourceOrder = [.mm2t, .local]
         }
     }
 
@@ -127,6 +131,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var hidesFromScreenCapture = true
     /// Display only: the saved transcript still comes from the recording.
     public var liveCaptions = false
+    public var recordingMode: RecordingMode = .online
     /// Translates live captions on this Mac with the downloaded models; never saved.
     public var translationEnabled = false
     public var captionEngine: CaptionEngine = .initial
@@ -163,6 +168,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             switch oldOrder?.first {
             case .selfHosted: transcriptionService = .server
             case .local: transcriptionService = selfHostedURL == nil ? .elevenLabs : .server
+            case .mm2t: transcriptionService = .mm2t
             case .cloud, nil: transcriptionService = .elevenLabs
             }
         }
@@ -193,6 +199,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         transcriptionLanguage = try c.decodeIfPresent(TranscriptionLanguage.self, forKey: .transcriptionLanguage) ?? defaults.transcriptionLanguage
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         hidesFromScreenCapture = try c.decodeIfPresent(Bool.self, forKey: .hidesFromScreenCapture) ?? defaults.hidesFromScreenCapture
+        recordingMode = try c.decodeIfPresent(RecordingMode.self, forKey: .recordingMode) ?? .online
         liveCaptions = try c.decodeIfPresent(Bool.self, forKey: .liveCaptions) ?? defaults.liveCaptions
         if let order = try c.decodeIfPresent([TranscriptionSource].self, forKey: .captionSourceOrder) ?? oldOrder {
             captionSourceOrder = order
@@ -218,6 +225,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case summaryService, hasCompletedOnboarding, hidesFromScreenCapture
         case openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
         case detectionRules
+        case recordingMode
         case liveCaptions, captionSourceOrder, captionBarOffsets, captionEngine, captionTranslation, translationEnabled
     }
 
@@ -226,6 +234,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var forProcessing: AppSettings {
         var settings = self
         settings.liveCaptions = false
+        settings.recordingMode = .online
         settings.speechModels = SpeechModels()
         settings.captionSourceOrder = []
         settings.translationEnabled = false

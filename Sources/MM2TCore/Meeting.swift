@@ -55,6 +55,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
 
     public internal(set) var outputs = LLMOutputs()
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
+    public internal(set) var deferredAIStep: ProcessingStep?
 
     init(id: MeetingID, metadata: MeetingMetadata, audio: RecordingAudio, highlights: [Highlight]) {
         self.id = id

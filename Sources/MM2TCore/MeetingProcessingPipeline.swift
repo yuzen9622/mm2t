@@ -28,6 +28,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Removes the speakers' echo of the remote track from the mic track before it is transcribed
     /// and separated. nil leaves the mic as recorded.
     public let micCleaner: (any MicCleaner)?
+    private let isSilentTrack: @Sendable (URL) -> Bool
 
     public init(
         library: MeetingLibrary,
@@ -41,11 +42,13 @@ public struct MeetingProcessingPipeline: Sendable {
         vocabulary: [String],
         runsConcurrently: Bool = false,
         transcribesConcurrently: Bool? = nil,
-        micCleaner: (any MicCleaner)? = nil
+        micCleaner: (any MicCleaner)? = nil,
+        isSilentTrack: @escaping @Sendable (URL) -> Bool = { _ in false }
     ) {
         self.runsConcurrently = runsConcurrently
         self.transcribesConcurrently = transcribesConcurrently ?? runsConcurrently
         self.micCleaner = micCleaner
+        self.isSilentTrack = isSilentTrack
         self.library = library
         self.voiceprints = voiceprints
         self.diarizer = diarizer
@@ -119,7 +122,7 @@ public struct MeetingProcessingPipeline: Sendable {
         MeetingProcessingPipeline(library: library, voiceprints: voiceprints, diarizer: diarizer, embedder: embedder,
             diarizationOrder: diarizationOrder, transcription: transcription, llm: provider, thresholds: thresholds,
             vocabulary: vocabulary, runsConcurrently: runsConcurrently, transcribesConcurrently: transcribesConcurrently,
-            micCleaner: micCleaner)
+            micCleaner: micCleaner, isSilentTrack: isSilentTrack)
     }
 
     /// Runs from the meeting's resume step to the end. A step failure is recorded in
@@ -127,10 +130,15 @@ public struct MeetingProcessingPipeline: Sendable {
     @discardableResult
     public func process(
         _ id: MeetingID,
+        resumeDeferredAI: Bool = false,
         progress: @Sendable (ProcessingStep) -> Void = { _ in }
     ) async throws -> Meeting {
         var meeting = try await library.meeting(id)
-        if case .failed(let step, _) = meeting.status {
+        if resumeDeferredAI {
+            guard llm != nil, let deferred = meeting.deferredAIStep else { return meeting }
+            meeting.status = .pending(next: max(deferred, meeting.status.resumeStep ?? deferred))
+            try await library.save(meeting)
+        } else if case .failed(let step, _) = meeting.status {
             meeting.status = .pending(next: step)
             try await library.save(meeting)
         }
@@ -138,6 +146,7 @@ public struct MeetingProcessingPipeline: Sendable {
             if step >= .inferNames {
                 guard let llm else {
                     try Task.checkCancellation()
+                    meeting.deferredAIStep = step
                     meeting.status = .completed
                     try await library.save(meeting)
                     return meeting
@@ -155,6 +164,7 @@ public struct MeetingProcessingPipeline: Sendable {
                 // Some steps fall back instead of throwing; a cancelled one must not count as done.
                 try Task.checkCancellation()
                 meeting.status = step.next.map { .pending(next: $0) } ?? .completed
+                if meeting.status == .completed { meeting.deferredAIStep = nil }
             } catch {
                 // A stop the user asked for leaves the meeting waiting at this step, ready to resume.
                 if Task.isCancelled { throw CancellationError() }
@@ -204,6 +214,7 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.status = .failed(step: failed, reason: failures[failed]!)
         } else {
             meeting.status = .completed
+            meeting.deferredAIStep = nil
         }
         try await library.save(meeting)
     }
@@ -258,7 +269,8 @@ public struct MeetingProcessingPipeline: Sendable {
             let names = await voiceprints.spokenNames()
             let hints = names + vocabulary.filter { !names.contains($0) }
             let micURL = await library.audioURL(meeting, track: .me), remoteURL = await library.audioURL(meeting, track: .remote)
-            let cleaned = try? micCleaner?.clean(mic: micURL, remote: remoteURL)
+            let remoteIsSilent = isSilentTrack(remoteURL)
+            let cleaned = remoteIsSilent ? nil : try? micCleaner?.clean(mic: micURL, remote: remoteURL)
             // Playback wants the same track, and cleaning it again there is slow for a long meeting.
             defer { if let cleaned { PlaybackMic.keep(cleaned.audio, beside: micURL) } }
             let heardURL = cleaned?.audio ?? micURL
@@ -272,7 +284,10 @@ public struct MeetingProcessingPipeline: Sendable {
                     try await transcription.transcribe(audio: audio, hints: hints, labelSpeakers: labelSpeakers)
                 }
             }
-            if transcribesConcurrently {
+            if remoteIsSilent {
+                me = try await transcribe(.me, heardURL, labelSpeakers: labels)
+                remote = TrackTranscript(source: me.source, content: .unlabeled([]))
+            } else if transcribesConcurrently {
                 // Both at once, so the mic is labeled before anyone knows whether it needs to be.
                 async let remoteTask = transcribe(.remote, remoteURL, labelSpeakers: labels)
                 async let meTask = transcribe(.me, heardURL, labelSpeakers: labels)

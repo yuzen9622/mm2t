@@ -330,13 +330,32 @@ public actor HostedLeases {
         let task = Task {
             defer { opening[meeting] = nil }
             let id = try await open()
-            leaseIDs[meeting] = id
-            let remembered = recall()
-            if !remembered.contains(id) { keep(remembered + [id]) }
+            rememberLease(id, for: meeting)
             return id
         }
         opening[meeting] = task
         return try await task.value
+    }
+
+    /// Transfers a recording's caption lease before its saved meeting is queued for transcription.
+    func adopt(_ id: String, for meeting: String) -> Bool {
+        guard leaseIDs[meeting] == nil, opening[meeting] == nil else { return false }
+        rememberLease(id, for: meeting)
+        return true
+    }
+
+    private func rememberLease(_ id: String, for meeting: String) {
+        leaseIDs[meeting] = id
+        rememberForCleanup(id)
+    }
+
+    func rememberForCleanup(_ id: String) {
+        let remembered = recall()
+        if !remembered.contains(id) { keep(remembered + [id]) }
+    }
+
+    func unassignedLeases() -> [String] {
+        Array(Set(recall()).subtracting(leaseIDs.values)).sorted()
     }
 
     func closed(_ id: String, meeting: String) {

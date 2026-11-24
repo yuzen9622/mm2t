@@ -3,6 +3,16 @@ import Testing
 @testable import MM2TApp
 
 @Suite struct ServiceMigrationTests {
+    @Test func recordingModeDefaultsToOnlineRoundTripsAndDoesNotAffectProcessing() throws {
+        let online = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+        #expect(online.recordingMode == .online)
+        var inPerson = online
+        inPerson.recordingMode = .inPerson
+        let saved = try JSONEncoder().encode(inPerson)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).recordingMode == .inPerson)
+        #expect(inPerson.forProcessing == online.forProcessing)
+    }
+
     @Test(arguments: [
         (#"{"transcriptionOrder":["cloud","selfHosted"]}"#, TranscriptionService.elevenLabs),
         (#"{"transcriptionOrder":["selfHosted","cloud"]}"#, .server),
@@ -45,6 +55,17 @@ import Testing
         #expect(saved.captionSources == [.cloud, .selfHosted, .local])
         settings.transcriptionService = .mm2t
         #expect(settings.captionSources == [.cloud, .selfHosted, .local])
+    }
+
+    @Test func newMM2TCaptionsDefaultToHostedWithoutChangingASavedLocalChoice() throws {
+        let decoder = JSONDecoder()
+        let current = Data(#"{"transcriptionService":"mm2t"}"#.utf8)
+        let saved = Data(#"{"transcriptionService":"mm2t","captionSourceOrder":["local"]}"#.utf8)
+        #expect(AppSettings().captionSources == [.mm2t, .local])
+        #expect(try decoder.decode(AppSettings.self, from: current).captionSources == [.mm2t, .local])
+        let settings = try decoder.decode(AppSettings.self, from: saved)
+        #expect(settings.captionSources == [.local])
+        #expect(try decoder.decode(AppSettings.self, from: JSONEncoder().encode(settings)).captionSources == [.local])
     }
 
     @MainActor @Test func anEmptySettingsStoreUsesTheMM2TPlan() throws {

@@ -2,11 +2,22 @@ import CoreAudio
 import Foundation
 import MM2TCore
 
+public enum SystemAudioCapture: Sendable, Equatable {
+    /// No process tap; the remote track is written as silence.
+    case off
+    /// A detected meeting app, including the whole browser for a web call.
+    case app(String)
+    /// Follow apps holding the microphone, except for bundle IDs silenced in detection rules.
+    case automatic(ignoring: Set<String>)
+
+    public var appBundleID: String? {
+        if case .app(let id) = self { return id }
+        return nil
+    }
+}
+
 public struct RecorderConfiguration: Sendable {
-    /// The app whose audio becomes the remote track; for a browser, the browser's own bundle id.
-    /// The app whose audio becomes the remote track; nil records everything the Mac plays except
-    /// this app, for when no meeting app is known.
-    public var targetBundleID: String?
+    public var systemAudio: SystemAudioCapture
     /// A fresh directory for this session; `mic.wav`, `remote.wav` and `session.json` go here.
     public var directory: URL
     public var title: String
@@ -17,9 +28,9 @@ public struct RecorderConfiguration: Sendable {
     /// remote-only recording and the probe's tap self-test.
     public var captureMicrophone: Bool
 
-    public init(targetBundleID: String?, directory: URL, title: String,
+    public init(systemAudio: SystemAudioCapture, directory: URL, title: String,
                 platform: MeetingPlatform? = nil, sampleRate: Int = 16_000, captureMicrophone: Bool = true) {
-        self.targetBundleID = targetBundleID
+        self.systemAudio = systemAudio
         self.directory = directory
         self.title = title
         self.platform = platform
@@ -64,6 +75,7 @@ public enum RecorderEvent: Sendable, Equatable {
     /// Flushing to disk failed (disk full, volume removed); capture continues and retries each second.
     case writeFailed(String)
     case targetProcessesChanged(count: Int)
+    case systemAudioLocked(bundleIDs: [String])
 }
 
 /// Records the microphone and one app's audio into two time-aligned WAV tracks.
@@ -81,6 +93,7 @@ public actor AudioRecorder {
     private let remote: TrackPipeline
     private var micIO: DeviceIO?
     private var micListeners: [PropertyListener] = []
+    private var locked: Set<String> = []
     private var tap: ProcessTap?
     private var tapIO: DeviceIO?
     private var systemListeners: [PropertyListener] = []
@@ -129,7 +142,7 @@ public actor AudioRecorder {
                 throw RecorderError.directoryNotEmpty(directory)
             }
             manifest = RecordingManifest(title: configuration.title, startedAt: Date(),
-                                         platform: configuration.platform, targetBundleID: configuration.targetBundleID)
+                                         platform: configuration.platform, targetBundleID: configuration.systemAudio.appBundleID)
             try manifest.write(to: directory)
             mic = try TrackPipeline(track: .me, url: directory.appending(path: RecordingManifest.micFile), sampleRate: configuration.sampleRate)
             remote = try TrackPipeline(track: .remote, url: directory.appending(path: RecordingManifest.remoteFile), sampleRate: configuration.sampleRate)
@@ -143,7 +156,7 @@ public actor AudioRecorder {
 
     private func begin() throws {
         do {
-            try startTap()
+            if configuration.systemAudio != .off { try startTap() }
         } catch let error as CoreAudioError {
             throw RecorderError.systemAudioCaptureUnavailable(error)
         }
@@ -158,14 +171,16 @@ public actor AudioRecorder {
         }
         let queue = listenerQueue
         do {
-            systemListeners = [
-                try PropertyListener(systemObject, kAudioHardwarePropertyDefaultInputDevice, queue: queue) { [weak self] in
+            if configuration.captureMicrophone {
+                systemListeners.append(try PropertyListener(systemObject, kAudioHardwarePropertyDefaultInputDevice, queue: queue) { [weak self] in
                     Task { await self?.restartMicrophone(reason: "default input changed") }
-                },
-                try PropertyListener(systemObject, kAudioHardwarePropertyProcessObjectList, queue: queue) { [weak self] in
+                })
+            }
+            if configuration.systemAudio != .off {
+                systemListeners.append(try PropertyListener(systemObject, kAudioHardwarePropertyProcessObjectList, queue: queue) { [weak self] in
                     Task { await self?.refreshTapProcesses() }
-                },
-            ]
+                })
+            }
         } catch {
             stopCaptures()
             throw error
@@ -252,9 +267,11 @@ public actor AudioRecorder {
         mic.drain(timeline)
         remote.drain(timeline)
         let duration = timeline.elapsed(at: now)
+        // Alignment tolerates small callback jitter, so a track may already reach past the clock.
+        let fileDuration = max(duration, Double(max(mic.writer.framesAppended, remote.writer.framesAppended)) / Double(configuration.sampleRate))
         do {
-            try mic.finish(duration: duration)
-            try remote.finish(duration: duration)
+            try mic.finish(duration: fileDuration)
+            try remote.finish(duration: fileDuration)
         } catch {
             throw RecorderError.fileSystem(error.localizedDescription)
         }
@@ -281,6 +298,7 @@ public actor AudioRecorder {
         continuation.yield(.levels(TrackLevels(me: mic.takeLevel(), remote: remoteLevel)))
         if now - lastFlush >= 1 {
             lastFlush = now
+            if case .automatic = configuration.systemAudio { refreshTapProcesses() }
             let settled = timeline.elapsed(at: now) - Self.captureLatencyMargin
             mic.padSilence(upTo: settled)
             remote.padSilence(upTo: settled)
@@ -290,6 +308,9 @@ public actor AudioRecorder {
             } catch {
                 continuation.yield(.writeFailed(error.localizedDescription))
             }
+        }
+        if configuration.systemAudio == .off {
+            remote.padSilence(upTo: Double(mic.writer.framesAppended) / Double(configuration.sampleRate))
         }
         publishLiveAudio()
         watchForStalls(now: now)
@@ -301,7 +322,7 @@ public actor AudioRecorder {
         if configuration.captureMicrophone, isStalled(mic.ring, since: micStartedAt, now: now) {
             restartMicrophone(reason: "no microphone audio for \(Self.stallTimeout) s")
         }
-        if isStalled(remote.ring, since: tapStartedAt, now: now) {
+        if configuration.systemAudio != .off, isStalled(remote.ring, since: tapStartedAt, now: now) {
             restartTap(reason: "no tap audio for \(Self.stallTimeout) s")
         }
     }
@@ -316,7 +337,7 @@ public actor AudioRecorder {
     private func watchForSilence(_ level: AudioLevel, now: Double) {
         // Recording the whole Mac, silence only means nothing is playing; some app always holds an
         // output stream open, so "the target is playing" proves nothing there.
-        guard configuration.targetBundleID != nil else { return }
+        guard configuration.systemAudio.appBundleID != nil || !locked.isEmpty else { return }
         guard level.peak == 0 else {
             remoteSilentSince = nil
             reportedSilence = false
@@ -359,13 +380,30 @@ public actor AudioRecorder {
     }
 
     private func tapScope() throws -> TapScope {
-        TapScope.recording(targetBundleID: configuration.targetBundleID,
-                           ownBundleID: Bundle.main.bundleIdentifier, processes: try AudioProcesses.list())
+        switch configuration.systemAudio {
+        case .off:
+            return .only([])
+        case .app(let id):
+            return TapScope.recording(targetBundleID: id, ownBundleID: Bundle.main.bundleIdentifier,
+                                      processes: try AudioProcesses.list())
+        case .automatic(let ignoring):
+            let result = TapScope.automatic(ownBundleID: Bundle.main.bundleIdentifier, ignoring: ignoring,
+                                            locked: locked, processes: try AudioProcesses.list())
+            let firstLock = locked.isEmpty && !result.locked.isEmpty
+            locked = result.locked
+            if firstLock {
+                let bundleIDs = locked.sorted()
+                manifest.targetBundleID = bundleIDs.first
+                do { try writeManifest() } catch { continuation.yield(.writeFailed(error.localizedDescription)) }
+                continuation.yield(.systemAudioLocked(bundleIDs: bundleIDs))
+            }
+            return result.scope
+        }
     }
 
     private func isTapped(_ owner: String?) -> Bool {
-        if let target = configuration.targetBundleID { return owner == target }
-        return owner != Bundle.main.bundleIdentifier && !TapScope.isAudioRelay(owner)
+        guard let owner else { return false }
+        return owner == configuration.systemAudio.appBundleID || locked.contains(owner)
     }
 
     private func stopTap() {

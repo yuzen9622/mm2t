@@ -194,7 +194,7 @@ import Testing
         #expect(flow.advance())
         #expect(world.app.settings.settings.transcriptionService == .mm2t)
         #expect(world.app.settings.settings.summaryService == .mm2t)
-        #expect(world.app.settings.settings.captionSources == [.local])
+        #expect(world.app.settings.settings.captionSources == [.mm2t, .local])
     }
 
     @Test func reopeningRepairKeepsTheExistingPairOfServices() throws {

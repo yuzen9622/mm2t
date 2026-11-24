@@ -18,6 +18,7 @@ public actor CaptionStream {
     private let hints: [String]
     private let captions: LiveCaptions
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let retainHostedLease: @MainActor @Sendable () -> Bool
 
     private var sampleRate = 16_000
     private var audioTask: Task<Void, Never>?
@@ -31,13 +32,14 @@ public actor CaptionStream {
     private var pending: [Float] = []
 
     public init(provider: any StreamingTranscriptionProvider, languageCode: String?, hints: [String],
-                captions: LiveCaptions,
+                captions: LiveCaptions, retainHostedLease: @escaping @MainActor @Sendable () -> Bool = { false },
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.provider = provider
         self.languageCode = languageCode
         self.hints = hints
         self.captions = captions
         self.sleep = sleep
+        self.retainHostedLease = retainHostedLease
     }
 
     /// Starts reading `audio` (mono samples at `sampleRate`) and opens the first session.
@@ -73,13 +75,16 @@ public actor CaptionStream {
     }
 
     /// The recording stopped: the session closes and every caption is cleared.
-    public func stop() async {
+    public func stop(retainingLeaseFor savedMeeting: MeetingID? = nil) async {
         guard !isStopped else { return }
         isStopped = true
         audioTask?.cancel()
         audioTask = nil
-        await disconnect(discard: true)
+        let open = disconnectSession()
         await captions.clear()
+        let meeting = await retainHostedLease() ? savedMeeting : nil
+        if let open { Task { await open.discard() } }
+        await provider.stop(retainingLeaseFor: meeting)
     }
 
     // MARK: Session
@@ -91,18 +96,17 @@ public actor CaptionStream {
         runTask = Task { [weak self] in await self?.run(current) }
     }
 
-    private func disconnect(discard: Bool = false) async {
+    private func disconnect() async {
+        await disconnectSession()?.close()
+    }
+
+    private func disconnectSession() -> (any StreamingTranscriptionSession)? {
         generation += 1
         runTask?.cancel()
         runTask = nil
         pending = []
-        let open = connection
-        connection = nil
-        if discard {
-            if let open { Task { await open.discard() } }
-        } else {
-            await open?.close()
-        }
+        defer { connection = nil }
+        return connection
     }
 
     private func isCurrent(_ run: Int) -> Bool {
@@ -133,6 +137,10 @@ public actor CaptionStream {
                     await captions.receive(event)
                 }
                 Self.logger.info("event=captions_session_closed")
+            } catch StreamingTranscriptionAvailability.ineligible {
+                guard isCurrent(run) else { return }
+                await captions.set(.off)
+                return
             } catch TranscriptionError.failed(let reason) {
                 guard isCurrent(run) else { return }
                 Self.logger.error("event=captions_unavailable")

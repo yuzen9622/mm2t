@@ -66,6 +66,7 @@ public protocol ProviderCatalog: Sendable {
     /// Live captions while recording; display only.
     func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider
     func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider
+    func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool) -> any StreamingTranscriptionProvider
     /// nil until the model is on disk.
     func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)?
     func llm(apiKey: Secret) -> any LLMProvider
@@ -136,7 +137,8 @@ public struct PipelineSetup: Sendable {
             diarizationOrder: AppSettings.diarizationOrder,
             transcription: TranscriptionChain([route]), llm: llm,
             thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
-            runsConcurrently: true, transcribesConcurrently: true, micCleaner: EchoRemover()))
+            runsConcurrently: true, transcribesConcurrently: true, micCleaner: EchoRemover(),
+            isSilentTrack: WAVFormat.isDigitalSilence))
     }
 
     func transcriptionRoute(_ settings: AppSettings, accountURL: URL?) throws -> TranscriptionChain.Route? {
@@ -159,9 +161,15 @@ public struct PipelineSetup: Sendable {
         }
     }
 
-    public func buildCaptions(_ settings: AppSettings) -> StreamingTranscriptionChain? {
+    public func buildCaptions(_ settings: AppSettings, accountURL: URL? = nil,
+                              interfaceLanguage: String = InterfaceLanguage.locale?.identifier ?? Bundle.main.preferredLocalizations.first ?? "en") -> StreamingTranscriptionChain? {
+        let traditionalChinese = Locale.Language(identifier: interfaceLanguage).maximalIdentifier.hasPrefix("zh-Hant")
         let routes: [StreamingTranscriptionChain.Route] = settings.captionSources.compactMap { source in
             switch source {
+            case .mm2t:
+                guard let accountURL, let token = try? accountToken(for: accountURL) else { return nil }
+                return .init(.mm2t, catalog.hostedCaptions(url: Self.hostedURL(accountURL, job: "sessions"),
+                                                         authorization: authorization(token), traditionalChinese: traditionalChinese))
             case .cloud:
                 guard let key = try? nonEmpty(.elevenLabsAPIKey) else { return nil }
                 return .init(.cloud, catalog.streamingTranscription(apiKey: key))

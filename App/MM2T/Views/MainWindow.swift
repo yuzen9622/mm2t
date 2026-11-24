@@ -114,7 +114,7 @@ struct MainWindow: View {
     /// During a change of stage, whether the arriving side has started to show.
     @State private var arriving = false
 
-    static let sidebarWidth: CGFloat = 220
+    static let sidebarWidth: CGFloat = 264
     static let setupSize = CGSize(width: 600, height: 580)
     static let appMinimum = CGSize(width: 820, height: 540)
 
@@ -319,7 +319,9 @@ struct MainWindow: View {
             .padding(.horizontal, 6)
             .padding(.bottom, 18)
 
-            RecordButton(capture: app.capture, openLive: { MainNavigation.shared.openLive() })
+            RecordButton(capture: app.capture, mode: Binding(
+                get: { app.settings.settings.recordingMode },
+                set: { app.settings.settings.recordingMode = $0 }), openLive: { MainNavigation.shared.openLive() })
                 .padding(.bottom, 18)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -838,34 +840,50 @@ struct EmptyState: View {
 /// While one runs it opens the live page.
 private struct RecordButton: View {
     let capture: CaptureController
+    @Binding var mode: RecordingMode
     let openLive: () -> Void
     @State private var hovering = false
 
     var body: some View {
         let idle = capture.state == .idle
-        Button {
-            if capture.state.isCapturing { openLive() } else { Task { await capture.startNow(title: String(localized: "Recording")) } }
-        } label: {
-            HStack(spacing: 8) {
-                if idle {
-                    Icon("microphone", size: 16)
-                } else {
-                    Circle().fill(.white).frame(width: 7, height: 7)
+        HStack(spacing: 0) {
+            Button {
+                if capture.state.isCapturing { openLive() }
+                else { Task { await capture.startNow(title: String(localized: "Recording")) } }
+            } label: {
+                HStack(spacing: 8) {
+                    if idle {
+                        Icon(mode == .online ? "video" : "users", size: 16)
+                    } else {
+                        Circle().fill(.white).frame(width: 7, height: 7)
+                    }
+                    Text(idle ? "Start Recording" : "Recording").font(Typo.bodyStrong)
+                    Spacer(minLength: 0)
                 }
-                Text(idle ? "Start Recording" : "Recording").font(Typo.bodyStrong)
-                Spacer(minLength: 0)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .frame(height: 38)
-            .background(Palette.orange.opacity(hovering && idle ? 0.88 : 1),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .buttonStyle(SegmentPress(hovering: hovering && idle))
+            .disabled(!idle && !capture.state.isCapturing)
+            .onHover { hovering = $0 }
+            .motion(Motion.touch, value: hovering)
+
+            if idle {
+                Rectangle().fill(.white.opacity(0.28))
+                    .frame(width: 1)
+                    .padding(.vertical, 9)
+                    .accessibilityHidden(true)
+                Dropdown(label: "Meeting type", options: [
+                    DropdownOption(id: .online, title: String(localized: "Online meeting")),
+                    DropdownOption(id: .inPerson, title: String(localized: "In-person meeting")),
+                ], selection: $mode, trigger: .recordingChevron)
+            }
         }
-        .buttonStyle(Pressable())
-        .disabled(!idle && !capture.state.isCapturing)
-        .onHover { hovering = $0 }
-        .motion(Motion.touch, value: hovering)
+        .frame(height: 38)
+        .background(Palette.orange, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }
 

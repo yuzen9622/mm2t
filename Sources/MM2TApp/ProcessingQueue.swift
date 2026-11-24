@@ -27,6 +27,7 @@ public enum JobState: Equatable, Sendable {
 public enum ProcessingOperation: Sendable {
     /// Run from the meeting's resume step: a new recording, or a retry after a failure.
     case process
+    case resumeDeferredAI
     /// Name inference and the three generated views again, after speakers changed.
     case regenerate
     /// Speaker separation, voiceprints and alignment again, on the stored transcription.
@@ -155,18 +156,41 @@ public final class ProcessingQueue {
         }
     }
 
+    /// Schedules persisted work oldest first, using the same queue as manual processing.
+    public func resumeDeferredAI() async {
+        guard let pipeline = readyWithAI(), let meetings = try? await pipeline.library.list() else { return }
+        let resumed = meetings.reversed().compactMap { meeting -> Task<Void, Never>? in
+            guard meeting.deferredAIStep != nil else { return nil }
+            return enqueue(.resumeDeferredAI, on: meeting.id)
+        }
+        for task in resumed { await task.value }
+    }
+
+    private func readyWithAI() -> MeetingProcessingPipeline? {
+        guard case .ready(let pipeline) = try? makePipeline(), pipeline.llm != nil else { return nil }
+        return pipeline
+    }
+
     private func execute(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline?) async {
         let pipeline: MeetingProcessingPipeline
-        do {
-            switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
-            case .ready(let ready): pipeline = ready
-            case .needsSetup(let issues):
-                jobs[id] = .needsSetup(issues)
+        if case .resumeDeferredAI = operation {
+            guard let ready = readyWithAI() else {
+                jobs[id] = nil
                 return
             }
-        } catch {
-            jobs[id] = .failed(step: nil, reason: String(describing: error))
-            return
+            pipeline = ready
+        } else {
+            do {
+                switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
+                case .ready(let ready): pipeline = ready
+                case .needsSetup(let issues):
+                    jobs[id] = .needsSetup(issues)
+                    return
+                }
+            } catch {
+                jobs[id] = .failed(step: nil, reason: String(describing: error))
+                return
+            }
         }
 
         let token = UUID()
@@ -180,6 +204,7 @@ public final class ProcessingQueue {
             let meeting: Meeting
             switch operation {
             case .process: meeting = try await pipeline.process(id, progress: progress)
+            case .resumeDeferredAI: meeting = try await pipeline.process(id, resumeDeferredAI: true, progress: progress)
             case .regenerate: meeting = try await pipeline.regenerateLLMOutputs(id, progress: progress)
             case .reseparate:
                 jobs[id] = .running(.diarize)
@@ -189,6 +214,10 @@ public final class ProcessingQueue {
             case .completed:
                 jobs[id] = .completed
                 onCompleted?(meeting)
+                // Sign-in may have happened while this job was finishing without an LLM.
+                if pipeline.llm == nil, meeting.deferredAIStep != nil, readyWithAI() != nil {
+                    _ = enqueue(.resumeDeferredAI, on: id)
+                }
             case .failed(let step, let reason): jobs[id] = .failed(step: step, reason: reason)
             case .pending(let step): jobs[id] = .failed(step: step, reason: "processing stopped before \(step.rawValue)")
             }

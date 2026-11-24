@@ -6,6 +6,42 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct ProcessingTests {
+    @Test(arguments: [false, true], [false, true])
+    func batchTranscriptionSkipsOnlyDigitalSilence(concurrent: Bool, audibleRemote: Bool) async throws {
+        let world = try World()
+        let stt = world.catalog.cloud
+        let micURL = world.root.appending(path: "mic.wav")
+        let remoteURL = world.root.appending(path: "remote.wav")
+        try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: [500]), to: micURL)
+        var samples = [Int16](repeating: 0, count: 40_000)
+        if audibleRemote { samples[samples.count - 1] = 1 }
+        try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: samples), to: remoteURL)
+        let meeting = try await world.library.create(Recording(micTrack: micURL, remoteTrack: remoteURL,
+            highlights: [], metadata: MeetingMetadata(title: "Track selection", startedAt: Date(), duration: 2.5)))
+        let pipeline = MeetingProcessingPipeline(library: world.library, voiceprints: world.app.voiceprints,
+            diarizer: nil, embedder: nil, diarizationOrder: [.transcription],
+            transcription: TranscriptionChain([.init(.cloud, stt)]), llm: nil,
+            thresholds: world.catalog.thresholds, vocabulary: [], transcribesConcurrently: concurrent,
+            isSilentTrack: WAVFormat.isDigitalSilence)
+
+        let processed = try await pipeline.process(meeting.id)
+        #expect(stt.calls.get.map(\.file).sorted() == (audibleRemote ? ["mic.wav", "remote.wav"] : ["mic.wav"]))
+        #expect(stt.labelRequests.get == (audibleRemote ? [true, concurrent] : [true]))
+        let transcription = try #require(processed.transcription)
+        #expect(!transcription.me.words.isEmpty)
+        #expect(transcription.remote.words.isEmpty == !audibleRemote)
+    }
+
+    @Test func configuredPipelineDoesNotTranscribeInPersonRemoteTrack() async throws {
+        let world = try World()
+        world.app.settings.settings.recordingMode = .inPerson
+        await world.capture.startNow(title: "In-person")
+        await world.capture.stop()
+        let meeting = try #require(try await world.library.list().first)
+        #expect(world.queue.jobs[meeting.id] == .completed)
+        #expect(world.catalog.cloud.calls.get.map(\.file) == ["mic.wav"])
+    }
+
     @Test func rewritingRetainsItsExistingSetupRequirements() async {
         let queue = ProcessingQueue(
             makePipeline: { .needsSetup([.transcriptionServiceNotConfigured(.elevenLabs)]) },
@@ -80,7 +116,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func signedOutMM2TRecordsLocallyAndCanGenerateAfterSignIn(hasAccountURL: Bool) async throws {
+    func signedOutMM2TRecordsLocallyAndDefersAI(hasAccountURL: Bool) async throws {
         let api = URL(string: "https://collab.example")!
         let world = try World(keys: false, collabConfiguration: hasAccountURL ? .init(apiURL: api, webURL: api) : nil)
         world.app.settings.settings = AppSettings()
@@ -99,16 +135,109 @@ import Testing
         #expect(world.catalog.onDeviceSTT.calls.get.count == 2)
         #expect(world.catalog.llm.calls.get.isEmpty)
         #expect(world.catalog.openAIEndpoints.get.isEmpty)
+        #expect(meeting.deferredAIStep == .inferNames)
+    }
 
-        if hasAccountURL {
-            try world.credentials.save(Secret(#"{"apiURL":"https://collab.example","tokens":{"accessToken":"plan-token","refreshToken":"refresh"}}"#), for: .collabAccount)
-            await world.detail(meeting.id).regenerate()
-            let summarized = try await world.library.meeting(meeting.id)
-            #expect(summarized.status == .completed)
-            #expect(summarized.outputs.summary != nil)
-            #expect(world.catalog.onDeviceSTT.calls.get.count == 2)
-            #expect(world.catalog.selfHosted.calls.get.isEmpty)
+    @Test(arguments: [false, true])
+    func accountAvailabilityResumesOnlyDeferredMeetings(restoredAtLaunch: Bool) async throws {
+        let api = URL(string: "https://deferred.example.test")!
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RecordingTokenProbe.self]
+        let world = try World(collabConfiguration: .init(apiURL: api, webURL: api),
+                              collabSession: URLSession(configuration: configuration))
+        let alreadyProcessed = try await world.recordedMeeting(title: "已經完成")
+        #expect(alreadyProcessed.deferredAIStep == nil)
+        world.catalog.llm.calls.set([])
+
+        world.app.settings.settings = AppSettings()
+        world.app.settings.settings.localSpeechModel = .breezeCoreML
+        world.catalog.offlineDownloaded[.breezeCoreML]?.set(true)
+        var older = try await world.recordedMeeting(title: "較早")
+        let newer = try await world.recordedMeeting(title: "較晚")
+        older.metadata.startedAt = newer.metadata.startedAt.addingTimeInterval(-60)
+        try await world.library.save(older)
+        let firstUtterance = try #require(older.utterances.first)
+        let edited = try await TranscriptEditing(library: world.library).edit(firstUtterance.id, in: older.id, to: "保留這段人工修正")
+        let account = try #require(world.app.collabAccount)
+        let gate = Gate<Bool>()
+        world.catalog.llm.holds.set(["summarize": gate])
+
+        if restoredAtLaunch {
+            try world.credentials.save(Secret(#"{"apiURL":"https://deferred.example.test","tokens":{"accessToken":"new-token","refreshToken":"new-refresh"}}"#), for: .collabAccount)
+            account.observeSignIn()
+        } else {
+            try await account.completeSignIn(code: "fixture", verifier: "fixture")
         }
+        let oldestStarted = await eventually {
+            world.catalog.llm.calls.get.contains("summarize") && world.queue.jobs[newer.id] == .queued
+        }
+        #expect(oldestStarted)
+        #expect(world.queue.activeJob?.id == older.id)
+        await gate.open(true)
+        try #require(await eventually { world.catalog.llm.calls.get.filter { $0 == "summarize" }.count == 2 && !world.queue.isBusy(newer.id) })
+
+        let summarized = try await world.library.meeting(older.id)
+        #expect(summarized.status == .completed)
+        #expect(summarized.deferredAIStep == nil)
+        #expect(summarized.outputs.summary != nil)
+        #expect(summarized.outputs.cleaned != nil)
+        #expect(!summarized.suggestions.items.isEmpty)
+        #expect(summarized.utterances == edited.utterances)
+        #expect(try await world.library.meeting(newer.id).deferredAIStep == nil)
+        #expect(try await world.library.meeting(alreadyProcessed.id) == alreadyProcessed)
+        #expect(world.catalog.onDeviceSTT.calls.get.count == 4)
+    }
+
+    @Test func manualRegenerationClearsDeferredAIAndPreventsAutomaticOverwrite() async throws {
+        let world = try World()
+        world.app.settings.settings.summaryService = .mm2t
+        let meeting = try await world.recordedMeeting()
+        try #require(meeting.deferredAIStep == .inferNames)
+
+        world.app.settings.settings.summaryService = .gemini
+        await world.queue.run(.regenerate, on: meeting.id)
+
+        let regenerated = try await world.library.meeting(meeting.id)
+        #expect(regenerated.status == .completed)
+        #expect(regenerated.outputs.summary != nil)
+        #expect(regenerated.deferredAIStep == nil)
+        #expect(world.catalog.llm.calls.get.contains("summarize"))
+
+        world.catalog.llm.calls.set([])
+        await world.queue.resumeDeferredAI()
+        #expect(world.catalog.llm.calls.get.isEmpty)
+        #expect(try await world.library.meeting(meeting.id) == regenerated)
+    }
+
+    @Test func deferredAIFailureKeepsItsMarkerAndRecordsTheFailedStep() async throws {
+        let api = URL(string: "https://deferred.example.test")!
+        let world = try World(keys: false, collabConfiguration: .init(apiURL: api, webURL: api))
+        world.app.settings.settings = AppSettings()
+        world.app.settings.settings.localSpeechModel = .breezeCoreML
+        world.catalog.offlineDownloaded[.breezeCoreML]?.set(true)
+        let meeting = try await world.recordedMeeting()
+        try world.credentials.save(Secret(#"{"apiURL":"https://deferred.example.test","tokens":{"accessToken":"new-token","refreshToken":"new-refresh"}}"#), for: .collabAccount)
+        world.catalog.llm.failNext.set(["summarize"])
+
+        await world.queue.resumeDeferredAI()
+
+        let failed = try await world.library.meeting(meeting.id)
+        #expect(failed.deferredAIStep == .inferNames)
+        let reason = FakeLLMError().description
+        #expect(failed.status == .failed(step: .summarize, reason: reason))
+        #expect(world.queue.jobs[meeting.id] == .failed(step: .summarize, reason: reason))
+
+        await world.queue.resumeDeferredAI()
+        #expect(try await world.library.meeting(meeting.id).deferredAIStep == nil)
+    }
+
+    @Test func legacyMeetingJSONDecodesWithoutDeferredAI() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let data = try JSONEncoder().encode(meeting)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["deferredAIStep"] == nil)
+        #expect(try JSONDecoder().decode(Meeting.self, from: data) == meeting)
     }
 
     @Test func signedOutMM2TWithoutTheDownloadedModelReportsOnlyTheTranscriptionIssue() async throws {
@@ -247,7 +376,20 @@ import Testing
         if signOut {
             #expect(meeting.status == .completed)
             #expect(meeting.outputs.summary == nil)
+            #expect(meeting.deferredAIStep == .inferNames)
             #expect(requests.isEmpty, "no hosted request should use the signed-out token")
+
+            let account = try #require(world.app.collabAccount)
+            try await account.completeSignIn(code: "fixture", verifier: "fixture")
+            try #require(await eventually {
+                !RecordingTokenProbe.summaryRequests.get.isEmpty && !world.queue.isBusy(meeting.id)
+            })
+            let resumed = try await world.library.meeting(meeting.id)
+            #expect(resumed.outputs.summary?.headline == "Summary with the rotated token")
+            #expect(resumed.deferredAIStep == nil)
+            #expect(RecordingTokenProbe.summaryRequests.get.allSatisfy {
+                $0.value(forHTTPHeaderField: "X-MM2T-Purpose") == "auto"
+            })
         } else {
             #expect(meeting.status == .completed)
             #expect(meeting.outputs.summary?.headline == "Summary with the rotated token")
@@ -428,9 +570,12 @@ private final class RecordingTokenProbe: URLProtocol, @unchecked Sendable {
         let status: Int
         let body: String
         switch (request.httpMethod, url.path) {
-        case ("POST", "/v1/auth/refresh"):
+        case ("POST", "/v1/auth/exchange"), ("POST", "/v1/auth/refresh"):
             status = 200
             body = #"{"accessToken":"new-token","refreshToken":"new-refresh","user":{"id":"1","name":"Test","email":"test@example.test"}}"#
+        case ("GET", "/v1/me"):
+            status = 200
+            body = #"{"user":{"id":"1","name":"Test","email":"test@example.test"},"quota":{"used":0,"limit":10,"period":"month"}}"#
         case ("POST", "/v1/auth/logout"):
             status = 200
             body = #"{"ok":true}"#

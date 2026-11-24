@@ -335,6 +335,12 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return selfHostedStreaming
     }
 
+    let hostedStreaming = FakeStreamingSTT()
+    let makeHostedCaptions = Box<(@Sendable (URL, HostedAuthorization, Bool) -> any StreamingTranscriptionProvider)?>(nil)
+    func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool) -> any StreamingTranscriptionProvider {
+        makeHostedCaptions.get?(url, authorization, traditionalChinese) ?? hostedStreaming
+    }
+
     let localStreaming = FakeStreamingSTT()
     func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)? {
         offlineDownloaded[OfflineModel(model)]!.get ? localStreaming : nil
@@ -492,7 +498,7 @@ actor FakeSession: RecordingSession {
         (events, continuation) = AsyncStream.makeStream()
         try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
         try RecordingManifest(title: configuration.title, startedAt: Date(), platform: configuration.platform,
-                              targetBundleID: configuration.targetBundleID).write(to: configuration.directory)
+                              targetBundleID: configuration.systemAudio.appBundleID).write(to: configuration.directory)
     }
 
     nonisolated func send(_ event: RecorderEvent) { continuation.yield(event) }
@@ -527,9 +533,11 @@ actor FakeSession: RecordingSession {
         let directory = configuration.directory
         if suppliedTrackDuration == nil {
             for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
-                let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)
-                writer.appendSilence(frames: 16_000)
-                try writer.close()
+                let isRemote = name == RecordingManifest.remoteFile
+                // Distinguish digital silence from a signal too quiet to trigger echo removal.
+                let hasSignal = isRemote == (configuration.systemAudio != .off)
+                let audio = WAVAudio(sampleRate: 16_000, samples: [Int16](repeating: hasSignal ? 1 : 0, count: 16_000))
+                try WAVFormat.write(audio, to: directory.appending(path: name))
             }
         }
         return Recording(
@@ -607,6 +615,7 @@ struct World {
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
         var settings = AppSettings()
         settings.transcriptionService = .elevenLabs
+        settings.initializeCaptionSources(for: .elevenLabs)
         settings.summaryService = .gemini
         defaults.set(try JSONEncoder().encode(settings), forKey: SettingsStore.key)
         if keys {

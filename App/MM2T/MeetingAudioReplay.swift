@@ -33,7 +33,8 @@ private actor ReplaySession: RecordingSession {
         self.configuration = configuration
         (events, eventWriter) = AsyncStream.makeStream()
         (stream, audio) = AsyncStream.makeStream()
-        manifest = RecordingManifest(title: configuration.title, startedAt: Date(), platform: configuration.platform, targetBundleID: nil)
+        manifest = RecordingManifest(title: configuration.title, startedAt: Date(), platform: configuration.platform,
+                                     targetBundleID: configuration.systemAudio.appBundleID)
         try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
         try manifest.write(to: configuration.directory)
         length = try WAVFormat.frameCount(root.appending(path: "mic-full.wav"))
@@ -75,8 +76,9 @@ private actor ReplaySession: RecordingSession {
                 for track in inputs.indices {
                     let bytes = try inputs[track].read(upToCount: count * 2) ?? Data()
                     guard bytes.count == count * 2 else { throw CocoaError(.fileReadCorruptFile) }
-                    pending[track].append(bytes)
-                    bytes.withUnsafeBytes { ptr in
+                    let captured = track == 1 && configuration.systemAudio == .off ? Data(count: bytes.count) : bytes
+                    pending[track].append(captured)
+                    captured.withUnsafeBytes { ptr in
                         let pcm = ptr.bindMemory(to: Int16.self).map { Float($0) / 32768 }
                         levels.append(pcm.withUnsafeBufferPointer { AudioLevel(samples: $0) })
                         for i in pcm.indices { mixed[i] += pcm[i] }

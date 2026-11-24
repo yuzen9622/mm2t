@@ -179,6 +179,7 @@ public enum TranscriptionSource: String, Codable, Sendable, CaseIterable {
     case selfHosted
     case cloud
     case local
+    case mm2t
 }
 
 /// The language of the speech, as a hint to every transcription source.

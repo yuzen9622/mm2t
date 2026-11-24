@@ -332,6 +332,14 @@ import Testing
         #expect(server.requests.allSatisfy { $0.headers["Authorization"] == "Bearer tok" })
     }
 
+    @Test func hostedCleanupUsesDefaultReasoningEffort() async throws {
+        let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"paragraphs":[]}"#))
+        _ = try await llm(server).cleanTranscript(LLMTranscript(utterances: [utterance("u1", "r1", 0, "大家好")]))
+        let request = try #require(server.requests.first)
+        #expect(request.json["reasoning_effort"] as? String == "low")
+        #expect(request.headers["X-MM2T-Purpose"] == "auto")
+    }
+
     @Test func meetingProcessingIsAuto() async throws {
         let server = StubServer(status: 200, body: Fixture.chatCompletion(#"{"names":[]}"#))
         _ = try? await llm(server).inferNames(NameInferenceRequest(

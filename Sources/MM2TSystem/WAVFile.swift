@@ -112,6 +112,22 @@ public enum WAVFormat {
         return WAVAudio(sampleRate: layout.sampleRate, samples: samples)
     }
 
+    /// Scans PCM in bounded chunks. An unreadable track is not assumed to be silent.
+    public static func isDigitalSilence(_ url: URL) -> Bool {
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let layout = try parse(try handle.read(upToCount: 4096) ?? Data())
+            try handle.seek(toOffset: UInt64(layout.dataOffset))
+            while let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty {
+                if data.contains(where: { $0 != 0 }) { return false }
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     public static func write(_ audio: WAVAudio, to url: URL) throws {
         var data = header(sampleRate: audio.sampleRate, dataBytes: audio.samples.count * 2)
         audio.samples.map(\.littleEndian).withUnsafeBufferPointer { data.append(Data(buffer: $0)) }
