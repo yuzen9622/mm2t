@@ -68,6 +68,7 @@
     "Payment didn't go through.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "付款未完成。"}}}},
     "Resets on %@": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%@ 重置"}}}},
     "%lld / %lld": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "%lld / %lld"}}}},
+    "No matching transcript passage": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "找不到符合的逐字稿段落"}}}},
     "Reviewed meeting folders": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "檢查會議歸檔"}}}},
     "Checked %lld meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "已檢查 %lld 篇會議"}}}},
     "Create folder and move meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "建立資料夾並移入會議"}}}},
@@ -104,8 +105,6 @@
     "Delete Folder": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "刪除資料夾"}}}},
     "Unfiled": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "未分類"}}}},
     "Undo move": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "復原移動"}}}},
-    "Create folder: %@": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "建立資料夾：%@"}}}},
-    "Filed meetings": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "整理會議"}}}},
     "All": {
       "localizations": {
         "zh-Hant": {
@@ -257,7 +256,6 @@
     "Step %lld of %lld": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "第 %1$lld 步，共 %2$lld 步" } } } },
     "Translate transcript": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "翻譯逐字稿"}}}},
     "Target language": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "目標語言"}}}},
-    "Select all": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "全選"}}}},
     "Show original": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "顯示原文"}}}},
     "Show translation": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "顯示譯文"}}}},
     "Replace translation": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "取代現有譯文"}}}},
@@ -577,16 +575,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@，出現 %2$lld 次"
-          }
-        }
-      }
-    },
-    "%lld more in your meetings": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "還有 %lld 項在各場會議裡"
           }
         }
       }
