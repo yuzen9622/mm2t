@@ -45,16 +45,16 @@ import Testing
         for key in ["transcriptionOrder", "llmLocation", "cloudLLM"] { #expect(encoded[key] == nil) }
     }
 
-    @Test func changingPostMeetingServicePreservesMigratedCaptionRoutes() throws {
+    @Test func changingTranscriptionServiceReplacesMigratedRemoteCaptionsInPlace() throws {
         let legacy = Data(#"{"transcriptionOrder":["cloud","selfHosted","local"],"liveCaptions":true}"#.utf8)
         var settings = try JSONDecoder().decode(AppSettings.self, from: legacy)
-        #expect(settings.captionSources == [.cloud, .selfHosted, .local])
+        #expect(settings.captionSources == [.cloud, .local])
         settings.transcriptionService = .server
-        #expect(settings.captionSources == [.cloud, .selfHosted, .local])
+        #expect(settings.captionSources == [.selfHosted, .local])
         let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
-        #expect(saved.captionSources == [.cloud, .selfHosted, .local])
+        #expect(saved.captionSources == [.selfHosted, .local])
         settings.transcriptionService = .mm2t
-        #expect(settings.captionSources == [.cloud, .selfHosted, .local])
+        #expect(settings.captionSources == [.mm2t, .local])
     }
 
     @Test func newMM2TCaptionsDefaultToHostedWithoutChangingASavedLocalChoice() throws {

@@ -99,7 +99,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
         var transcript: LocalSpeechModel?
     }
     private var speechModels = SpeechModels()
-    var captionSources: [TranscriptionSource] { captionSourceOrder }
+    var captionSources: [TranscriptionSource] {
+        let remote: TranscriptionSource = switch transcriptionService {
+        case .mm2t: .mm2t
+        case .elevenLabs: .cloud
+        case .server: .selfHosted
+        }
+        return captionSourceOrder.reduce(into: []) { sources, stored in
+            let source = stored == .local ? .local : remote
+            if !sources.contains(source) { sources.append(source) }
+        }
+    }
     private var captionSourceOrder: [TranscriptionSource] = [.mm2t, .local]
 
     mutating func initializeCaptionSources(for service: TranscriptionService) {

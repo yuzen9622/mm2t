@@ -616,7 +616,7 @@ struct World {
     let app: AppController
 
     /// `endCountdown` is zero unless a test is about the countdown, so a meeting ending stops at once.
-    init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
+    init(keys: Bool = true, storedSettings: Data? = nil, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
          endCountdown: Duration = .zero, setupValidator: (any KeyValidating)? = nil,
          collabConfiguration: CollabConfiguration? = nil, collabSession: URLSession = .shared) throws {
         root = try temporaryDirectory()
@@ -625,7 +625,7 @@ struct World {
         settings.transcriptionService = .elevenLabs
         settings.initializeCaptionSources(for: .elevenLabs)
         settings.summaryService = .gemini
-        defaults.set(try JSONEncoder().encode(settings), forKey: SettingsStore.key)
+        defaults.set(try storedSettings ?? JSONEncoder().encode(settings), forKey: SettingsStore.key)
         if keys {
             try credentials.save("eleven-key", for: .elevenLabsAPIKey)
             try credentials.save("gemini-key", for: .geminiAPIKey)
