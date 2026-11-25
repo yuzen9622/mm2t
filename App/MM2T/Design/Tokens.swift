@@ -4,10 +4,12 @@ import SwiftUI
 
 /// Every color the app draws with. Two values each: light, dark.
 enum Palette {
-    static let window = dynamic(0xF6F5F1, 0x1B1B1D)
+    static let windowHex: (light: UInt32, dark: UInt32) = (0xF6F5F1, 0x1B1B1D)
+    static let cardHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x262628)
+    static let window = dynamic(windowHex.light, windowHex.dark)
     static let backdrop = Color.black.opacity(0.28)
     static let sidebar = dynamic(0xEEEDE8, 0x151516)
-    static let card = dynamic(0xFFFFFF, 0x262628)
+    static let card = dynamic(cardHex.light, cardHex.dark)
     static let field = dynamic(0xEDECE7, 0x303033)
     /// Surfaces are told apart by tone, never by an outline: a raised panel, a selected row, a quiet button.
     static let panel = dynamic(0xFFFFFF, 0x222224)

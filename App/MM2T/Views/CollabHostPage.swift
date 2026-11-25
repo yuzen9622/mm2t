@@ -12,6 +12,32 @@ final class CollabHostPage {
         if self.url == url, let view { return view }
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        func cssColor(_ hex: UInt32) -> String { String(format: "#%06X", hex) }
+        let theme = """
+        (() => {
+            const style = document.createElement('style');
+            style.textContent = `
+                html, body { background: transparent !important }
+                html .room-theme {
+                    --paper: \(cssColor(Palette.windowHex.light));
+                    --surface: \(cssColor(Palette.cardHex.light));
+                }
+                @media (prefers-color-scheme: dark) {
+                    html .room-theme {
+                        --paper: \(cssColor(Palette.windowHex.dark));
+                        --surface: \(cssColor(Palette.cardHex.dark));
+                    }
+                }
+                html .module-pane, html .module-tab-surface { background: var(--paper) }
+                html .module-tab-surface::before, html .module-tab-surface::after {
+                    background: radial-gradient(circle at 0 0, transparent 7.5px, var(--paper) 8px);
+                }
+            `;
+            document.documentElement.appendChild(style);
+        })();
+        """
+        configuration.userContentController.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentStart,
+                                                                       forMainFrameOnly: true))
         let view = WKWebView(frame: .zero, configuration: configuration)
         #if DEBUG
         view.isInspectable = true
