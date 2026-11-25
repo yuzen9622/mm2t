@@ -200,7 +200,11 @@ extension URLSessionWebSocketTask: CaptionWebSocket {
     func closeSocket() { cancel(with: .normalClosure, reason: nil) }
 }
 
-private actor SonioxConnection: StreamingTranscriptionSession {
+/// Sessions that rotate credentials can replay audio rejected during their closing handshake.
+package protocol RotatingCaptionSession: StreamingTranscriptionSession {}
+package struct CaptionSessionClosing: Error {}
+
+private actor SonioxConnection: RotatingCaptionSession {
     struct Interrupted: Error {}
 
     private struct Response: Decodable {
@@ -238,7 +242,8 @@ private actor SonioxConnection: StreamingTranscriptionSession {
     }
 
     func send(_ samples: [Float]) async throws {
-        guard !samples.isEmpty, !closing, !closed else { return }
+        guard !closing, !closed else { throw CaptionSessionClosing() }
+        guard !samples.isEmpty else { return }
         do { try await socket.send(.data(pcm16(samples))) }
         catch {
             finish(throwing: Interrupted())

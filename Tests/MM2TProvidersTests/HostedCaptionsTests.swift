@@ -131,6 +131,7 @@ struct HostedCaptionsTests {
         #expect(server.requests.map(\.url.path) == [Self.sessions.path, Self.sessions.path + "/lease/captions", Self.sessions.path + "/lease/captions"])
         let stt = HostedTranscription(baseURL: Self.sessions.deletingLastPathComponent().appending(component: "stt"),
                                       authorization: .fixed("account-fixture"), leases: leases, session: server.session)
+        try FileManager.default.createDirectory(at: testScratch, withIntermediateDirectories: true)
         let audio = testScratch.appending(component: "caption-handoff-\(UUID()).wav")
         let samples = (0..<16_000).map { Float(0.25 * sin(Double($0) * .pi / 20)) }
         try wav(samples, sampleRate: 16_000).write(to: audio)
