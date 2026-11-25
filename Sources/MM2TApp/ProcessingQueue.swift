@@ -43,11 +43,12 @@ public final class ProcessingQueue {
 
     /// Called with each meeting a job finished processing.
     @ObservationIgnored public var onCompleted: (@MainActor (Meeting) -> Void)?
+    @ObservationIgnored var onJobFinished: (@MainActor () -> Void)?
     @ObservationIgnored private let makePipeline: @MainActor () throws -> PipelineBuild
     @ObservationIgnored private let makeLLM: @MainActor () throws -> LLMBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
-    @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>)] = [:]
+    @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>, finish: @MainActor () -> Void)] = [:]
 
     public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild,
                 makeLLM: @escaping @MainActor () throws -> LLMBuild) {
@@ -102,7 +103,15 @@ public final class ProcessingQueue {
         revision += 1
         let previous = tail
         let token = UUID()
+        var completion = onJobFinished
+        // A cancelled queued job leaves the UI before its place in the serial task chain.
+        let finish: @MainActor () -> Void = {
+            let notify = completion
+            completion = nil
+            notify?()
+        }
         let task = Task { @MainActor in
+            defer { finish() }
             await HostedRequestGroup.$current.withValue(token) {
                 defer {
                     if self.tasks[id]?.token == token {
@@ -117,6 +126,7 @@ public final class ProcessingQueue {
                         if self.tasks[id]?.token == token {
                             self.tasks[id] = nil
                             self.jobs[id] = nil
+                            finish()
                         }
                     } else {
                         self.jobs[id] = .queued
@@ -130,7 +140,7 @@ public final class ProcessingQueue {
                 await self.execute(operation, on: id, using: current ? prepared : nil)
             }
         }
-        tasks[id] = (token, task)
+        tasks[id] = (token, task, finish)
         tail = task
         return task
     }
@@ -145,6 +155,7 @@ public final class ProcessingQueue {
             tasks[id] = nil
             jobs[id] = nil
             revision += 1
+            entry.finish()
         }
     }
 

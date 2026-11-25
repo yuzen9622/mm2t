@@ -155,6 +155,9 @@ public final class AppController {
         let queue = ProcessingQueue(
             makePipeline: { try pipelineSetup.build(settings.settings, accountURL: accountURL) },
             makeLLM: { try pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) })
+        if let account {
+            queue.onJobFinished = { Task { await account.refreshProfile(afterJob: true) } }
+        }
         queue.onCompleted = { meeting in
             guard folders.claimRecording(meeting.id), !folders.folders.isEmpty, folders.revision(of: meeting.id) == nil else { return }
             Task {

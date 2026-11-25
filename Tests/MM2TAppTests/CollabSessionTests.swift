@@ -228,6 +228,21 @@ import Testing
         #expect(fixture.account.quota?.used == 4)
     }
 
+    @Test func jobRefreshReadsUsageAfterAnOlderRequestFinishes() async throws {
+        let f = try await Fixture()
+        CollabBackend.planUsedSeconds.set(60)
+        CollabBackend.holdNextProfile.set(true)
+        defer { CollabBackend.releaseProfile() }
+        let earlier = Task { await f.account.refreshProfile() }
+        try #require(await waitForCollabEvent { CollabBackend.deferredProfile.get != nil })
+        CollabBackend.planUsedSeconds.set(180)
+        let finished = Task { await f.account.refreshProfile(afterJob: true) }
+        CollabBackend.releaseProfile()
+        await earlier.value
+        await finished.value
+        #expect(f.account.plan?.usedMinutes == 3)
+    }
+
     @Test func refreshAfterCompletionMakesANewRequest() async throws {
         let fixture = try await Fixture()
         CollabBackend.requests.set([])

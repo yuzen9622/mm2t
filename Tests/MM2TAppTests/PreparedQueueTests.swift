@@ -11,6 +11,8 @@ import Testing
         let priorGate = Gate<Bool>()
         let gate = Gate<Bool>()
         let queue = ProcessingQueue(makePipeline: { .needsSetup([]) }, makeLLM: { .needsSetup([]) })
+        var finished = 0
+        queue.onJobFinished = { finished += 1 }
         let priorJob = queue.enqueue(.process, on: other, finalize: { _ = await priorGate.wait() })
         let prior = try #require(priorJob)
         let firstJob = queue.enqueue(.process, on: id, finalize: { _ = await gate.wait() })
@@ -20,13 +22,29 @@ import Testing
         queue.cancel(id)
         await gate.open(true)
         #expect(await eventually { !queue.isBusy(id) })
+        #expect(finished == 1)
+        let queued = try #require(queue.enqueue(.process, on: id))
+        queue.cancel(id)
+        #expect(finished == 2)
         let retry = try #require(queue.enqueue(.process, on: id))
         #expect(queue.jobs[id] == .queued)
         await priorGate.open(true)
         await prior.value
         await first.value
+        await queued.value
         await retry.value
         #expect(queue.jobs[id] == .needsSetup([]))
+        #expect(finished == 4)
+    }
+
+    @Test func pipelineFailureFinishesTheJobOnce() async throws {
+        let id = try await World().recordedMeeting(title: "Failure").id
+        let queue = ProcessingQueue(makePipeline: { throw CocoaError(.fileReadUnknown) }, makeLLM: { .needsSetup([]) })
+        var finished = 0
+        queue.onJobFinished = { finished += 1 }
+        await queue.run(.process, on: id)
+        guard case .failed = queue.jobs[id] else { Issue.record("expected pipeline failure"); return }
+        #expect(finished == 1)
     }
 
     @Test func queuedPreparationIsRevalidatedBeforeSelectingItsProvider() async throws {
@@ -52,6 +70,8 @@ import Testing
             return .ready(latest)
         }, makeLLM: { .ready(latestLLM) })
 
+        var finished = 0
+        queue.onJobFinished = { finished += 1 }
         let processingFirst = Task {
             await queue.run(.regenerate, on: first.id, using: base.withLLM(blockingLLM))
         }
@@ -71,6 +91,7 @@ import Testing
         await processingFirst.value
         await processingSecond.value
 
+        #expect(finished == 2)
         #expect(queue.jobs[first.id] == .completed)
         #expect(queue.jobs[second.id] == .completed)
         #expect(checks.get == [false])

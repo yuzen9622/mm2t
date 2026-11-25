@@ -187,9 +187,15 @@ public final class CollabAccount {
         }
     }
 
-    public func refreshProfile() async {
-        guard !signingOut else { return }
+    public func refreshProfile(afterJob: Bool = false) async {
+        // A finished job only updates usage; signing in goes through restore so deferred work resumes.
+        guard !signingOut, !afterJob || user != nil else { return }
         let session = profileSession
+        if afterJob, let pending = profileRefresh, pending.session == session {
+            // A request started before the job finished may contain the previous usage.
+            _ = await pending.task.result
+            guard session == profileSession, !signingOut else { return }
+        }
         do {
             try await loadProfile(for: session)
         } catch CollabError.notSignedIn where session == profileSession && !Task.isCancelled {
