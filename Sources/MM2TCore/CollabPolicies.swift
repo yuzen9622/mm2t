@@ -36,7 +36,8 @@ public struct SuggestionPolicy: Sendable {
     private var lastAsked: Date
     private var lastClosed: Date?
     private var characters = 0
-    public private(set) var titles: Set<String> = []
+    private var history: [CollabComponentKind: Set<String>] = [:]
+    public var titles: Set<String> { Set(history.values.joined()) }
 
     public init(now: Date) { lastAsked = now }
 
@@ -54,10 +55,26 @@ public struct SuggestionPolicy: Sendable {
         return true
     }
 
-    public mutating func offer(title: String, existing: [String]) -> Bool {
+    public mutating func remember(kind: CollabComponentKind, title: String) {
         let key = Self.normalize(title)
-        guard !key.isEmpty, !existing.contains(where: { Self.normalize($0) == key }) else { return false }
-        return titles.insert(key).inserted
+        if !key.isEmpty { history[kind, default: []].insert(key) }
+    }
+
+    public mutating func offer(kind: CollabComponentKind, title: String) -> Bool {
+        let key = Self.normalize(title)
+        guard !key.isEmpty, !history[kind, default: []].contains(where: { Self.similar($0, key) }) else { return false }
+        history[kind, default: []].insert(key)
+        return true
+    }
+
+    private static func similar(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs.contains(rhs) || rhs.contains(lhs) { return true }
+        func bigrams(_ text: String) -> Set<String> {
+            Set(zip(text, text.dropFirst()).map { String([$0, $1]) })
+        }
+        let left = bigrams(lhs), right = bigrams(rhs)
+        let total = left.union(right).count
+        return total > 0 && 5 * left.intersection(right).count >= 3 * total
     }
 
     public mutating func closed(at now: Date) { lastClosed = now }

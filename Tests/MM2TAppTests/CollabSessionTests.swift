@@ -278,6 +278,30 @@ import Testing
         await account.waitForPendingEnds()
     }
 
+    @Test func dismissedPreRoomAndCreatedTitlesSuppressLaterSuggestions() async throws {
+        let f = try await Fixture()
+        func suggest(_ title: String, kind: String) async {
+            f.llm.answerChunks.set([#"{"suggest":true,"kind":"\#(kind)","title":"\#(title)","instruction":"整理資料"}"#])
+            let count = f.llm.answerInputs.get.count
+            f.clock.update { $0.addTimeInterval(60) }
+            f.captions.receive(.final(String(repeating: "字", count: 40)))
+            await f.session.waitForWork()
+            #expect(f.llm.answerInputs.get.count == count + 1)
+        }
+        await suggest("午餐地點投票", kind: "poll")
+        try #require(f.session.suggestion != nil)
+        f.session.dismissSuggestion()
+        try await f.makeRoom()
+        f.session.dismissCommand()
+        await suggest("晚餐地點投票", kind: "poll")
+        #expect(f.session.suggestion == nil)
+        await suggest("今日會議決議", kind: "document")
+        #expect(f.session.suggestion == nil)
+        await suggest("選出值日生", kind: "poll")
+        #expect(f.session.suggestion?.title == "選出值日生")
+        await f.session.end()?.value
+    }
+
     @Test func confirmedSuggestionUsesOneRoomAndLaterCaptionsUpdateIt() async throws {
         let fixture = try await Fixture()
         let (session, captions, clock, llm) = (fixture.session, fixture.captions, fixture.clock, fixture.llm)

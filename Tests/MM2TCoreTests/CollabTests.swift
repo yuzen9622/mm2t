@@ -77,7 +77,7 @@ struct CollabTests {
         func ask(_ offset: TimeInterval, on: Bool = true, shown: Bool = false) -> Bool {
             policy.shouldAsk(now: at(offset), captionsOn: on, cardVisible: shown)
         }
-        func offer(_ title: String, existing: [String] = []) -> Bool { policy.offer(title: title, existing: existing) }
+        func offer(_ title: String) -> Bool { policy.offer(kind: .document, title: title) }
         policy.record(39)
         #expect(!ask(20))
         policy.record(1)
@@ -90,9 +90,28 @@ struct CollabTests {
         policy.closed(at: at(35))
         #expect(!ask(94.99))
         #expect(ask(95))
-        #expect(!offer(" ＡＰＩ  規格", existing: ["api 規格"]))
+        policy.remember(kind: .document, title: "api 規格")
+        #expect(!offer(" ＡＰＩ  規格"))
         #expect(offer("  Project   Plan "))
         #expect(!offer("project plan"))
+    }
+
+    @Test func suggestionsRememberSimilarTitlesWithinTheirKind() {
+        var policy = SuggestionPolicy(now: Date())
+        func offer(kind: CollabComponentKind, title: String) -> Bool { policy.offer(kind: kind, title: title) }
+        #expect(offer(kind: .document, title: "會議摘要"))
+        policy.closed(at: Date())
+        #expect(!offer(kind: .document, title: "建立會議摘要"))
+        #expect(!offer(kind: .document, title: "摘要"))
+        policy.remember(kind: .poll, title: "午餐地點投票")
+        #expect(!offer(kind: .poll, title: "晚餐地點投票"))
+        #expect(offer(kind: .poll, title: "下次開會時間"))
+        #expect(offer(kind: .whiteboard, title: "會議摘要"))
+        policy.remember(kind: .document, title: "abcde")
+        #expect(!offer(kind: .document, title: "abcdf")) // 3 of 5 bigrams
+        #expect(offer(kind: .document, title: "abcef"))
+        #expect(offer(kind: .poll, title: "甲"))
+        #expect(offer(kind: .poll, title: "乙"))
     }
 
     @Test func hoveringPreservesTheUnusedPartOfTheFifteenSeconds() {

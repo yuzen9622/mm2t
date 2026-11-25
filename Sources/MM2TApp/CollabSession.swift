@@ -451,6 +451,9 @@ public final class CollabSession {
             _ = end()
             throw CollabError.roomEnded
         }
+        for component in response.components {
+            policy.remember(kind: component.kind, title: component.title)
+        }
         knownComponents = response.components
         pruneCaptions()
         return response.components
@@ -474,7 +477,7 @@ public final class CollabSession {
                  "previousTitles": .array(previousTitles.sorted().map(CollabJSON.string))]
             }
             guard !Task.isCancelled, captionsActive(), pendingCommand == nil, commandStatus == .hidden, suggestion == nil,
-                  let offer, offer.kind != .experimental, policy.offer(title: offer.title, existing: titles) else { return }
+                  let offer, offer.kind != .experimental, policy.offer(kind: offer.kind, title: offer.title) else { return }
             suggestion = offer
             card = SuggestionPolicy.Card(now: now())
             scheduleExpiry()
