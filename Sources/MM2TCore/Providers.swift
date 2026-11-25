@@ -144,6 +144,13 @@ public enum PlaybackMic {
 
 public protocol Diarizer: Sendable {
     func diarize(track: URL) async throws -> Diarization
+    func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization
+}
+
+extension Diarizer {
+    public func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization {
+        try await diarize(track: track)
+    }
 }
 
 /// Voice vectors for speaker turns another source segmented, so voiceprints still match

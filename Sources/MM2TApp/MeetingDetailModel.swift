@@ -109,7 +109,10 @@ public final class MeetingDetailModel {
         return false
     }
 
-    public var canEditSpeakers: Bool { meeting != nil && !isProcessing }
+    private var isEditingSpeakers = false
+    private var isRegenerating = false
+    public var canEditSpeakers: Bool { meeting != nil && !isProcessing && !isEditingSpeakers && !isRegenerating }
+    public var canRegenerate: Bool { canEditSpeakers }
 
     /// Whether "this is me" applies: only a voice the mic heard can be the user.
     public func canClaimAsMe(_ speaker: SpeakerID) -> Bool {
@@ -232,8 +235,11 @@ public final class MeetingDetailModel {
     // MARK: Actions
 
     public func regenerate() async {
+        guard canRegenerate else { return }
+        isRegenerating = true
+        defer { isRegenerating = false }
         await documentWriter?.value
-        guard documentDrafts.isEmpty else { return }
+        guard documentDrafts.isEmpty, !isProcessing else { return }
         await queue.run(.regenerate, on: id)
         await load()
     }
@@ -297,6 +303,14 @@ public final class MeetingDetailModel {
 
     public func merge(_ source: SpeakerID, into target: SpeakerID) async {
         await edit { try await $0.merge(source, into: target, in: self.id) }
+    }
+
+    public func restoreBackground(_ speaker: SpeakerID) async {
+        await edit { try await $0.restoreBackground(speaker, in: self.id) }
+    }
+
+    public func delete(_ speaker: SpeakerID) async {
+        await edit { try await $0.delete(speaker, in: self.id) }
     }
 
     /// "This is me": the speaker's speech becomes the user's and teaches their voiceprint.
@@ -383,7 +397,8 @@ public final class MeetingDetailModel {
             defer { documentWriter = nil }
             while let (kind, draft) = documentDrafts.first(where: { $0.value.failure == nil }) {
                 do {
-                    try await saveDocument(draft.text, kind: kind, editing: draft.original)
+                    guard !isProcessing, !isEditingSpeakers else { throw TranscriptEditError.meetingIsProcessing }
+                    meeting = try await library.saveMarkdown(draft.text, kind: kind, editing: draft.original)
                     if documentDrafts[kind]?.text == draft.text {
                         documentDrafts[kind] = nil
                     } else if let meeting {
@@ -503,6 +518,8 @@ public final class MeetingDetailModel {
 
     private func edit(_ change: (SpeakerEditing) async throws -> Meeting) async {
         guard canEditSpeakers else { return }
+        isEditingSpeakers = true
+        defer { isEditingSpeakers = false }
         do {
             meeting = try await change(SpeakerEditing(library: library, voiceprints: voiceprints))
             errorMessage = nil

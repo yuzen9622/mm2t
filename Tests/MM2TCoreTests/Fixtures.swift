@@ -76,28 +76,37 @@ struct ScriptedDiarizer: Diarizer {
     /// What is heard on the mic of a call, which is diarized after its remote track. nil is the
     /// usual call: one voice, the user's.
     let micOnCall = Box<Diarization?>(nil)
-    private let heardRemote = Box(false)
+    let micCalls = Box(0)
     init(_ result: Diarization = Script.diarization) { self.result = result }
-    func diarize(track: URL) async throws -> Diarization {
+
+    func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization {
         calls.update { $0 += 1 }
         if fails.get { throw LocalModelError() }
-        guard track.lastPathComponent.hasPrefix("mic"), heardRemote.get else {
-            heardRemote.update { $0 = !track.lastPathComponent.hasPrefix("mic") }
-            return result
-        }
+        return result
+    }
+
+    func diarize(track: URL) async throws -> Diarization {
+        micCalls.update { $0 += 1 }
+        if fails.get { throw LocalModelError() }
+        let user = ClusterID("m1")
         return micOnCall.get ?? Diarization(
-            segments: [.init(cluster: ClusterID("m1"), range: TimeRange(start: 50, end: 51))], overlaps: [], embeddings: [:])
+            segments: [.init(cluster: user, range: TimeRange(start: 49, end: 51))], overlaps: [],
+            embeddings: [user: [Embedding([0, 1, 0])]])
     }
 }
 
 /// Marks as echo whatever the mic heard in `echo`.
 struct ScriptedCleaner: MicCleaner {
     let echo: TimeRange
+    var additionalEcho: TimeRange? = nil
     func clean(mic: URL, remote: URL) throws -> CleanedMic? {
         let url = mic.deletingLastPathComponent().appending(path: "mic-clean-\(UUID().uuidString).caf")
         try Data("clean mic audio".utf8).write(to: url)
         let frames = 600
-        let after = (0..<frames).map { echo.intersects(TimeRange(start: Double($0) / 10, end: Double($0 + 1) / 10)) ? Float(0.01) : 1 }
+        let after = (0..<frames).map { index in
+            let frame = TimeRange(start: Double(index) / 10, end: Double(index + 1) / 10)
+            return echo.intersects(frame) || additionalEcho?.intersects(frame) == true ? Float(0.01) : 1
+        }
         return CleanedMic(audio: url, echo: EchoProfile(frameDuration: 0.1, before: [Float](repeating: 1, count: frames), after: after))
     }
 }

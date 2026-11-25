@@ -98,7 +98,7 @@ public enum Alignment {
         return drafts
     }
 
-    private static func speaker(for range: TimeRange, in segments: [SpeakerSegment]) -> SpeakerID? {
+    static func speaker(for range: TimeRange, in segments: [SpeakerSegment]) -> SpeakerID? {
         segments.min { a, b in
             let overlapA = a.range.overlap(with: range), overlapB = b.range.overlap(with: range)
             if overlapA != overlapB { return overlapA > overlapB }

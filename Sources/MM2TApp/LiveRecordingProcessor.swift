@@ -37,6 +37,7 @@ public actor LiveRecordingProcessor {
     private var writers: [Track: WAVWriter] = [:]
     private var frames = 0
     private var echo: EchoProfile?
+    private var micEnergy = SpeechEnergy.Builder()
     private var failed = false
     private var isFinishing = false
     private var checkpointsStopped = false
@@ -90,6 +91,7 @@ public actor LiveRecordingProcessor {
                 let samples = pcm.map { Float($0) / Float(Int16.max) }
                 samples.withUnsafeBufferPointer { writer.append($0) }
                 try writer.flush()
+                if track == .me { micEnergy.append(samples) }
                 try await session.append(samples: samples, track: track)
             }
             frames = range.upperBound
@@ -141,7 +143,7 @@ public actor LiveRecordingProcessor {
                                            duration: covered, platform: manifest.platform,
                                            timeZoneIdentifier: manifest.timeZoneIdentifier ?? TimeZone.current.identifier)
             let draft = await pipeline.recordingDraft(transcription: prefix, diarizations: snapshot.diarizations,
-                echo: echo, metadata: metadata, highlights: manifest.highlights.map(Highlight.init(time:)))
+                echo: echo, metadata: metadata, highlights: manifest.highlights.map(Highlight.init(time:)), audioURLs: audioURLs, micEnergy: micEnergy.energy)
             guard await canCheckpoint() else { checkpointInProgress = false; return }
             let preparedThrough = draft.utterances.map(\.range.end).max() ?? 0
             checkpointTask = Task {
@@ -222,7 +224,7 @@ public actor LiveRecordingProcessor {
     /// Returns false when the ordinary full-audio separation must run instead.
     public func attach(_ transcription: Transcription, to id: MeetingID) async throws -> Bool {
         guard let pipeline, !failed, let finalSnapshot else { return false }
-        try await pipeline.attachRecording(transcription, diarizations: finalSnapshot.diarizations, echo: echo, to: id)
+        try await pipeline.attachRecording(transcription, diarizations: finalSnapshot.diarizations, echo: echo, to: id, micEnergy: micEnergy.energy)
         return true
     }
 

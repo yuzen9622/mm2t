@@ -45,6 +45,29 @@ import Testing
 }
 
 @MainActor @Suite struct MeetingDetailTests {
+    @Test func speakerEditingIsDisabledWhileTheDocumentEditSuspends() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let speaker = try #require(meeting.speakers.first)
+        let duringEdit = Box<Bool?>(nil)
+        // This child cannot enter the main actor until the edit first suspends.
+        let edit = Task {
+            let competing = Task {
+                let canEdit = detail.canEditSpeakers
+                duringEdit.update { $0 = canEdit }
+                await detail.rename(speaker.id, to: .newPerson(name: "Competing name"))
+            }
+            await detail.delete(speaker.id)
+            await competing.value
+        }
+        await edit.value
+        #expect(duringEdit.get == false)
+        #expect(detail.canEditSpeakers)
+        #expect(try await world.library.meeting(meeting.id).speaker(speaker.id) == nil)
+    }
+
     @Test func independentPassagesPairWithTheirOwnUtterancesEvenInOneCleanedRow() async throws {
         let world = try World()
         var meeting = try await world.recordedMeeting()
@@ -252,6 +275,41 @@ import Testing
         await detail.forgetVoice(of: id)
         #expect(try row().canLearnVoice && !row().canForgetVoice)
         #expect(detail.errorMessage == nil)
+    }
+
+    @Test func regenerationAndSpeakerEditingReserveTheDocumentBeforeSuspension() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let speaker = try #require(meeting.speakers.first)
+        world.catalog.llm.calls.set([])
+        let revision = world.queue.revision
+        let edit = Task {
+            let competing = Task { await detail.regenerate() }
+            await detail.rename(speaker.id, to: .newPerson(name: "First"), learn: false)
+            await competing.value
+        }
+        await edit.value
+        #expect(world.catalog.llm.calls.get.isEmpty)
+        #expect(world.queue.revision == revision)
+
+        let duringStartup = Box<Bool?>(nil)
+        let regenerate = Task {
+            detail.updateDocument("Queued notes", kind: .summary)
+            let competing = Task {
+                let editable = detail.canEditSpeakers
+                duringStartup.update { $0 = editable }
+                await detail.rename(speaker.id, to: .newPerson(name: "Must not write"), learn: false)
+            }
+            await detail.regenerate()
+            await competing.value
+        }
+        await regenerate.value
+        #expect(duringStartup.get == false)
+        #expect(await world.app.voiceprints.person(named: "Must not write") == nil)
+        #expect(!world.catalog.llm.calls.get.isEmpty)
+        #expect(detail.canEditSpeakers)
     }
 
     @Test func editsAreRefusedWhileTheMeetingIsRegenerating() async throws {

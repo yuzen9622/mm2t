@@ -63,11 +63,12 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Recording snapshots are private drafts. They warm the same provider instance that will
     /// finish this meeting, but never persist an incomplete meeting or overwrite a user's edits.
     public func recordingDraft(transcription: Transcription, diarizations: [Track: Diarization],
-                               echo: EchoProfile?, metadata: MeetingMetadata, highlights: [Highlight]) async -> Meeting {
+                               echo: EchoProfile?, metadata: MeetingMetadata, highlights: [Highlight],
+                               audioURLs: [Track: URL] = [:], micEnergy: SpeechEnergy? = nil) async -> Meeting {
         var meeting = Meeting(id: MeetingID(), metadata: metadata,
                               audio: RecordingAudio(micFile: "mic.wav", remoteFile: "remote.wav"), highlights: highlights)
         meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
-        await diarize(&meeting, recorded: diarizations, echo: echo)
+        await diarize(&meeting, recorded: diarizations, echo: echo, audioURLs: audioURLs, micEnergy: micEnergy)
         await matchVoiceprints(&meeting)
         align(&meeting)
         // A continuing speaker may extend the last utterance. Only a closed prefix is offered
@@ -107,11 +108,11 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Installs only finalized audio-derived results; generated outputs still run through the
     /// normal completion/error path with the actual saved recording's metadata and highlights.
     public func attachRecording(_ transcription: Transcription, diarizations: [Track: Diarization],
-                                echo: EchoProfile?, to id: MeetingID) async throws {
+                                echo: EchoProfile?, to id: MeetingID, micEnergy: SpeechEnergy? = nil) async throws {
         var meeting = try await library.meeting(id)
         guard meeting.status == .pending(next: .transcribe) else { return }
         meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
-        await diarize(&meeting, recorded: diarizations, echo: echo)
+        await diarize(&meeting, recorded: diarizations, echo: echo, micEnergy: micEnergy)
         await matchVoiceprints(&meeting)
         align(&meeting)
         meeting.status = .pending(next: .inferNames)
@@ -144,6 +145,19 @@ public struct MeetingProcessingPipeline: Sendable {
         }
         while let step = meeting.status.resumeStep {
             if step >= .inferNames {
+                // A meeting can contain only background voices. Do not generate content from an empty transcript.
+                if meeting.utterances.isEmpty {
+                    try Task.checkCancellation()
+                    meeting.outputs = LLMOutputs()
+                    meeting.suggestions = NameSuggestions()
+                    meeting.summaryMarkdown = nil
+                    meeting.perPersonMarkdown = nil
+                    meeting.translation = nil
+                    meeting.deferredAIStep = nil
+                    meeting.status = .completed
+                    try await library.save(meeting)
+                    return meeting
+                }
                 guard let llm else {
                     try Task.checkCancellation()
                     meeting.deferredAIStep = step
@@ -407,24 +421,41 @@ public struct MeetingProcessingPipeline: Sendable {
 
     /// Never fails: when every source is unavailable or throws, the meeting keeps its transcript
     /// under one unnamed speaker and records why, so the user can re-run separation later.
-    private func diarize(_ meeting: inout Meeting, recorded: [Track: Diarization]? = nil, echo: EchoProfile? = nil) async {
+    private func diarize(_ meeting: inout Meeting, recorded: [Track: Diarization]? = nil, echo: EchoProfile? = nil,
+                         audioURLs: [Track: URL] = [:], micEnergy: SpeechEnergy? = nil) async {
         guard let transcription = meeting.transcription else { preconditionFailure("diarize before transcribe") }
         let track: Track = transcription.remote.words.isEmpty && !transcription.me.words.isEmpty ? .me : .remote
-        let remote = track == .me ? transcription.me : transcription.remote
-        let separated: (segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]], attribution: SpeakerAttribution)
-        if let heard = recorded?[track] {
-            separated = (heard.segments, heard.embeddings, heard.briefEmbeddings, .local(overlaps: heard.overlaps))
+        let transcript = track == .me ? transcription.me : transcription.remote
+        let url: URL
+        if let recordedURL = audioURLs[track] { url = recordedURL }
+        else { url = await library.audioURL(meeting, track: track) }
+        let heard: Diarization, attribution: SpeakerAttribution
+        if let fromRecording = recorded?[track] {
+            (heard, attribution) = (fromRecording, .local(overlaps: fromRecording.overlaps))
         } else {
-            separated = await separation(of: remote, track: library.audioURL(meeting, track: track))
+            (heard, attribution) = await separation(of: transcript, track: url, on: track == .remote ? .call : .room)
         }
-        let channel: VoiceChannel = track == .me ? .room : .call
-        apply(separated.segments, embeddings: separated.embeddings.mapValues { $0.map { $0.heard(on: channel) } },
-              brief: separated.brief.mapValues { $0.map { $0.heard(on: channel) } }, to: &meeting)
-        let attribution = separated.attribution
+        let current = removingDeletedSpeech(from: heard, on: track, in: meeting)
+        let user = track == .me ? await claimUser(in: current) : nil
+        let energy = track == .me && !current.segments.isEmpty ? micEnergy ?? speechEnergy(at: url, for: current) : nil
+        let wordSpeech: [ClusterID: TimeInterval]?
+        if case .transcription = attribution, let words = transcript.content.labeledWords {
+            wordSpeech = Self.labeledSpeechDurations(words)
+        } else {
+            wordSpeech = nil
+        }
+        let evidence = SpeakerGate.Evidence(for: current, energy: energy, speechDurations: wordSpeech)
+        let decisions = SpeakerGate().destinations(for: evidence, mode: track == .me ? .room : .call, protecting: user)
+        meeting.speakers = []
+        meeting.backgroundSpeakers = []
+        meeting.backgroundUtterances = []
+        meeting.pendingBackgroundSpeakerIDs = []
+        meeting.remoteSegments = apply(current, decisions: decisions, user: user,
+                                       channel: track == .me ? .room : .call, to: &meeting)
         meeting.separatedTrack = track == .me ? .me : nil
         meeting.mergedSpeakers = [:]
         meeting.attribution = attribution
-        if meeting.remoteSegments.isEmpty, let first = remote.words.first, let last = remote.words.last {
+        if meeting.remoteSegments.isEmpty, let first = transcript.words.first, let last = transcript.words.last {
             // No source heard anyone but STT did; keep the words under one unnamed speaker.
             let id = SpeakerID.remote(1)
             meeting.speakers = [RemoteSpeaker(id: id, label: Self.label(0), person: nil, embeddings: [])]
@@ -432,134 +463,174 @@ public struct MeetingProcessingPipeline: Sendable {
         }
         meeting.micSegments = nil
         if track == .remote, !transcription.me.words.isEmpty {
-            if let heard = recorded?[.me] {
-                let enrolled = await voiceprints.user() != nil
-                if echo != nil || enrolled { await applyMic(heard, echo: echo, to: &meeting) }
+            if let mic = recorded?[.me] {
+                let micURL: URL
+                if let recordedURL = audioURLs[.me] { micURL = recordedURL }
+                else { micURL = await library.audioURL(meeting, track: .me) }
+                await applyMic(mic, audio: micURL, echo: echo, energy: micEnergy, to: &meeting)
             } else {
                 await separateMic(&meeting)
             }
         }
-        if track == .me { await claimUser(in: &meeting) }
     }
 
-    /// On a call the mic is the user's own, but in a shared room it hears the people next to them
-    /// and, without headphones, the call itself. A voice that mostly went away with the echo was the
-    /// speakers, and its words are dropped. Of the rest, the user is whoever sounds like their
-    /// enrollment and every other voice becomes a speaker of its own. Without a local model, or
-    /// when it throws, every mic word stays the user's.
+    /// Without a local model, or when it throws, every mic word stays the user's.
     private func separateMic(_ meeting: inout Meeting) async {
-        guard let diarizer, meeting.transcription != nil else { return }
-        let enrolled = await voiceprints.user() != nil
+        guard let diarizer else { return }
         let mic = await library.audioURL(meeting, track: .me), remote = await library.audioURL(meeting, track: .remote)
         let cleaned = try? micCleaner?.clean(mic: mic, remote: remote)
         defer { if let cleaned { try? FileManager.default.removeItem(at: cleaned.audio) } }
-        guard enrolled || cleaned != nil,
-              let heard = try? await diarizer.diarize(track: cleaned?.audio ?? mic) else { return }
-
-        await applyMic(heard, echo: cleaned?.echo, to: &meeting)
+        let url = cleaned?.audio ?? mic
+        guard let heard = try? await diarizer.diarize(track: url) else { return }
+        await applyMic(heard, audio: url, echo: cleaned?.echo, to: &meeting)
     }
 
-    private func applyMic(_ heard: Diarization, echo: EchoProfile?, to meeting: inout Meeting) async {
-        guard let transcription = meeting.transcription else { return }
-        var clusters: [ClusterID] = []
-        for segment in heard.segments.sorted(by: { $0.range.start < $1.range.start })
-        where !clusters.contains(segment.cluster) {
-            clusters.append(segment.cluster)
+    private func speechEnergy(at url: URL, for heard: Diarization) -> SpeechEnergy? {
+        try? SpeechEnergy(reading: url, through: heard.segments.map(\.range.end).max())
+    }
+
+    private func applyMic(_ diarization: Diarization, audio: URL, echo: EchoProfile?, energy: SpeechEnergy? = nil,
+                          to meeting: inout Meeting) async {
+        guard let transcription = meeting.transcription, !diarization.segments.isEmpty else { return }
+        let heard = removingDeletedSpeech(from: diarization, on: .me, in: meeting)
+        let enrollment = await voiceprints.user()?.embeddings ?? []
+        let energy = energy ?? speechEnergy(at: audio, for: heard)
+        let gate = SpeakerGate()
+        let decisions: [SpeakerGate.Destination]
+        if enrollment.isEmpty {
+            decisions = gate.destinations(for: heard, mode: .callMic, energy: energy)
+        } else {
+            let evidence = SpeakerGate.Evidence(for: heard, energy: energy, measuringMicGroups: true)
+            decisions = gate.callMicDestinations(for: evidence, thresholds: SpeakerGate.enrolledCallMic,
+                                                userEmbeddings: enrollment, matchThresholds: thresholds)
         }
-        if let echo {
-            let played = Set(clusters.filter { cluster in
-                echo.isEcho(heard.segments.filter { $0.cluster == cluster }.map(\.range))
-            })
-            if !played.isEmpty {
-                meeting.transcription = Transcription(
-                    me: transcription.me.keeping { word in
-                        let voice = heard.segments.max { $0.range.overlap(with: word) < $1.range.overlap(with: word) }
-                        return voice.map { $0.range.overlap(with: word) == 0 || !played.contains($0.cluster) } ?? true
-                    },
-                    remote: transcription.remote)
-                clusters.removeAll(where: played.contains)
+        let foreground = zip(heard.segments, decisions).compactMap { segment, decision in
+            if case .foreground = decision { return segment }
+            return nil
+        }
+        let foregroundGroups = Dictionary(grouping: foreground, by: \.cluster)
+        let background = Set(decisions.compactMap { decision in
+            if case .background(let id) = decision { return id }
+            return nil
+        })
+        let played = Set(foregroundGroups.keys.filter { cluster in
+            echo?.isEcho(foregroundGroups[cluster, default: []].map(\.range)) == true
+        })
+        if !played.isEmpty {
+            meeting.transcription = Transcription(
+                me: transcription.me.keeping { word in
+                    let voice = heard.segments.enumerated().max { $0.element.range.overlap(with: word) < $1.element.range.overlap(with: word) }
+                    guard let (index, segment) = voice, segment.range.overlap(with: word) > 0,
+                          case .foreground(let cluster) = decisions[index] else { return true }
+                    return !played.contains(cluster)
+                }, remote: transcription.remote)
+        }
+
+        let clusters = Set(foregroundGroups.keys).subtracting(played)
+        let mixed = clusters.intersection(background)
+        var kept = heard.embeddings, brief = heard.briefEmbeddings
+        if !mixed.isEmpty {
+            // Do not use a voiceprint incorporating a turn that failed the loudness gate.
+            let cleanVectors = try? await embedder?.voiceprints(track: audio,
+                segments: foreground.filter { mixed.contains($0.cluster) }, includingBrief: true)
+            for cluster in mixed {
+                kept[cluster] = cleanVectors?.kept[cluster]
+                brief[cluster] = cleanVectors?.brief[cluster]
             }
         }
-        guard clusters.count > 1 else { return }
-        // Only the voiceprint says who the user is. Once a voice matches, every other voice is
-        // someone else. With no match, a voice that scored below the threshold is someone else and
-        // one with no vector at all stays the user's, as nothing tells it apart.
-        var similarity: [ClusterID: Double] = [:]
-        for cluster in clusters {
-            let vectors = heard.embeddings[cluster] ?? heard.briefEmbeddings[cluster] ?? []
-            similarity[cluster] = await voiceprints.similarityToUser(vectors)
+        var mine: Set<ClusterID> = []
+        if !enrollment.isEmpty {
+            var similarity: [ClusterID: Double] = [:]
+            for cluster in clusters {
+                similarity[cluster] = await voiceprints.similarityToUser(kept[cluster] ?? brief[cluster] ?? [])
+            }
+            mine = Set(clusters.filter { similarity[$0].map { $0 >= thresholds.user } == true })
+            if clusters.count > 1, mine.isEmpty { mine = clusters.filter { similarity[$0] == nil } }
+        } else if Set(diarization.segments.map(\.cluster)).count == 1 {
+            mine = clusters
         }
-        let mine = Set(clusters.filter { similarity[$0].map { $0 >= thresholds.user } == true })
-        var others: [ClusterID: SpeakerID] = [:]
-        for cluster in clusters where !mine.contains(cluster) && (!mine.isEmpty || similarity[cluster] != nil) {
-            let id = SpeakerID.remote(meeting.speakers.count + 1)
-            meeting.speakers.append(RemoteSpeaker(
-                id: id, label: Self.label(meeting.speakers.count), person: nil,
-                embeddings: (heard.embeddings[cluster] ?? []).map { $0.heard(on: .room) },
-                briefEmbeddings: heard.briefEmbeddings[cluster]?.map { $0.heard(on: .room) }))
-            others[cluster] = id
+        let retained = zip(heard.segments, decisions).filter { _, decision in
+            if case .foreground(let cluster) = decision { return !played.contains(cluster) }
+            return true
         }
-        guard !others.isEmpty else { return }
-        meeting.micSegments = heard.segments.filter { clusters.contains($0.cluster) }
-            .map { SpeakerSegment(speaker: others[$0.cluster] ?? .me, range: $0.range) }
+        let cleaned = Diarization(segments: retained.map(\.0), overlaps: heard.overlaps, embeddings: kept, briefEmbeddings: brief)
+        let mic = apply(cleaned, decisions: retained.map(\.1), micUser: mine, mixed: mixed, channel: .room, to: &meeting)
+        meeting.micSegments = mic.contains { $0.speaker != .me } ? mic : nil
+    }
+
+    private func removingDeletedSpeech(from heard: Diarization, on track: Track, in meeting: Meeting) -> Diarization {
+        let cuts = meeting.deletedSpeakerRanges?[track] ?? []
+        let shared = meeting.deletedSpeakerSharedRanges?[track] ?? []
+        guard !cuts.isEmpty || !shared.isEmpty else { return heard }
+        let excluded = Set(shared.compactMap { range -> Int? in
+            let matches = heard.segments.indices.filter {
+                heard.segments[$0].range.hasBoundaries(of: range, within: TimeRange.speakerTurnTolerance)
+            }
+            return matches.count == 1 ? matches.first : nil
+        })
+        let segments = heard.segments.enumerated().flatMap { index, segment -> [Diarization.Segment] in
+            guard !excluded.contains(index) else { return [] }
+            return cuts.reduce([segment.range]) { remaining, cut in
+                remaining.flatMap { $0.subtracting(cut) }
+            }.map { Diarization.Segment(cluster: segment.cluster, range: $0) }
+        }
+        return Diarization(segments: segments, overlaps: heard.overlaps,
+                           embeddings: heard.embeddings, briefEmbeddings: heard.briefEmbeddings)
     }
 
     /// `brief` are vectors of speakers with too little clean speech to store or name anyone by.
-    private func separation(of remote: TrackTranscript, track: URL) async
-        -> (segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]], brief: [ClusterID: [Embedding]],
-            attribution: SpeakerAttribution) {
+    private func separation(of remote: TrackTranscript, track: URL, on channel: VoiceChannel) async
+        -> (Diarization, SpeakerAttribution) {
         var localFailure: String?
         for source in diarizationOrder {
             switch source {
             case .local:
                 guard let diarizer else { continue }
                 do {
-                    let diarization = try await diarizer.diarize(track: track)
-                    return (diarization.segments, diarization.embeddings, diarization.briefEmbeddings,
-                            .local(overlaps: diarization.overlaps))
+                    let diarization = try await diarizer.diarize(track: track, on: channel)
+                    return (diarization, .local(overlaps: diarization.overlaps))
                 } catch {
                     localFailure = String(describing: error)
                 }
             case .transcription:
                 guard let labeled = remote.content.labeledWords else { continue }
                 let segments = Self.segments(from: labeled)
-                guard let embedder else { return (segments, [:], [:], .transcription(voiceprintsUnavailable: .noSource)) }
+                guard let embedder else { return (Diarization(segments: segments, overlaps: [], embeddings: [:]), .transcription(voiceprintsUnavailable: .noSource)) }
                 do {
                     let embeddings = try await embedder.embeddings(track: track, segments: segments)
-                    return (segments, embeddings, [:], .transcription(voiceprintsUnavailable: nil))
+                    return (Diarization(segments: segments, overlaps: [], embeddings: embeddings), .transcription(voiceprintsUnavailable: nil))
                 } catch {
-                    return (segments, [:], [:], .transcription(voiceprintsUnavailable: .failed(reason: String(describing: error))))
+                    return (Diarization(segments: segments, overlaps: [], embeddings: [:]),
+                            .transcription(voiceprintsUnavailable: .failed(reason: String(describing: error))))
                 }
             }
         }
-        return ([], [:], [:], .unseparated(localFailure.map { .failed(reason: $0) } ?? .noSource))
+        return (Diarization(segments: [], overlaps: [], embeddings: [:]), .unseparated(localFailure.map { .failed(reason: $0) } ?? .noSource))
     }
 
     /// In a meeting recorded in the room, the speaker who sounds most like the enrolled user becomes
     /// `.me`, as the mic track is on a call. Below the user threshold nobody is. A speaker who
     /// said too little to store a voiceprint is judged by their brief vectors: telling the user
     /// apart needs less than naming someone, and short meetings are mostly short turns.
-    private func claimUser(in meeting: inout Meeting) async {
-        var best: (id: SpeakerID, similarity: Double)?
-        for speaker in meeting.speakers {
-            guard let similarity = await voiceprints.similarityToUser(speaker.learnableEmbeddings),
+    private func claimUser(in heard: Diarization) async -> ClusterID? {
+        var best: (id: ClusterID, similarity: Double)?
+        let order = heard.segments.sorted { $0.range.start < $1.range.start }.map(\.cluster)
+        var seen: Set<ClusterID> = []
+        for cluster in order where seen.insert(cluster).inserted {
+            let vectors = heard.embeddings[cluster] ?? heard.briefEmbeddings[cluster] ?? []
+            guard let similarity = await voiceprints.similarityToUser(vectors),
                   similarity >= thresholds.user, similarity > (best?.similarity ?? -.infinity) else { continue }
-            best = (speaker.id, similarity)
+            best = (cluster, similarity)
         }
-        guard let mine = best?.id else { return }
-        meeting.remoteSegments = meeting.remoteSegments.map {
-            $0.speaker == mine ? SpeakerSegment(speaker: .me, range: $0.range) : $0
-        }
-        meeting.speakers = meeting.speakers.filter { $0.id != mine }.enumerated().map { index, speaker in
-            RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
-                          briefEmbeddings: speaker.briefEmbeddings)
-        }
+        return best?.id
     }
 
     private func matchVoiceprints(_ meeting: inout Meeting) async {
         var suggestions: [NameSuggestion] = []
+        let background = Set(meeting.pendingBackgroundSpeakerIDs ?? [])
         for index in meeting.speakers.indices {
             let speaker = meeting.speakers[index]
+            guard !background.contains(speaker.id) else { continue }
             switch await voiceprints.match(speaker.embeddings, thresholds: thresholds) {
             case .autoName(let person, _):
                 meeting.speakers[index].person = person
@@ -582,36 +653,52 @@ public struct MeetingProcessingPipeline: Sendable {
             segments: meeting.remoteSegments,
             overlaps: meeting.attribution?.overlaps ?? [],
             micSegments: meeting.micSegments ?? [])
-        // Someone the mic heard whose every word turned out to be echo said nothing.
         let speaking = Set(meeting.utterances.map(\.speaker))
-        let micOnly = Set((meeting.micSegments ?? []).map(\.speaker)).subtracting(meeting.remoteSegments.map(\.speaker))
-        let silent = micOnly.subtracting(speaking)
+        let silent = Set(meeting.speakers.map(\.id) + [.me]).subtracting(speaking)
+        meeting.remoteSegments.removeAll { silent.contains($0.speaker) }
         meeting.micSegments = meeting.micSegments?.filter { !silent.contains($0.speaker) }
-        meeting.speakers = meeting.speakers.filter { !silent.contains($0.id) }
-            .enumerated().map { index, speaker in
-                RemoteSpeaker(id: speaker.id, label: Self.label(index), person: speaker.person, embeddings: speaker.embeddings,
-                              briefEmbeddings: speaker.briefEmbeddings)
-            }
+        let background = Set(meeting.pendingBackgroundSpeakerIDs ?? [])
+        meeting.backgroundSpeakers = meeting.speakers.filter { background.contains($0.id) && !silent.contains($0.id) }
+        meeting.backgroundUtterances = meeting.utterances.filter { background.contains($0.speaker) }
+        meeting.utterances.removeAll { background.contains($0.speaker) }
+        meeting.speakers.removeAll { background.contains($0.id) || silent.contains($0.id) }
+        meeting.suggestions.items.removeAll { silent.contains($0.speaker) }
+        meeting.pendingBackgroundSpeakerIDs = nil
+        meeting.relabelSpeakers()
     }
 
-    @discardableResult
-    private func apply(_ segments: [Diarization.Segment], embeddings: [ClusterID: [Embedding]],
-                       brief: [ClusterID: [Embedding]], to meeting: inout Meeting) {
-        var order: [ClusterID] = []
-        for segment in segments.sorted(by: { $0.range.start < $1.range.start })
-        where !order.contains(segment.cluster) {
-            order.append(segment.cluster)
+    private func apply(_ heard: Diarization, decisions: [SpeakerGate.Destination], user: ClusterID? = nil,
+                       micUser: Set<ClusterID> = [], mixed: Set<ClusterID> = [], channel: VoiceChannel, to meeting: inout Meeting) -> [SpeakerSegment] {
+        var ids: [SpeakerGate.Destination: SpeakerID] = [:]
+        let ordered = zip(heard.segments, decisions).enumerated().sorted {
+            ($0.element.0.range.start, $0.offset) < ($1.element.0.range.start, $1.offset)
         }
-        let ids = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, SpeakerID.remote($0 + 1)) })
-        meeting.speakers = order.enumerated().map { index, cluster in
-            RemoteSpeaker(id: ids[cluster]!, label: Self.label(index), person: nil,
-                          embeddings: embeddings[cluster] ?? [], briefEmbeddings: brief[cluster])
+        var nextID = (meeting.speakers.compactMap { Int($0.id.rawValue.dropFirst()) }.max() ?? 0) + 1
+        for (_, (_, decision)) in ordered where ids[decision] == nil {
+            let cluster: ClusterID, background: Bool
+            switch decision {
+            case .foreground(let id): (cluster, background) = (id, false)
+            case .background(let id): (cluster, background) = (id, true)
+            }
+            if !background, cluster == user || micUser.contains(cluster) {
+                ids[decision] = .me
+                if cluster == user { nextID += 1 }
+            } else {
+                let id = SpeakerID.remote(nextID)
+                nextID += 1
+                let hasVectors = !background || !mixed.contains(cluster)
+                ids[decision] = id
+                meeting.speakers.append(RemoteSpeaker(id: id, label: Self.label(meeting.speakers.count), person: nil,
+                    embeddings: hasVectors ? (heard.embeddings[cluster] ?? []).map { $0.heard(on: channel) } : [],
+                    briefEmbeddings: hasVectors ? heard.briefEmbeddings[cluster]?.map { $0.heard(on: channel) } : nil))
+                if background { meeting.pendingBackgroundSpeakerIDs?.append(id) }
+            }
         }
-        meeting.remoteSegments = segments.map { SpeakerSegment(speaker: ids[$0.cluster]!, range: $0.range) }
+        return zip(heard.segments, decisions).map { SpeakerSegment(speaker: ids[$1]!, range: $0.range) }
     }
 
     /// One segment per run of consecutive words sharing a label.
-    static func segments(from words: [LabeledWord]) -> [Diarization.Segment] {
+    private static func segments(from words: [LabeledWord]) -> [Diarization.Segment] {
         var segments: [Diarization.Segment] = []
         for labeled in words.sorted(by: { $0.word.range.start < $1.word.range.start }) {
             if let last = segments.last, last.cluster == labeled.speaker {
@@ -623,6 +710,19 @@ public struct MeetingProcessingPipeline: Sendable {
             }
         }
         return segments
+    }
+
+    /// Count the union of word intervals for each label, independent of turns used for alignment and embeddings.
+    private static func labeledSpeechDurations(_ words: [LabeledWord]) -> [ClusterID: TimeInterval] {
+        Dictionary(grouping: words, by: \.speaker).mapValues { spoken in
+            var end = -Double.infinity
+            var seconds: TimeInterval = 0
+            for range in spoken.map(\.word.range).sorted(by: { $0.start < $1.start }) {
+                seconds += max(0, range.end - max(end, range.start))
+                end = max(end, range.end)
+            }
+            return seconds
+        }
     }
 
     private func llmTranscript(_ meeting: Meeting) -> LLMTranscript {

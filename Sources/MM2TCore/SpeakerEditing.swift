@@ -162,6 +162,71 @@ public struct SpeakerEditing: Sendable {
         return meeting
     }
 
+    @discardableResult
+    public func restoreBackground(_ speaker: SpeakerID, in meetingID: MeetingID) async throws -> Meeting {
+        var meeting = try await editableMeeting(meetingID)
+        guard let index = meeting.backgroundSpeakers.firstIndex(where: { $0.id == speaker }) else {
+            throw SpeakerEditError.unknownSpeaker(speaker)
+        }
+        meeting.speakers.append(meeting.backgroundSpeakers.remove(at: index))
+        meeting.utterances += meeting.backgroundUtterances.filter { $0.speaker == speaker }
+        meeting.backgroundUtterances.removeAll { $0.speaker == speaker }
+        meeting.utterances.sort { ($0.range.start, $0.speaker.rawValue) < ($1.range.start, $1.speaker.rawValue) }
+        meeting.relabelSpeakers()
+        meeting.invalidateSpeakerOutputs()
+        try await library.save(meeting)
+        return meeting
+    }
+
+    @discardableResult
+    public func delete(_ speaker: SpeakerID, in meetingID: MeetingID) async throws -> Meeting {
+        var meeting = try await editableMeeting(meetingID)
+        let index = try speakerIndex(speaker, in: meeting)
+        let removed = meeting.speakers[index]
+        if let person = removed.person, let stored = await voiceprints.person(person),
+           removed.learnableEmbeddings.contains(where: stored.embeddings.contains) {
+            try await forgetVoice(of: removed.id, in: meetingID)
+        }
+        let main = meeting.separatedTrack ?? .remote
+        let segments: [Track: [SpeakerSegment]] = main == .me
+            ? [.me: meeting.remoteSegments] : [.remote: meeting.remoteSegments, .me: meeting.micSegments ?? []]
+        var deleted = meeting.deletedSpeakerRanges ?? [:]
+        var overlaps = meeting.deletedSpeakerSharedRanges ?? [:]
+        for (track, turns) in segments {
+            let kept = turns.filter { $0.speaker != removed.id }.map(\.range)
+            let removedRanges = turns.filter { $0.speaker == removed.id }.map(\.range)
+            let ranges = removedRanges.flatMap { range in
+                kept.reduce([range]) { parts, other in parts.flatMap { $0.subtracting(other) } }
+            }
+            let shared = removedRanges.filter { range in
+                kept.contains { $0.overlap(with: range) > 0 } && !kept.contains {
+                    $0.hasBoundaries(of: range, within: 2 * TimeRange.speakerTurnTolerance)
+                }
+            }
+            if !shared.isEmpty { overlaps[track, default: []] += shared }
+            if !ranges.isEmpty { deleted[track, default: []] += ranges }
+        }
+        meeting.deletedSpeakerRanges = deleted.isEmpty ? nil : deleted
+        meeting.deletedSpeakerSharedRanges = overlaps.isEmpty ? nil : overlaps
+        if let transcription = meeting.transcription {
+            func keeping(_ track: Track, _ transcript: TrackTranscript) -> TrackTranscript {
+                let turns = segments[track] ?? []
+                return transcript.keeping { Alignment.speaker(for: $0, in: turns) != removed.id }
+            }
+            meeting.transcription = Transcription(me: keeping(.me, transcription.me), remote: keeping(.remote, transcription.remote))
+        }
+        meeting.mergedSpeakers = meeting.mergedSpeakers.filter { meeting.resolve($0.key) != removed.id }
+        meeting.speakers.remove(at: index)
+        meeting.utterances.removeAll { $0.speaker == removed.id }
+        meeting.remoteSegments.removeAll { $0.speaker == removed.id }
+        meeting.micSegments?.removeAll { $0.speaker == removed.id }
+        meeting.suggestions.items.removeAll { $0.speaker == removed.id }
+        meeting.relabelSpeakers()
+        meeting.invalidateSpeakerOutputs()
+        try await library.save(meeting)
+        return meeting
+    }
+
     /// A failed meeting is editable: a retry reloads the document, so it keeps the edit.
     private func editableMeeting(_ id: MeetingID) async throws -> Meeting {
         let meeting = try await library.meeting(id)

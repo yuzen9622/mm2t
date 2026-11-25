@@ -6,6 +6,7 @@ import SwiftUI
 struct SpeakerPanel: View {
     let model: MeetingDetailModel
     @State private var renaming: SpeakerRow?
+    @State private var showsBackground = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -17,7 +18,33 @@ struct SpeakerPanel: View {
                                learn: { Task { await model.learnVoice(of: speaker.id) } },
                                forget: { Task { await model.forgetVoice(of: speaker.id) } },
                                merge: { other in Task { await model.merge(speaker.id, into: other) } },
-                               accept: { Task { await model.acceptSuggestion(for: speaker.id) } })
+                               accept: { Task { await model.acceptSuggestion(for: speaker.id) } },
+                               delete: { Task { await model.delete(speaker.id) } })
+            }
+            if let background = model.meeting?.backgroundSpeakers, !background.isEmpty {
+                Button { showsBackground.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Icon("chevron-down", size: 12)
+                            .rotationEffect(.degrees(showsBackground ? 0 : -90))
+                            .motion(Motion.touch, value: showsBackground)
+                        Text("\(background.count) Background Voices").font(Typo.caption)
+                    }
+                    .foregroundStyle(Palette.secondary)
+                    .frame(height: 24)
+                }
+                .buttonStyle(.plain)
+                if showsBackground {
+                    ForEach(background) { speaker in
+                        HStack {
+                            Text(speaker.label).font(Typo.body)
+                            Spacer()
+                            PillButton("Restore", kind: .ghost) {
+                                Task { await model.restoreBackground(speaker.id) }
+                            }
+                        }
+                        .frame(height: 28)
+                    }
+                }
             }
             if model.isProcessing {
                 Text("Speakers can be edited when processing finishes.").font(Typo.caption).foregroundStyle(Palette.secondary)
@@ -46,6 +73,8 @@ struct SpeakerRowView: View {
     var forget: () -> Void = {}
     let merge: (SpeakerID) -> Void
     let accept: () -> Void
+    let delete: () -> Void
+    @State private var confirmDelete = false
     @State private var hovering = false
 
     var body: some View {
@@ -77,6 +106,12 @@ struct SpeakerRowView: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .motion(Motion.touch, value: hovering)
+        .confirmationDialog("Delete \(speaker.displayName)?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: delete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Their lines will be removed from the transcript. The generated views will need regenerating.")
+        }
     }
 
     private var menu: some View {
@@ -94,6 +129,8 @@ struct SpeakerRowView: View {
             Menu("Merge Into") {
                 ForEach(others) { other in Button(other.displayName) { merge(other.id) } }
             }
+            Divider()
+            Button("Delete Speaker…", role: .destructive) { confirmDelete = true }
         } label: {
             Icon("dots", size: 16).foregroundStyle(Palette.secondary).frame(width: 26, height: 26).contentShape(Circle())
         }

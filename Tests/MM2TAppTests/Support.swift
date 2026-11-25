@@ -79,10 +79,13 @@ enum Script {
 
     static let remoteWords = [
         TimedWord("大家好", 0.5, 1.5), TimedWord("今天", 1.6, 2.2), TimedWord("討論預算", 2.2, 3.5),
-        TimedWord("小明", 4.5, 5), TimedWord("你覺得呢", 5, 6),
+        TimedWord("小明", 4.5, 5), TimedWord("你覺得呢", 5, 6.5),
         TimedWord("我同意", 20.5, 21.5),
     ]
     static let micWords = [TimedWord("那就這樣", 30, 31), TimedWord("決定", 31, 31.5)]
+    static let micDiarization = Diarization(
+        segments: [.init(cluster: ClusterID("mic"), range: TimeRange(start: 30, end: 32))],
+        overlaps: [], embeddings: [:])
 }
 
 struct FakeSTT: TranscriptionProvider {
@@ -282,9 +285,14 @@ struct LocalModelError: Error {}
 
 struct ScriptedDiarizer: Diarizer {
     let fails = Box(false)
-    func diarize(track: URL) async throws -> Diarization {
+    func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization {
         if fails.get { throw LocalModelError() }
         return Script.diarization
+    }
+
+    func diarize(track: URL) async throws -> Diarization {
+        if fails.get { throw LocalModelError() }
+        return Script.micDiarization
     }
 }
 

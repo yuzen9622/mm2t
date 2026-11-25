@@ -22,6 +22,15 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     /// Everyone but the user, who is `SpeakerID.me` and has no record: the remote track's speakers,
     /// then anyone else the mic heard in the room.
     public internal(set) var speakers: [RemoteSpeaker] = []
+    public internal(set) var backgroundSpeakers: [RemoteSpeaker] = []
+    public internal(set) var backgroundUtterances: [Utterance] = []
+    /// Kept across the diarize → match → align checkpoints, then cleared by alignment.
+    var pendingBackgroundSpeakerIDs: [SpeakerID]?
+    /// Deleted word ranges are removed from the source transcription; keep the deleted IDs'
+    /// audio spans as well so a fresh separation does not revive them as empty speaker rows.
+    var deletedSpeakerRanges: [Track: [TimeRange]]?
+    // Shared time cannot be cut from all tracks. Remember only distinguishable deleted turns.
+    var deletedSpeakerSharedRanges: [Track: [TimeRange]]?
     /// Speakers removed by a merge, mapped to the speaker they were merged into.
     public internal(set) var mergedSpeakers: [SpeakerID: SpeakerID] = [:]
     public internal(set) var remoteSegments: [SpeakerSegment] = []
@@ -62,6 +71,66 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
         self.metadata = metadata
         self.audio = audio
         self.highlights = highlights.sorted { $0.time < $1.time }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, metadata, audio, highlights, speakers, mergedSpeakers, remoteSegments, separatedTrack
+        case micSegments, attribution, transcription, utterances, suggestions, translation
+        case summaryMarkdown, perPersonMarkdown, outputs, status, deferredAIStep
+        case backgroundSpeakers, backgroundUtterances, pendingBackgroundSpeakerIDs, deletedSpeakerRanges, deletedSpeakerSharedRanges
+    }
+
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decode(MeetingID.self, forKey: .id)
+        metadata = try box.decode(MeetingMetadata.self, forKey: .metadata)
+        audio = try box.decode(RecordingAudio.self, forKey: .audio)
+        highlights = try box.decode([Highlight].self, forKey: .highlights)
+        speakers = try box.decode([RemoteSpeaker].self, forKey: .speakers)
+        backgroundSpeakers = try box.decodeIfPresent([RemoteSpeaker].self, forKey: .backgroundSpeakers) ?? []
+        backgroundUtterances = try box.decodeIfPresent([Utterance].self, forKey: .backgroundUtterances) ?? []
+        pendingBackgroundSpeakerIDs = try box.decodeIfPresent([SpeakerID].self, forKey: .pendingBackgroundSpeakerIDs)
+        deletedSpeakerRanges = try box.decodeIfPresent([Track: [TimeRange]].self, forKey: .deletedSpeakerRanges)
+        deletedSpeakerSharedRanges = try box.decodeIfPresent([Track: [TimeRange]].self, forKey: .deletedSpeakerSharedRanges)
+        mergedSpeakers = try box.decode([SpeakerID: SpeakerID].self, forKey: .mergedSpeakers)
+        remoteSegments = try box.decode([SpeakerSegment].self, forKey: .remoteSegments)
+        separatedTrack = try box.decodeIfPresent(Track.self, forKey: .separatedTrack)
+        micSegments = try box.decodeIfPresent([SpeakerSegment].self, forKey: .micSegments)
+        attribution = try box.decodeIfPresent(SpeakerAttribution.self, forKey: .attribution)
+        transcription = try box.decodeIfPresent(Transcription.self, forKey: .transcription)
+        utterances = try box.decode([Utterance].self, forKey: .utterances)
+        suggestions = try box.decode(NameSuggestions.self, forKey: .suggestions)
+        translation = try box.decodeIfPresent(TranscriptTranslation.self, forKey: .translation)
+        summaryMarkdown = try box.decodeIfPresent(String.self, forKey: .summaryMarkdown)
+        perPersonMarkdown = try box.decodeIfPresent(String.self, forKey: .perPersonMarkdown)
+        outputs = try box.decode(LLMOutputs.self, forKey: .outputs)
+        status = try box.decode(ProcessingStatus.self, forKey: .status)
+        deferredAIStep = try box.decodeIfPresent(ProcessingStep.self, forKey: .deferredAIStep)
+    }
+
+    mutating func relabelSpeakers() {
+        var starts: [SpeakerID: TimeInterval] = [:]
+        for segment in remoteSegments + (micSegments ?? []) {
+            starts[segment.speaker] = min(starts[segment.speaker] ?? .infinity, segment.range.start)
+        }
+        for utterance in utterances where starts[utterance.speaker] == nil {
+            starts[utterance.speaker] = utterance.range.start
+        }
+        speakers = speakers.enumerated().sorted {
+            (starts[$0.element.id] ?? .infinity, $0.offset) < (starts[$1.element.id] ?? .infinity, $1.offset)
+        }.map(\.element)
+        for index in speakers.indices { speakers[index].label = MeetingProcessingPipeline.label(index) }
+        for index in backgroundSpeakers.indices {
+            backgroundSpeakers[index].label = MeetingProcessingPipeline.label(speakers.count + index)
+        }
+    }
+
+    mutating func invalidateSpeakerOutputs() {
+        suggestions.isStale = true
+        if outputs.cleaned != nil || outputs.digests != nil || outputs.summary != nil ||
+            summaryMarkdown != nil || perPersonMarkdown != nil {
+            outputs.isStale = true
+        }
     }
 
     public func speaker(_ id: SpeakerID) -> RemoteSpeaker? {
@@ -131,7 +200,7 @@ public struct Highlight: Codable, Hashable, Sendable {
 public struct RemoteSpeaker: Codable, Hashable, Sendable, Identifiable {
     public let id: SpeakerID
     /// "A", "B", "C" in order of first appearance; shown while the speaker has no person.
-    public let label: String
+    public internal(set) var label: String
     public internal(set) var person: PersonID?
     public internal(set) var embeddings: [Embedding]
     /// Vectors of a speaker with too little clean speech for `embeddings`. Never matched against

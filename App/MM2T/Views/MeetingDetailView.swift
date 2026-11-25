@@ -162,6 +162,7 @@ struct MeetingDetailView: View {
         }
         .confirmationDialog("Regenerate the cleaned transcript, summary and notes?", isPresented: $confirmRegenerate) {
             Button("Regenerate") { Task { await model.regenerate() } }
+                .disabled(!model.canRegenerate)
         } message: {
             Text("Regenerating replaces your edits to the cleaned transcript, summary, and by-person notes.")
         }
@@ -230,7 +231,7 @@ struct MeetingDetailView: View {
                 Text("Speakers changed since the generated views were written.")
                 Spacer()
                 PillButton("Regenerate") { confirmRegenerate = true }
-                    .disabled(model.isProcessing)
+                    .disabled(!model.canRegenerate)
             }
         }
         if let failure = model.separationFailure {

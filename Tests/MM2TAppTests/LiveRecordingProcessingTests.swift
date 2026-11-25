@@ -13,7 +13,7 @@ private actor RecordingSpeakerSession: StreamingDiarizationSession {
         if final { finals += 1 }
         for (track, url) in tracks { #expect(try WAVFormat.frameCount(url) == counts[track]) }
         return StreamingDiarizationSnapshot(
-            diarizations: [.me: Script.diarization, .remote: Script.diarization],
+            diarizations: [.me: Script.micDiarization, .remote: Script.diarization],
             processedSeconds: counts.mapValues { Double($0) / 16_000 })
     }
 }
@@ -42,7 +42,7 @@ private actor RecordingSpeakerSession: StreamingDiarizationSession {
         world.catalog.diarizer.fails.set(true)
         world.catalog.cloud.behavior.set(.failed)
         world.catalog.llm.calls.set([])
-        try await prepared.attachRecording(source, diarizations: [.me: Script.diarization, .remote: Script.diarization],
+        try await prepared.attachRecording(source, diarizations: [.me: Script.micDiarization, .remote: Script.diarization],
                                            echo: nil, to: saved.id)
         #expect(try await world.library.meeting(saved.id).status == .pending(next: .inferNames))
         await world.queue.run(.process, on: saved.id, using: prepared)
@@ -61,7 +61,7 @@ private actor RecordingSpeakerSession: StreamingDiarizationSession {
         let draft = await prepared.recordingDraft(
             transcription: Transcription(me: TrackTranscript(source: .cloud, content: .unlabeled(Script.micWords)),
                                          remote: TrackTranscript(source: .cloud, content: .unlabeled(Script.remoteWords))),
-            diarizations: [.me: Script.diarization, .remote: Script.diarization], echo: nil,
+            diarizations: [.me: Script.micDiarization, .remote: Script.diarization], echo: nil,
             metadata: MeetingMetadata(title: "Recording", startedAt: Date(), duration: 35), highlights: [])
         world.catalog.llm.failNext.set(["summarize"])
         #expect(await prepared.precomputeRecording(draft) == false)
