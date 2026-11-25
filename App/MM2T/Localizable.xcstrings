@@ -220,6 +220,7 @@
     "Couldn’t save the pending collaboration room closure.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法儲存待關閉的協作房間。" } } } },
     "Can’t connect to the collaboration service.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法連線到協作服務。" } } } },
     "The collaboration service couldn’t complete the request.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "協作服務無法完成要求。" } } } },
+    "Translation": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯" } } } },
     "Translation model": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "翻譯模型" } } } },
     "Apple Translation requires macOS 26 or later.": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "Apple 翻譯需要 macOS 26 或以上版本。" } } } },
     "Unavailable": { "localizations": { "zh-Hant": { "stringUnit": { "state": "translated", "value": "無法使用" } } } },
