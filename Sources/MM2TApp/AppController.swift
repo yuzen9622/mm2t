@@ -475,7 +475,7 @@ public final class AppController {
     public func detail(_ id: MeetingID, labels: PresentationLabels, playback: (any MeetingPlayback)?) -> MeetingDetailModel {
         MeetingDetailModel(
             id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback,
-            todos: todoStatus, reminders: reminders,
+            todos: todoStatus, reminders: reminders, account: collabAccount,
             learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 

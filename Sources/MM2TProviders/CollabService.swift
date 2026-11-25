@@ -302,6 +302,14 @@ public actor CollabService {
         return try parse(CollabRoom.self, from: await authorized(request, owner: owner))
     }
 
+    package func hostCode(for id: String, owner: String) async throws -> String {
+        struct HostCode: Decodable { let code: String }
+        let request = Request(post: ["rooms", id, "host-code"])
+        let result = try parse(HostCode.self, from: await authorized(request, owner: owner))
+        guard !result.code.isEmpty else { throw CollabError.server(status: 200) }
+        return result.code
+    }
+
     public func endRoom(_ id: String, owner: String) async throws {
         let response = try await authorized(Request(post: ["rooms", id, "end"]), owner: owner)
         guard try parse(End.self, from: response).status == .ended else { throw CollabError.server(status: response.1) }

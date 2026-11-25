@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if app.collabAccount != nil {
             observeChanges { [weak app] in
                 let collaboration = app?.capture.collaboration
+                collaboration?.onRoomCreated = MainNavigation.shared.openCollaboration
                 CollabHostPage.shared.prepare(for: collaboration?.room?.hostUrl, retaining: collaboration?.retainedHostURL)
             }
         }

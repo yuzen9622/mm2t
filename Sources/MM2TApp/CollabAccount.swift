@@ -187,6 +187,24 @@ public final class CollabAccount {
         }
     }
 
+    func owns(_ room: MeetingRoom) -> Bool { user?.id == room.owner && !signingOut }
+
+    func openHostBrowser(for room: MeetingRoom, using open: (URL) -> Bool) async throws {
+        guard owns(room) else { throw CollabError.notSignedIn }
+        guard configuration.accepts(room.shareUrl), room.shareUrl.fragment == nil,
+              var destination = URLComponents(url: room.shareUrl, resolvingAgainstBaseURL: false) else {
+            throw CollabError.unreachable
+        }
+        let session = profileSession
+        let code = try await service.hostCode(for: room.roomId, owner: room.owner)
+        guard session == profileSession, owns(room) else { throw CollabError.notSignedIn }
+        try Task.checkCancellation()
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let encoded = code.addingPercentEncoding(withAllowedCharacters: unreserved) else { throw CollabError.server(status: 200) }
+        destination.percentEncodedFragment = "host=" + encoded
+        guard let url = destination.url, open(url) else { throw CollabError.unreachable }
+    }
+
     public func refreshProfile(afterJob: Bool = false) async {
         // A finished job only updates usage; signing in goes through restore so deferred work resumes.
         guard !signingOut, !afterJob || user != nil else { return }

@@ -63,6 +63,15 @@ final class MainNavigation {
         WindowOpener.open(WindowID.main)
     }
 
+    private(set) var collaborationRequest = 0
+
+    func openCollaboration() {
+        searchOpen = false
+        settingsOpen = false
+        collaborationRequest += 1
+        openLive()
+    }
+
     /// Opens the main window on the recording in progress.
     func openLive() {
         liveOpen = true

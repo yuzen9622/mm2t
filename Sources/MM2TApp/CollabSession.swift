@@ -68,7 +68,30 @@ public final class CollabSession {
     public var showsCommandButton: Bool { allowsRoomCommands && state != .ended && (pendingCleanup?.isBackground ?? true) }
     public var wantsKeyboard: Bool { allowsRoomCommands && (commandStatus == .input || state == .confirmingStart) }
     public var room: CollabRoom? { if case .live(let room) = state { room } else { nil } }
+    var meetingRoom: MeetingRoom? {
+        ownedRoom.map { MeetingRoom(roomId: $0.room.roomId, shareUrl: $0.room.shareUrl, owner: $0.owner) }
+    }
+
     public var retainedHostURL: URL? { ownedRoom?.room.hostUrl }
+    @ObservationIgnored public var onRoomCreated: (() -> Void)?
+    public private(set) var openingHostBrowser = false
+    public private(set) var hostBrowserFailed = false
+
+    public func openHostBrowser(using open: (URL) -> Bool) async {
+        guard let liveRoom = room, let saved = meetingRoom, !openingHostBrowser else { return }
+        openingHostBrowser = true
+        hostBrowserFailed = false
+        defer { openingHostBrowser = false }
+        do {
+            try await account.openHostBrowser(for: saved) { url in
+                guard room == liveRoom else { return false }
+                return open(url)
+            }
+        } catch {
+            hostBrowserFailed = room == liveRoom
+        }
+    }
+
     private var ownedRoom: OwnedRoom?
     private var pendingCleanup: CommandCleanup?
     @ObservationIgnored private var cleanupRequested = false
@@ -217,6 +240,7 @@ public final class CollabSession {
     private func closeSharing() {
         let room = ownedRoom
         let creation = creation
+        hostBrowserFailed = false
         ownedRoom = nil
         pendingCleanup = nil
         cleanupRequested = false
@@ -266,7 +290,7 @@ public final class CollabSession {
             case .success(let binding):
                 let room = binding.room
                 ownedRoom = binding
-                guard account.configuration.accepts(room.shareUrl), account.configuration.accepts(room.hostUrl) else {
+                guard room.shareUrl.fragment == nil, account.configuration.accepts(room.shareUrl), account.configuration.accepts(room.hostUrl) else {
                     closeSharing()
                     fail(CollabError.server(status: 200))
                     state = .idle
@@ -274,6 +298,7 @@ public final class CollabSession {
                 }
                 guard account.user?.id == binding.owner, !account.signingOut else { return }
                 state = .live(room)
+                onRoomCreated?()
                 if pendingCommand != nil { commandStatus = .building(nil) }
                 pump()
             case .failure(let error):

@@ -34,6 +34,12 @@ struct MeetingDetailView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             ScreenHeader(title: Text(verbatim: model.meeting?.metadata.title ?? ""), back: back) {
+                if model.canOpenRoom {
+                    PillButton("Open Room", icon: "external-link") {
+                        Task { await model.openRoom { NSWorkspace.shared.open($0) } }
+                    }
+                    .disabled(model.openingRoom)
+                }
                 IconButton("Rename…", icon: "pencil") {
                     newTitle = model.meeting?.metadata.title ?? ""
                     renaming = true
@@ -201,6 +207,9 @@ struct MeetingDetailView: View {
     }
 
     @ViewBuilder private var banners: some View {
+        if model.canOpenRoom, model.openRoomFailed {
+            Banner(icon: "alert-triangle", tone: .danger) { Text("Couldn’t open the host page.") }
+        }
         if let job = model.job, job != .completed {
             Banner(icon: "refresh", tone: .info) {
                 Text(Copy.job(job))

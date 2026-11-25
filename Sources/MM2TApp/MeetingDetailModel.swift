@@ -44,6 +44,9 @@ public final class MeetingDetailModel {
     public private(set) var people: [Person] = []
     public private(set) var errorMessage: String?
 
+    public private(set) var openingRoom = false
+    public private(set) var openRoomFailed = false
+    @ObservationIgnored private let account: CollabAccount?
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let voiceprints: VoiceprintStore
     @ObservationIgnored private let queue: ProcessingQueue
@@ -58,8 +61,9 @@ public final class MeetingDetailModel {
     /// `learn` receives the names and terms corrected in a saved transcript passage.
     public init(id: MeetingID, library: MeetingLibrary, voiceprints: VoiceprintStore, queue: ProcessingQueue,
                 labels: PresentationLabels, playback: (any MeetingPlayback)?,
-                todos: TodoStatus? = nil, reminders: RemindersSync? = nil,
+                todos: TodoStatus? = nil, reminders: RemindersSync? = nil, account: CollabAccount? = nil,
                 learn: @escaping @MainActor (String) -> Void = { _ in }) {
+        self.account = account
         self.learn = learn
         self.todos = todos
         self.reminders = reminders
@@ -69,6 +73,20 @@ public final class MeetingDetailModel {
         self.queue = queue
         self.labels = labels
         self.playback = playback
+    }
+
+    public var canOpenRoom: Bool {
+        guard let room = meeting?.room else { return false }
+        return account?.owns(room) == true
+    }
+
+    public func openRoom(using open: (URL) -> Bool) async {
+        guard let account, let room = meeting?.room, account.owns(room), !openingRoom else { return }
+        openingRoom = true
+        openRoomFailed = false
+        defer { openingRoom = false }
+        do { try await account.openHostBrowser(for: room, using: open) }
+        catch { openRoomFailed = account.owns(room) }
     }
 
     public func load(at utterance: UtteranceID? = nil) async {

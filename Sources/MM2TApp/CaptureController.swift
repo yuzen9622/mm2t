@@ -460,6 +460,7 @@ public final class CaptureController {
         countdown?.task.cancel()
         countdown = nil
         state = .stopping(target)
+        let room = collaboration?.meetingRoom
         let closingCollaboration = endCollaboration()
         eventTask?.cancel()
         eventTask = nil
@@ -473,7 +474,7 @@ public final class CaptureController {
         let id: MeetingID
         do {
             let recording = try await session.stop()
-            id = try await library.create(recording).id
+            id = try await library.create(recording, room: room).id
             try? FileManager.default.removeItem(at: recording.micTrack.deletingLastPathComponent())
         } catch {
             await stopCaptions()

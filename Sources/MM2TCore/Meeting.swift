@@ -12,9 +12,23 @@ private struct StringKey: CodingKey {
     init?(intValue: Int) { nil }
 }
 
+/// The guest link and owner needed to request a fresh host code for a saved meeting.
+public struct MeetingRoom: Codable, Hashable, Sendable {
+    public let roomId: String
+    public let shareUrl: URL
+    public let owner: String
+
+    public init(roomId: String, shareUrl: URL, owner: String) {
+        self.roomId = roomId
+        self.shareUrl = shareUrl
+        self.owner = owner
+    }
+}
+
 /// The persisted record of one meeting: recording, speakers, transcript, LLM outputs and processing state.
 public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     public let id: MeetingID
+    public let room: MeetingRoom?
     public var metadata: MeetingMetadata
     public let audio: RecordingAudio
     public let highlights: [Highlight]
@@ -66,15 +80,16 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     public internal(set) var status: ProcessingStatus = .pending(next: .transcribe)
     public internal(set) var deferredAIStep: ProcessingStep?
 
-    init(id: MeetingID, metadata: MeetingMetadata, audio: RecordingAudio, highlights: [Highlight]) {
+    init(id: MeetingID, metadata: MeetingMetadata, audio: RecordingAudio, highlights: [Highlight], room: MeetingRoom? = nil) {
         self.id = id
+        self.room = room
         self.metadata = metadata
         self.audio = audio
         self.highlights = highlights.sorted { $0.time < $1.time }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, metadata, audio, highlights, speakers, mergedSpeakers, remoteSegments, separatedTrack
+        case id, room, metadata, audio, highlights, speakers, mergedSpeakers, remoteSegments, separatedTrack
         case micSegments, attribution, transcription, utterances, suggestions, translation
         case summaryMarkdown, perPersonMarkdown, outputs, status, deferredAIStep
         case backgroundSpeakers, backgroundUtterances, pendingBackgroundSpeakerIDs, deletedSpeakerRanges, deletedSpeakerSharedRanges
@@ -83,6 +98,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         id = try box.decode(MeetingID.self, forKey: .id)
+        room = try box.decodeIfPresent(MeetingRoom.self, forKey: .room)
         metadata = try box.decode(MeetingMetadata.self, forKey: .metadata)
         audio = try box.decode(RecordingAudio.self, forKey: .audio)
         highlights = try box.decode([Highlight].self, forKey: .highlights)

@@ -7,8 +7,8 @@ import SwiftUI
 struct LivePage: View {
     let app: AppController
     let collapse: () -> Void
-    @State private var selected = Tab.captions
-    private enum Tab: CaseIterable { case captions, shared }
+    @State private var selected = Tab.shared
+    private enum Tab: CaseIterable { case shared, captions }
     @State private var follow = AssistantFollowScroll()
     @Environment(\.controlActiveState) private var activeState
 
@@ -18,7 +18,7 @@ struct LivePage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if let room = capture.collaboration?.room {
+            if let collaboration = capture.collaboration, let room = collaboration.room {
                 Segmented(options: Tab.allCases, selection: $selected) { tab in
                     switch tab {
                     case .captions: String(localized: "Captions")
@@ -28,6 +28,16 @@ struct LivePage: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 10)
                 if selected == .shared {
+                    HStack {
+                        if collaboration.hostBrowserFailed { Text("Couldn’t open the host page.") }
+                        Spacer()
+                        PillButton("Open in Browser as Host", icon: "external-link") {
+                            Task { await collaboration.openHostBrowser { NSWorkspace.shared.open($0) } }
+                        }
+                        .disabled(collaboration.openingHostBrowser)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 10)
                     CollabHostView(page: .shared, url: room.hostUrl).id(room.roomId)
                 } else {
                     captionBody
@@ -37,6 +47,7 @@ struct LivePage: View {
             }
         }
         .background(Palette.window)
+        .onChange(of: MainNavigation.shared.collaborationRequest) { selected = .shared }
         .onChange(of: showingCaptionsInKeyWindow, initial: true) {
             MainNavigation.shared.liveFrontmost = showingCaptionsInKeyWindow
         }

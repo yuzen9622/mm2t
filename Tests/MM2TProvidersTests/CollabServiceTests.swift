@@ -148,6 +148,30 @@ struct CollabServiceTests {
         #expect(handoffs.map { $0.headers["Authorization"] } == (renew ? ["Bearer a1", "Bearer a2"] : ["Bearer a1"]))
     }
 
+    @Test(arguments: [200, 403, 404, 429])
+    func browserHostCodeUsesRoomOwnerAndRefreshes(status: Int) async throws {
+        let server = StubServer { call in
+            switch call.url.path {
+            case "/v1/auth/exchange": .status(200, Self.login)
+            case "/v1/auth/refresh": .status(200, Self.rotated)
+            case "/v1/rooms/r/host-code" where call.headers["Authorization"] == "Bearer a1": .status(401, "")
+            case "/v1/rooms/r/host-code" where call.headers["Authorization"] == "Bearer a2":
+                .status(status, status == 200 ? #"{"code":"fresh"}"# : "{}")
+            default: .status(500, "")
+            }
+        }
+        let service = MemoryTokens().service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        await #expect(throws: CollabError.notSignedIn) { try await service.hostCode(for: "r", owner: "other") }
+        if status == 200 {
+            #expect(try await service.hostCode(for: "r", owner: "u") == "fresh")
+        } else {
+            await #expect(throws: CollabError.server(status: status)) { try await service.hostCode(for: "r", owner: "u") }
+        }
+        let calls = server.requests.filter { $0.url.path == "/v1/rooms/r/host-code" }
+        #expect(calls.count == 2 && calls.allSatisfy { $0.method == "POST" && $0.body.isEmpty })
+    }
+
     @Test func refreshRotatesCredentialsAndRetryOnlyOnce() async throws {
         let server = StubServer { call in
             switch call.url.path {

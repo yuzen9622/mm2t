@@ -11,6 +11,7 @@ struct CollabCapsuleRows: View {
     var body: some View {
         VStack(spacing: 8) {
             commandRow
+            if session.room != nil, session.hostBrowserFailed { Text("Couldn’t open the host page.") }
             if session.allowsRoomCommands, let suggestion = session.suggestion, let card = session.card {
                 VStack(spacing: 6) {
                     HStack(spacing: 10) {

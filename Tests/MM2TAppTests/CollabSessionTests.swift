@@ -58,6 +58,91 @@ import Testing
         await world.capture.stop()
     }
 
+    @Test func savedRoomReopensOnlyForItsOwnerAfterRecordingStops() async throws {
+        let world = try await recordingWithCollaboration(summaryService: .gemini, plan: "pro")
+        let account = try #require(world.app.collabAccount)
+        let session = try #require(world.capture.collaboration)
+        session.run(command: "建立文件")
+        session.startSharing()
+        try #require(await eventually { session.room != nil })
+        await world.capture.stop()
+        let id = try #require(world.capture.lastSavedMeeting)
+        let detail = world.detail(id)
+        await detail.load()
+        let meeting = try #require(detail.meeting)
+        let room = try #require(meeting.room)
+        #expect(room.owner == "test" && room.roomId == "room")
+        #expect(room.shareUrl.absoluteString == "https://web.collab.invalid/r/share")
+        let directory = await world.library.audioURL(meeting, track: .me).deletingLastPathComponent()
+        let bytes = try Data(contentsOf: directory.appending(path: "meeting.json"))
+        let json = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        let fields = try #require(json["room"] as? [String: String])
+        #expect(Set(fields.keys) == ["roomId", "shareUrl", "owner"])
+        #expect(!String(decoding: bytes, as: UTF8.self).contains("#host="))
+
+        #expect(detail.canOpenRoom)
+        CollabBackend.hostCodeStatus.set(429)
+        await detail.openRoom { _ in Issue.record("unexpected browser launch"); return false }
+        #expect(detail.openRoomFailed && !detail.openingRoom)
+        CollabBackend.hostCodeStatus.set(200)
+        var opened = false
+        await detail.openRoom { url in
+            #expect(detail.openingRoom)
+            opened = url.absoluteString == "https://web.collab.invalid/r/share#host=fresh%2Bcode"
+            return true
+        }
+        #expect(opened && !detail.openRoomFailed && !detail.openingRoom)
+
+        await account.signOut()
+        #expect(!detail.canOpenRoom)
+        await detail.openRoom { _ in Issue.record("signed-out browser launch"); return false }
+        try await account.completeSignIn(code: "other", verifier: "fixture")
+        #expect(!detail.canOpenRoom)
+        await detail.openRoom { _ in Issue.record("non-owner browser launch"); return false }
+        #expect(CollabBackend.requests.get.filter { $0.hasSuffix("/host-code") }.count == 2)
+    }
+
+    @Test(arguments: [false, true])
+    func unsharedRecordingHasNoSavedRoom(creationRejected: Bool) async throws {
+        let world = try await recordingWithCollaboration(summaryService: .gemini, plan: "pro")
+        if creationRejected {
+            CollabBackend.blockRoomCreation.set(true)
+            let session = try #require(world.capture.collaboration)
+            session.run(command: "建立文件")
+            session.startSharing()
+            try #require(await eventually { session.commandStatus == .failed(.service(.planRequired)) })
+        }
+        await world.capture.stop()
+        let id = try #require(world.capture.lastSavedMeeting)
+        let detail = world.detail(id)
+        await detail.load()
+        let meeting = try #require(detail.meeting)
+        #expect(meeting.room == nil && !detail.canOpenRoom)
+    }
+
+    @Test func stoppingBeforeCreationCompletesSavesNoRoom() async throws {
+        let world = try await recordingWithCollaboration(summaryService: .gemini, plan: "pro")
+        let session = try #require(world.capture.collaboration)
+        CollabBackend.holdCreation.set(true)
+        defer { CollabBackend.releaseCreation() }
+        session.run(command: "建立文件")
+        session.startSharing()
+        try #require(await eventually { CollabBackend.deferredCreation.get != nil })
+        let stop = Task { await world.capture.stop() }
+        try #require(await eventually { world.capture.collaboration == nil })
+        CollabBackend.releaseCreation()
+        await stop.value
+        let id = try #require(world.capture.lastSavedMeeting)
+        let detail = world.detail(id)
+        await detail.load()
+        let meeting = try #require(detail.meeting)
+        #expect(meeting.room == nil && !detail.canOpenRoom)
+        let encoded = try JSONEncoder().encode(meeting)
+        let legacy = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(legacy["room"] == nil)
+        #expect(try JSONDecoder().decode(Meeting.self, from: encoded).room == nil)
+    }
+
     @Test func freeAccountWithItsOwnGeminiKeyCannotHost() async throws {
         let world = try await recordingWithCollaboration(summaryService: .gemini, plan: "free")
         #expect(try world.credentials.read(.geminiAPIKey) != nil)
@@ -276,6 +361,28 @@ import Testing
         #expect(account.user?.id == "test")
         #expect(account.error == nil)
         await account.waitForPendingEnds()
+    }
+
+    @Test func roomCreationOpensOnceAndBrowserUsesAFreshCode() async throws {
+        let f = try await Fixture()
+        var openedRooms: [String] = []
+        f.session.onRoomCreated = { [weak session = f.session] in
+            if let id = session?.room?.roomId { openedRooms.append(id) }
+        }
+        try await f.makeRoom()
+        f.session.accountChanged()
+        #expect(openedRooms == ["room"])
+        let room = try #require(f.session.room)
+        await f.session.openHostBrowser { url in
+            #expect(url.absoluteString == room.shareUrl.absoluteString + "#host=fresh%2Bcode")
+            return false
+        }
+        #expect(f.session.hostBrowserFailed)
+        #expect(f.session.room == room)
+        await f.session.openHostBrowser { _ in true }
+        #expect(!f.session.hostBrowserFailed)
+        #expect(CollabBackend.requests.get.filter { $0.hasSuffix("/host-code") }.count == 2)
+        await f.session.end()?.value
     }
 
     @Test func dismissedPreRoomAndCreatedTitlesSuppressLaterSuggestions() async throws {
@@ -1289,6 +1396,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static let endBearers = Box<[String]>([])
     static let holdOps = Box(false)
     static let roomAISources = Box<[String]>([])
+    static let hostCodeStatus = Box(200)
     static let holdCreation = Box(false)
     static let deferredCreation = Box<(@Sendable () -> Void)?>(nil)
     static let deferredReply = Box<(@Sendable () -> Void)?>(nil)
@@ -1296,6 +1404,7 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
     static func reset() {
         quotaUsed.set(0); planUsedSeconds.set(nil); planName.set("pro"); handoffURL.set(nil)
         roomAISources.set([])
+        hostCodeStatus.set(200)
         blockRoomCreation.set(false)
         profileUnavailable.set(false); holdNextProfile.set(false); deferredProfile.set(nil)
         exchanges.set([]); requests.set([]); document.set(nil); events.set([]); ops.set([]); endBearers.set([])
@@ -1384,6 +1493,8 @@ private final class CollabBackend: URLProtocol, @unchecked Sendable {
                 return
             }
             response = (201, body)
+        case "/v1/rooms/room/host-code":
+            response = (Self.hostCodeStatus.get, Data(#"{"code":"fresh+code"}"#.utf8))
         case "/v1/rooms/room/components":
             let doc = Self.document.get.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) }
             let json = [doc, Self.extraComponent.get].compactMap { $0 }.joined(separator: ",")

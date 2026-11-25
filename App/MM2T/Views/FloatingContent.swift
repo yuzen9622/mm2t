@@ -597,7 +597,14 @@ struct CapsuleBar: View {
                     .transition(.opacity)
             }
             if let collaboration {
-                if let url = collaboration.room?.shareUrl { CollabCopyLink(url: url) }
+                if let room = collaboration.room {
+                    CircleButton("Open Collaboration", icon: "maximize", action: MainNavigation.shared.openCollaboration)
+                    CircleButton("Open in Browser as Host", icon: "external-link") {
+                        Task { await collaboration.openHostBrowser { NSWorkspace.shared.open($0) } }
+                    }
+                    .disabled(collaboration.openingHostBrowser)
+                    CollabCopyLink(url: room.shareUrl)
+                }
                 if collaboration.showsCommandButton {
                     CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
                 }
