@@ -1,6 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Voice Command": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "語音指令"}}}},
+    "Speak a command for the shared meeting": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "對共享會議說出指令"}}}},
+    "Press once, say what to build, then press again to send.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "按一下後說出要建立的內容，再按一下送出。"}}}},
+    "This is the same as the recording shortcut, so it does nothing.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "與錄音快速鍵相同，因此不會作用。"}}}},
+    "Listening… say what to build, then press again.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "正在聆聽…說出要建立的內容，再按一下送出。"}}}},
     "Delete Speaker…": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "刪除講者…"}}}},
     "Delete %@?": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "刪除「%@」？"}}}},
     "Their lines will be removed from the transcript. The generated views will need regenerating.": {"localizations": {"zh-Hant": {"stringUnit": {"state": "translated", "value": "這位講者的發言會從逐字稿移除，產生的內容需要重新產生。"}}}},

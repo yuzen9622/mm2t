@@ -336,6 +336,7 @@ public final class CaptureController {
             collaboration = makeCollaboration(target.name)
             if let collaboration {
                 collaboration.captionsActive = { [weak captions] in captions?.isActive == true }
+                collaboration.captionsPartial = { [weak captions] in captions?.partial ?? "" }
                 captions.onFinalized = { [weak collaboration] segment in collaboration?.finalized(segment) }
             }
             state = .recording(target)

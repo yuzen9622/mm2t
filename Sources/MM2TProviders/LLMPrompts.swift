@@ -510,7 +510,10 @@ package enum CollabPrompts {
     判斷最近三分鐘的會議是否明顯需要排時程、列待辦、投票決策、畫流程或架構、整理文件。\(language)
     不需要時只回傳 {"suggest":false}。需要時只回傳單一 JSON：
     {"suggest":true,"kind":"whiteboard|poll|gantt|actions|document","title":"不超過 24 字","instruction":"一句可執行的建立指令"}。
-    kind 只能選其中一個。不要重複已存在或提過的標題。不要加 Markdown 圍欄或其他文字。
+    kind 只能從 allowedKinds 選一個。requestedKinds 是字幕裡有人點名的類型；若字幕確實在要求建立它，就提議。
+    existing 是會議室已建立的元件，會隨會議自動更新，不要提議同主題的新元件。
+    previousSuggestions 是你提議過的元件（不論使用者是否採用），不要換個標題再提同一件事。
+    不要加 Markdown 圍欄或其他文字。
     """
 
     package static let update = """

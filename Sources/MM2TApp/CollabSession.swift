@@ -11,7 +11,10 @@ public final class CollabSession {
     }
 
     public enum CommandStatus: Equatable {
-        case hidden, input, building(String?), completed(String?), failed(Failure)
+        case hidden, input
+        /// A spoken command is being heard: what has been said since the voice shortcut was pressed.
+        case listening(String)
+        case building(String?), completed(String?), failed(Failure)
     }
 
     public enum Failure: Equatable {
@@ -99,6 +102,9 @@ public final class CollabSession {
     @ObservationIgnored private var draining: Task<Void, Never>?
     @ObservationIgnored private var closingRoom: Task<Void, Never>?
     @ObservationIgnored var captionsActive: () -> Bool = { false }
+    /// The caption words not yet settled into a segment.
+    @ObservationIgnored var captionsPartial: () -> String = { "" }
+    @ObservationIgnored private var listeningSince: Date?
 
     @ObservationIgnored private let account: CollabAccount
     @ObservationIgnored private let title: String
@@ -137,6 +143,27 @@ public final class CollabSession {
         commandStatus = .input
     }
 
+    /// Starts hearing a spoken command, or sends what was heard. Without live captions nothing can
+    /// be heard, so the typed command opens instead.
+    public func toggleVoiceCommand() {
+        if case .listening(let heard) = commandStatus {
+            let text = [heard, captionsPartial()].filter { !$0.isEmpty }.joined(separator: " ")
+            listeningSince = nil
+            commandStatus = .hidden
+            submit(text, source: .command)
+            return
+        }
+        guard captionsActive() else {
+            if commandStatus != .input { toggleCommand() }
+            return
+        }
+        guard allowsRoomCommands, showsCommandButton, state != .starting, state != .confirmingStart, pendingCommand == nil else { return }
+        if case .building = commandStatus { return }
+        completion?.cancel()
+        listeningSince = now()
+        commandStatus = .listening("")
+    }
+
     public func dismissCommand() {
         guard pendingCleanup?.isBackground ?? true else { return }
         switch commandStatus {
@@ -149,6 +176,7 @@ public final class CollabSession {
         }
         pendingCommand = nil
         retryCommand = nil
+        listeningSince = nil
         commandStatus = .hidden
     }
 
@@ -318,7 +346,11 @@ public final class CollabSession {
         guard state != .ended, captionsActive() else { return }
         totalCharacters += segment.text.count
         transcript.append(Caption(segment: segment, position: totalCharacters))
-        policy.record(segment.text.count)
+        if case .listening(let heard) = commandStatus, let listeningSince, segment.ended > listeningSince {
+            commandStatus = .listening(heard.isEmpty ? segment.text : heard + " " + segment.text)
+        } else {
+            policy.record(segment.text)
+        }
         pruneCaptions()
         needsCaptions = true
         pump()
@@ -489,20 +521,27 @@ public final class CollabSession {
     }
 
     private func askForSuggestion() async {
-        guard policy.shouldAsk(now: now(), captionsOn: captionsActive(), cardVisible: suggestion != nil) else { return }
+        guard let ask = policy.shouldAsk(now: now(), captionsOn: captionsActive(), cardVisible: suggestion != nil) else { return }
         do {
             let components = if let room { try await roomComponents(room) } else { [] as [CollabComponent] }
             guard !Task.isCancelled, captionsActive() else { return }
-            let titles = components.map(\.title)
+            let kinds = policy.kinds(for: ask, existing: Set(components.map(\.kind)), now: now())
+            guard !kinds.isEmpty else { return }
+            func entry(_ kind: CollabComponentKind, _ title: String) -> CollabJSON {
+                .object(["kind": .string(kind.rawValue), "title": .string(title)])
+            }
+            let existing = components.map { entry($0.kind, $0.title) }
+            let offered = policy.offered.map { entry($0.kind, $0.title) }
             let captions = recent(180, at: now())
-            let previousTitles = policy.titles
             let model = CollabModelWork(makeLLM: llmSnapshot().build)
             let offer = try await model.suggestion {
-                ["captions": .string(captions.joined(separator: "\n")), "existingTitles": .array(titles.map(CollabJSON.string)),
-                 "previousTitles": .array(previousTitles.sorted().map(CollabJSON.string))]
+                ["captions": .string(captions.joined(separator: "\n")),
+                 "allowedKinds": .array(kinds.map(\.rawValue).sorted().map(CollabJSON.string)),
+                 "requestedKinds": .array(ask.requested.map(\.rawValue).sorted().map(CollabJSON.string)),
+                 "existing": .array(existing), "previousSuggestions": .array(offered)]
             }
             guard !Task.isCancelled, captionsActive(), pendingCommand == nil, commandStatus == .hidden, suggestion == nil,
-                  let offer, offer.kind != .experimental, policy.offer(kind: offer.kind, title: offer.title) else { return }
+                  let offer, kinds.contains(offer.kind), policy.offer(kind: offer.kind, title: offer.title, now: now()) else { return }
             suggestion = offer
             card = SuggestionPolicy.Card(now: now())
             scheduleExpiry()

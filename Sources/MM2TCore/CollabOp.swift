@@ -4,6 +4,24 @@ public enum CollabComponentKind: String, Codable, Sendable, CaseIterable {
     case whiteboard, poll, gantt, actions, document, experimental
 
     public var updatesLive: Bool { self != .poll && self != .experimental }
+
+    /// The kinds a suggestion card may offer.
+    public static let suggestible: Set<Self> = [.whiteboard, .poll, .gantt, .actions, .document]
+
+    /// Words in a caption that ask for a kind by name. Captions arrive in Traditional Chinese.
+    static let requestWords: [Self: [String]] = [
+        .whiteboard: ["白板", "流程圖", "架構圖", "畫個圖", "畫一下", "whiteboard", "diagram"],
+        .poll: ["投票", "表決", "poll", "vote"],
+        .gantt: ["甘特", "時程表", "排時程", "排個時程", "時間表", "gantt", "timeline"],
+        .actions: ["待辦", "代辦", "分工", "任務清單", "todo", "to-do", "action item"],
+        .document: ["會議紀錄", "會議記錄", "整理成文件", "寫成文件", "寫個文件", "document"],
+    ]
+
+    /// The kinds a caption names, for asking about a suggestion without waiting.
+    public static func requested(in text: String) -> Set<Self> {
+        let text = text.lowercased()
+        return Set(requestWords.filter { $0.value.contains(where: text.contains) }.keys)
+    }
 }
 
 public enum CollabSource: String, Codable, Sendable { case command, suggestion }

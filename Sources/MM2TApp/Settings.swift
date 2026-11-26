@@ -152,6 +152,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     /// The global shortcut that starts a recording and stops it again.
     public var recordShortcut: Hotkey = .commandFn
+    /// The global shortcut that starts hearing a spoken command for the shared meeting, and sends it.
+    public var voiceCommandShortcut: Hotkey = .optionFn
 
     // MARK: Recording prompts
     /// Which apps and websites bring up the recording prompt, beyond and instead of the built-in
@@ -221,6 +223,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         translationEnabled = try c.decodeIfPresent(Bool.self, forKey: .translationEnabled) ?? (captionTranslation != .off)
         captionBarOffsets = try c.decodeIfPresent([String: CaptionBarOffset].self, forKey: .captionBarOffsets) ?? [:]
         recordShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .recordShortcut) ?? defaults.recordShortcut
+        voiceCommandShortcut = try c.decodeIfPresent(Hotkey.self, forKey: .voiceCommandShortcut) ?? defaults.voiceCommandShortcut
         detectionRules = try c.decodeIfPresent(DetectionRules.self, forKey: .detectionRules) ?? defaults.detectionRules
     }
 
@@ -233,7 +236,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case transcriptionService, selfHostedURL, vocabulary, learnedVocabulary, dismissedVocabulary
         case summaryService, hasCompletedOnboarding, hidesFromScreenCapture
-        case openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut
+        case openAIBaseURL, openAIModel, transcriptionLanguage, speechModels, recordShortcut, voiceCommandShortcut
         case detectionRules
         case recordingMode
         case liveCaptions, captionSourceOrder, captionBarOffsets, captionEngine, captionTranslation, translationEnabled

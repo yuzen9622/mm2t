@@ -606,6 +606,7 @@ struct CapsuleBar: View {
                     CollabCopyLink(url: room.shareUrl)
                 }
                 if collaboration.showsCommandButton {
+                    CircleButton("Voice Command", icon: "microphone", action: collaboration.toggleVoiceCommand)
                     CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
                 }
             }

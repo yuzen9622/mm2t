@@ -58,7 +58,7 @@ enum SettingsRow: Hashable {
     case diarizationModel, translationEnabled, translationModel
     case appLanguage, assistantMemory
     case hideFromCapture
-    case recordShortcut
+    case recordShortcut, voiceCommandShortcut
     case promptApps, promptSites
     case systemPermissions, calendars, reminders, account
     case version, sourceCode, author, buyMeACoffee
@@ -83,6 +83,7 @@ enum SettingsRow: Hashable {
         case .appLanguage: [String(localized: "App language"), "English", "繁體中文"]
         case .hideFromCapture: [String(localized: "Hide mm2t from screen sharing and screenshots")]
         case .recordShortcut: [String(localized: "Start or stop recording")]
+        case .voiceCommandShortcut: [String(localized: "Speak a command for the shared meeting")]
         case .promptApps: [String(localized: "Apps")] + DetectionPolicy.callApps.map(\.name)
         case .promptSites: [String(localized: "Websites")] + MeetingPlatform.allCases.map(\.displayName)
         case .systemPermissions: [String(localized: "Microphone"), String(localized: "System audio recording"),
@@ -116,7 +117,7 @@ struct SettingsGroup: Identifiable {
             SettingsGroup(id: "translation", section: .general, title: String(localized: "Translation"), rows: [.translationEnabled, .translationModel]),
             SettingsGroup(id: "diarization", section: .general, title: String(localized: "Speaker separation"),
                           rows: [.diarizationModel]),
-            SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut]),
+            SettingsGroup(id: "shortcut", section: .general, title: String(localized: "Keyboard shortcut"), rows: [.recordShortcut, .voiceCommandShortcut]),
             SettingsGroup(id: "language", section: .general, title: String(localized: "Language"), rows: [.appLanguage]),
             SettingsGroup(id: "privacy", section: .privacy, title: String(localized: "Privacy"), rows: [.hideFromCapture]),
             SettingsGroup(id: "prompts", section: .general, title: String(localized: "Recording prompts"),
@@ -336,6 +337,8 @@ struct SettingsRowView: View {
             Toggle("Hide mm2t from screen sharing and screenshots", isOn: $store.settings.hidesFromScreenCapture)
         case .recordShortcut:
             RecordShortcutRow(app: app)
+        case .voiceCommandShortcut:
+            VoiceCommandShortcutRow(app: app)
         case .promptApps:
             PromptAppRules(store: store)
         case .promptSites:
@@ -595,7 +598,7 @@ private struct RecordShortcutRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                ShortcutField(app: app, shortcut: $store.settings.recordShortcut, listening: $listening)
+                ShortcutField(app: app, label: "Start or stop recording", shortcut: $store.settings.recordShortcut, listening: $listening)
             }
             if app.setup.accessibility != .granted {
                 HStack(spacing: 12) {
@@ -617,10 +620,36 @@ private struct RecordShortcutRow: View {
     }
 }
 
+/// The global shortcut that starts hearing a spoken command for the shared meeting and sends it.
+/// The Accessibility note sits under the record shortcut, which needs the same permission.
+private struct VoiceCommandShortcutRow: View {
+    let app: AppController
+    @State private var listening = false
+
+    var body: some View {
+        @Bindable var store = app.settings
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Speak a command for the shared meeting")
+                Text(listening ? "Press the new shortcut. Esc cancels." : "Press once, say what to build, then press again to send.")
+                    .font(Typo.caption).foregroundStyle(Palette.secondary).fixedSize(horizontal: false, vertical: true)
+                if store.settings.voiceCommandShortcut == store.settings.recordShortcut {
+                    Text("This is the same as the recording shortcut, so it does nothing.")
+                        .font(Typo.caption).foregroundStyle(Palette.danger).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            ShortcutField(app: app, label: "Speak a command for the shared meeting",
+                          shortcut: $store.settings.voiceCommandShortcut, listening: $listening)
+        }
+    }
+}
+
 /// Shows the shortcut; clicked, it listens for a new one. While it listens the shortcut itself is
 /// off, and the keys pressed go nowhere else.
 private struct ShortcutField: View {
     let app: AppController
+    let label: LocalizedStringKey
     @Binding var shortcut: Hotkey
     @Binding var listening: Bool
     @State private var recorder = HotkeyRecorder()
@@ -648,7 +677,7 @@ private struct ShortcutField: View {
         .motion(Motion.touch, value: hovering)
         .motion(Motion.select, value: listening)
         .onDisappear(perform: stop)
-        .accessibilityLabel("Start or stop recording")
+        .accessibilityLabel(label)
         .accessibilityValue(Text(verbatim: shortcut.symbols))
     }
 

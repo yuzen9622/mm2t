@@ -33,26 +33,75 @@ public struct SuggestionPolicy: Sendable {
         }
     }
 
+    /// Why a suggestion is being asked for now.
+    public struct Ask: Equatable, Sendable {
+        /// The kinds someone named in the captions since the last ask.
+        public let requested: Set<CollabComponentKind>
+        /// Enough talk and time have passed for an unprompted look at the meeting.
+        public let passive: Bool
+
+        public init(requested: Set<CollabComponentKind>, passive: Bool) {
+            self.requested = requested
+            self.passive = passive
+        }
+    }
+
+    /// An unprompted look needs this much new caption text and this long since the last ask.
+    static let passiveCharacters = 300
+    static let passiveInterval: TimeInterval = 120
+    /// A named kind is looked at this soon after the last ask.
+    static let requestInterval: TimeInterval = 15
+    /// After a card is closed, unprompted looks wait this long.
+    static let closedInterval: TimeInterval = 60
+    /// A kind already offered is not offered again unprompted for this long.
+    static let kindCooldown: TimeInterval = 600
+
     private var lastAsked: Date
     private var lastClosed: Date?
     private var characters = 0
+    private var requested: Set<CollabComponentKind> = []
+    private var offeredAt: [CollabComponentKind: Date] = [:]
     private var history: [CollabComponentKind: Set<String>] = [:]
-    public var titles: Set<String> { Set(history.values.joined()) }
+    /// What was offered, in order, so the model knows what it already proposed.
+    public private(set) var offered: [(kind: CollabComponentKind, title: String)] = []
 
     public init(now: Date) { lastAsked = now }
 
-    public mutating func record(_ count: Int) { characters += count }
-
-    public func canAsk(now: Date, captionsOn: Bool, cardVisible: Bool) -> Bool {
-        captionsOn && !cardVisible && characters >= 40 && now.timeIntervalSince(lastAsked) >= 20
-            && (lastClosed.map { now.timeIntervalSince($0) >= 60 } ?? true)
+    public mutating func record(_ text: String) {
+        characters += text.count
+        requested.formUnion(CollabComponentKind.requested(in: text))
     }
 
-    public mutating func shouldAsk(now: Date, captionsOn: Bool, cardVisible: Bool) -> Bool {
-        guard canAsk(now: now, captionsOn: captionsOn, cardVisible: cardVisible) else { return false }
+    public func canAsk(now: Date, captionsOn: Bool, cardVisible: Bool) -> Bool {
+        ask(now: now, captionsOn: captionsOn, cardVisible: cardVisible) != nil
+    }
+
+    public mutating func shouldAsk(now: Date, captionsOn: Bool, cardVisible: Bool) -> Ask? {
+        guard let ask = ask(now: now, captionsOn: captionsOn, cardVisible: cardVisible) else { return nil }
         lastAsked = now
         characters = 0
-        return true
+        requested = []
+        return ask
+    }
+
+    private func ask(now: Date, captionsOn: Bool, cardVisible: Bool) -> Ask? {
+        guard captionsOn, !cardVisible else { return nil }
+        let since = now.timeIntervalSince(lastAsked)
+        let passive = characters >= Self.passiveCharacters && since >= Self.passiveInterval
+            && (lastClosed.map { now.timeIntervalSince($0) >= Self.closedInterval } ?? true)
+        let named = since >= Self.requestInterval ? requested : []
+        return passive || !named.isEmpty ? Ask(requested: named, passive: passive) : nil
+    }
+
+    /// The kinds this ask may suggest. Named kinds always may. An unprompted look leaves out kinds
+    /// offered recently and live-updating kinds the room already has, which keep updating instead.
+    public func kinds(for ask: Ask, existing: Set<CollabComponentKind>, now: Date) -> Set<CollabComponentKind> {
+        guard ask.passive else { return ask.requested }
+        let open = CollabComponentKind.suggestible.filter { kind in
+            !(kind.updatesLive && existing.contains(kind))
+                && (offeredAt[kind].map { now.timeIntervalSince($0) >= Self.kindCooldown } ?? true)
+        }
+        return ask.requested.union(open)
     }
 
     public mutating func remember(kind: CollabComponentKind, title: String) {
@@ -60,10 +109,12 @@ public struct SuggestionPolicy: Sendable {
         if !key.isEmpty { history[kind, default: []].insert(key) }
     }
 
-    public mutating func offer(kind: CollabComponentKind, title: String) -> Bool {
+    public mutating func offer(kind: CollabComponentKind, title: String, now: Date) -> Bool {
         let key = Self.normalize(title)
         guard !key.isEmpty, !history[kind, default: []].contains(where: { Self.similar($0, key) }) else { return false }
         history[kind, default: []].insert(key)
+        offeredAt[kind] = now
+        offered.append((kind, title))
         return true
     }
 

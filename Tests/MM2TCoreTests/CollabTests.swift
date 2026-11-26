@@ -70,35 +70,59 @@ struct CollabTests {
         #expect(parser.rejectedLines == 4)
     }
 
-    @Test func suggestionsUseCaptionTimeCountVisibilityAndCooldown() {
+    @Test func unpromptedSuggestionsWaitForTwoMinutesAndThreeHundredCharacters() {
         let start = Date(timeIntervalSince1970: 1000)
         func at(_ offset: TimeInterval) -> Date { start.addingTimeInterval(offset) }
         var policy = SuggestionPolicy(now: start)
-        func ask(_ offset: TimeInterval, on: Bool = true, shown: Bool = false) -> Bool {
+        func ask(_ offset: TimeInterval, on: Bool = true, shown: Bool = false) -> SuggestionPolicy.Ask? {
             policy.shouldAsk(now: at(offset), captionsOn: on, cardVisible: shown)
         }
-        func offer(_ title: String) -> Bool { policy.offer(kind: .document, title: title) }
-        policy.record(39)
-        #expect(!ask(20))
-        policy.record(1)
-        #expect(!ask(19.99))
-        #expect(!ask(20, on: false))
-        #expect(!ask(20, shown: true))
-        #expect(ask(20))
-        #expect(!ask(40))
-        policy.record(40)
-        policy.closed(at: at(35))
-        #expect(!ask(94.99))
-        #expect(ask(95))
-        policy.remember(kind: .document, title: "api 規格")
-        #expect(!offer(" ＡＰＩ  規格"))
-        #expect(offer("  Project   Plan "))
-        #expect(!offer("project plan"))
+        policy.record(String(repeating: "字", count: 299))
+        #expect(ask(120) == nil)
+        policy.record("字")
+        #expect(ask(119.99) == nil)
+        #expect(ask(120, on: false) == nil)
+        #expect(ask(120, shown: true) == nil)
+        #expect(ask(120) == .init(requested: [], passive: true))
+        #expect(ask(300) == nil)
+        policy.record(String(repeating: "字", count: 300))
+        policy.closed(at: at(200))
+        #expect(ask(259.99) == nil)
+        #expect(ask(260) != nil)
+    }
+
+    @Test func namingAKindAsksWithinFifteenSecondsEvenAfterAClosedCard() {
+        let start = Date(timeIntervalSince1970: 1000)
+        func at(_ offset: TimeInterval) -> Date { start.addingTimeInterval(offset) }
+        var policy = SuggestionPolicy(now: start)
+        policy.closed(at: start)
+        policy.record("我們來投票決定午餐")
+        #expect(policy.shouldAsk(now: at(14.99), captionsOn: true, cardVisible: false) == nil)
+        #expect(policy.shouldAsk(now: at(15), captionsOn: true, cardVisible: false) == .init(requested: [.poll], passive: false))
+        #expect(policy.shouldAsk(now: at(40), captionsOn: true, cardVisible: false) == nil)
+        #expect(CollabComponentKind.requested(in: "開個白板畫流程圖，再排個時程") == [.whiteboard, .gantt])
+        #expect(CollabComponentKind.requested(in: "Let's VOTE and list the TODO items") == [.poll, .actions])
+        #expect(CollabComponentKind.requested(in: "今天天氣很好").isEmpty)
+    }
+
+    @Test func unpromptedSuggestionsSkipKindsOfferedRecentlyOrAlreadyUpdating() {
+        let start = Date(timeIntervalSince1970: 1000)
+        func at(_ offset: TimeInterval) -> Date { start.addingTimeInterval(offset) }
+        var policy = SuggestionPolicy(now: start)
+        let passive = SuggestionPolicy.Ask(requested: [], passive: true)
+        #expect(policy.kinds(for: passive, existing: [], now: start) == CollabComponentKind.suggestible)
+        let offered = policy.offer(kind: .poll, title: "午餐地點", now: start)
+        #expect(offered)
+        #expect(policy.kinds(for: passive, existing: [.whiteboard, .poll], now: at(599)) == [.gantt, .actions, .document])
+        #expect(policy.kinds(for: passive, existing: [.poll], now: at(600)).contains(.poll))
+        let named = SuggestionPolicy.Ask(requested: [.whiteboard], passive: false)
+        #expect(policy.kinds(for: named, existing: [.whiteboard], now: at(1)) == [.whiteboard])
+        #expect(policy.offered.map(\.title) == ["午餐地點"])
     }
 
     @Test func suggestionsRememberSimilarTitlesWithinTheirKind() {
         var policy = SuggestionPolicy(now: Date())
-        func offer(kind: CollabComponentKind, title: String) -> Bool { policy.offer(kind: kind, title: title) }
+        func offer(kind: CollabComponentKind, title: String) -> Bool { policy.offer(kind: kind, title: title, now: Date()) }
         #expect(offer(kind: .document, title: "會議摘要"))
         policy.closed(at: Date())
         #expect(!offer(kind: .document, title: "建立會議摘要"))
@@ -112,6 +136,10 @@ struct CollabTests {
         #expect(offer(kind: .document, title: "abcef"))
         #expect(offer(kind: .poll, title: "甲"))
         #expect(offer(kind: .poll, title: "乙"))
+        policy.remember(kind: .document, title: "api 規格")
+        #expect(!offer(kind: .document, title: " ＡＰＩ  規格"))
+        #expect(offer(kind: .document, title: "  Project   Plan "))
+        #expect(!offer(kind: .document, title: "project plan"))
     }
 
     @Test func hoveringPreservesTheUnusedPartOfTheFifteenSeconds() {

@@ -387,25 +387,81 @@ import Testing
 
     @Test func dismissedPreRoomAndCreatedTitlesSuppressLaterSuggestions() async throws {
         let f = try await Fixture()
-        func suggest(_ title: String, kind: String) async {
+        func suggest(_ title: String, kind: String, caption: String, asks: Bool = true) async {
             f.llm.answerChunks.set([#"{"suggest":true,"kind":"\#(kind)","title":"\#(title)","instruction":"整理資料"}"#])
             let count = f.llm.answerInputs.get.count
-            f.clock.update { $0.addTimeInterval(60) }
-            f.captions.receive(.final(String(repeating: "字", count: 40)))
+            f.clock.update { $0.addTimeInterval(20) }
+            f.captions.receive(.final(caption))
             await f.session.waitForWork()
-            #expect(f.llm.answerInputs.get.count == count + 1)
+            #expect(f.llm.answerInputs.get.count == count + (asks ? 1 : 0))
         }
-        await suggest("午餐地點投票", kind: "poll")
+        await suggest("午餐地點投票", kind: "poll", caption: "我們投票決定午餐")
         try #require(f.session.suggestion != nil)
         f.session.dismissSuggestion()
         try await f.makeRoom()
         f.session.dismissCommand()
-        await suggest("晚餐地點投票", kind: "poll")
+        await suggest("晚餐地點投票", kind: "poll", caption: "那晚餐也投票")
         #expect(f.session.suggestion == nil)
-        await suggest("今日會議決議", kind: "document")
+        #expect(f.llm.answerInputs.get.last?.contains("午餐地點投票") == true)
+        await suggest("今日會議決議", kind: "document", caption: "整理成會議紀錄")
         #expect(f.session.suggestion == nil)
-        await suggest("選出值日生", kind: "poll")
+        await suggest("無關閒聊", kind: "poll", caption: "今天天氣不錯", asks: false)
+        await suggest("選出值日生", kind: "poll", caption: "值日生用投票選")
         #expect(f.session.suggestion?.title == "選出值日生")
+        await f.session.end()?.value
+    }
+
+    @Test func unpromptedLooksSkipTheModelWhenEveryKindIsCoolingDown() async throws {
+        let f = try await Fixture()
+        let named = ["whiteboard": "開白板", "poll": "來投票", "gantt": "做甘特圖", "actions": "列待辦", "document": "寫會議紀錄"]
+        for (index, kind) in ["whiteboard", "poll", "gantt", "actions", "document"].enumerated() {
+            f.llm.answerChunks.set([#"{"suggest":true,"kind":"\#(kind)","title":"主題\#(index)號","instruction":"整理資料"}"#])
+            f.clock.update { $0.addTimeInterval(20) }
+            f.captions.receive(.final(named[kind]!))
+            await f.session.waitForWork()
+            #expect(f.session.suggestion?.kind.rawValue == kind)
+            #expect(f.llm.answerInputs.get.last?.contains(#""allowedKinds""#) == true)
+            f.session.dismissSuggestion()
+            f.llm.answerChunks.set([#"{"suggest":false}"#])
+        }
+        let count = f.llm.answerInputs.get.count
+        f.clock.update { $0.addTimeInterval(120) }
+        f.captions.receive(.final(String(repeating: "字", count: 300)))
+        await f.session.waitForWork()
+        #expect(f.llm.answerInputs.get.count == count)
+        await f.session.end()?.value
+    }
+
+    @Test func voiceCommandSendsWhatWasSaidAfterThePress() async throws {
+        let f = try await Fixture()
+        f.captions.receive(.final("先前的閒聊"))
+        f.clock.update { $0.addTimeInterval(1) }
+        f.session.toggleVoiceCommand()
+        #expect(f.session.commandStatus == .listening(""))
+        f.clock.update { $0.addTimeInterval(1) }
+        f.captions.receive(.final("建立一個投票"))
+        #expect(f.session.commandStatus == .listening("建立一個投票"))
+        f.captions.receive(.partial("選午餐"))
+        f.session.toggleVoiceCommand()
+        #expect(f.session.state == .confirmingStart)
+        f.llm.answerChunks.set(Fixture.create + [Fixture.done])
+        f.session.startSharing()
+        try #require(await eventually { f.session.commandStatus == .completed("會議決議") })
+        let input = try #require(f.llm.answerInputs.get.last)
+        #expect(input.contains("建立一個投票 選午餐"))
+        await f.session.end()?.value
+    }
+
+    @Test func voiceCommandCancelsAndFallsBackToTypingWithoutCaptions() async throws {
+        let f = try await Fixture()
+        f.session.toggleVoiceCommand()
+        f.session.dismissCommand()
+        #expect(f.session.commandStatus == .hidden)
+        f.captions.receive(.final("建立一個投票"))
+        #expect(f.session.commandStatus == .hidden)
+        f.captions.set(.off)
+        f.session.toggleVoiceCommand()
+        #expect(f.session.commandStatus == .input)
         await f.session.end()?.value
     }
 
@@ -414,10 +470,10 @@ import Testing
         let (session, captions, clock, llm) = (fixture.session, fixture.captions, fixture.clock, fixture.llm)
         llm.answerChunks.set([#"{"suggest":true,"kind":"document","title":"會議決議","instruction":"整理目前決議"}"#])
         clock.update { $0.addTimeInterval(20) }
-        captions.receive(.partial(String(repeating: "字", count: 40)))
+        captions.receive(.partial("把決議整理成會議紀錄"))
         await session.waitForWork()
         #expect(llm.answerInputs.get.isEmpty)
-        captions.receive(.final(String(repeating: "字", count: 40)))
+        captions.receive(.final("把決議整理成會議紀錄"))
         try #require(await eventually { session.suggestion != nil })
         session.accept(suggestion: try #require(session.suggestion))
         #expect(session.state == .confirmingStart)
@@ -830,7 +886,7 @@ import Testing
         f.llm.holds.set(["answer": gate])
         f.llm.answerChunks.set([#"{"suggest":true,"kind":"document","title":"會議決議","instruction":"整理決議"}"#])
         f.clock.update { $0.addTimeInterval(20) }
-        f.captions.receive(.final(String(repeating: "字", count: 40)))
+        f.captions.receive(.final("把決議整理成會議紀錄"))
         try #require(await eventually { f.llm.answerInputs.get.count == 1 })
         f.captions.set(.off)
         await gate.open(true)
@@ -1331,6 +1387,7 @@ import Testing
             })
             captions.set(.live)
             session.captionsActive = { [weak captions] in captions?.isActive == true }
+            session.captionsPartial = { [weak captions] in captions?.partial ?? "" }
             captions.onFinalized = { [weak session] in session?.finalized($0) }
             account.onUserChanged = { [weak session] in session?.accountChanged() }
             account.beforeSignOut = { [weak session] in await session?.signOut() }

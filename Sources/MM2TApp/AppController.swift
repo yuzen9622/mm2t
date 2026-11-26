@@ -81,12 +81,16 @@ public final class AppController {
     @ObservationIgnored private var monitor: SystemSignalMonitor?
     @ObservationIgnored private var watchMeetings = false
     @ObservationIgnored private var hotkey: GlobalHotkeyMonitor?
+    @ObservationIgnored private var voiceHotkey: GlobalHotkeyMonitor?
     @ObservationIgnored private let recordingTitle: String
     /// Set while the shortcut field in Settings is listening, so pressing the current shortcut
     /// there to replace it does not also start or stop a recording.
     public var suspendsRecordShortcut: Bool {
         get { hotkey?.isSuspended ?? false }
-        set { hotkey?.isSuspended = newValue }
+        set {
+            hotkey?.isSuspended = newValue
+            voiceHotkey?.isSuspended = newValue
+        }
     }
 
     public let collabAccount: CollabAccount?
@@ -494,6 +498,12 @@ public final class AppController {
         }
         hotkey.start()
         self.hotkey = hotkey
+        let voiceHotkey = GlobalHotkeyMonitor(hotkey: { [settings] in settings.settings.voiceCommandShortcut }) { [weak self] in
+            guard let self, settings.settings.voiceCommandShortcut != settings.settings.recordShortcut else { return }
+            capture.collaboration?.toggleVoiceCommand()
+        }
+        voiceHotkey.start()
+        self.voiceHotkey = voiceHotkey
     }
 }
 

@@ -87,6 +87,21 @@ struct CollabCapsuleRows: View {
                 .background(.white.opacity(0.12), in: Capsule())
                 .transition(.opacity.combined(with: .move(edge: .top)))
             case .input: EmptyView()
+            case .listening(let heard):
+                HStack(spacing: 9) {
+                    Icon("microphone", size: 15).foregroundStyle(Palette.orange)
+                    if heard.isEmpty {
+                        Text("Listening… say what to build, then press again.").foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                    } else {
+                        Text(verbatim: heard).lineLimit(1).truncationMode(.head)
+                    }
+                    Spacer(minLength: 0)
+                    CapsulePill("Send", filled: true, action: session.toggleVoiceCommand)
+                    CircleButton("Cancel", icon: "x", action: session.dismissCommand)
+                }
+                .padding(.leading, 12)
+                .frame(width: 420, height: 36)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             case .building(let title):
                 HStack(spacing: 8) {
                     Spinner()
