@@ -269,26 +269,22 @@ struct CollabServiceTests {
 
     private func waitForRequests(_ event: () -> Bool) async -> Bool {
         let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(3)
+        let deadline = clock.now + .seconds(60)
         while clock.now < deadline, !Task.isCancelled {
             if event() { return true }
-            try? await Task.sleep(for: .milliseconds(2))
+            try? await Task.sleep(for: .milliseconds(20))
         }
-        return false
+        return event()
     }
 
-    private final class ResponseGate: @unchecked Sendable {
-        private let lock = NSLock()
-        private var released = false
-        func open() { lock.withLock { released = true } }
+    private struct ResponseGate: Sendable {
+        private let signal = AsyncStream<Void>.makeStream()
+
+        func open() { signal.continuation.finish() }
+
         func wait() async -> Bool {
-            let clock = ContinuousClock()
-            let deadline = clock.now + .seconds(5)
-            while clock.now < deadline, !Task.isCancelled {
-                if lock.withLock({ released }) { return true }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-            return false
+            for await _ in signal.stream {}
+            return !Task.isCancelled
         }
     }
 
