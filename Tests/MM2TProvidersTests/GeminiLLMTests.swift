@@ -60,7 +60,7 @@ extension StubServer.Request {
 
         #expect(request.geminiSystem.contains("{{speaker:代號}}"))
         #expect(request.geminiSystem.contains("sources"))
-        #expect(request.geminiSystem.contains("繁體中文"))
+        #expect(request.geminiSystem.contains("保留它的原始語言"))
         #expect(request.geminiSystem.contains("精簡但不摘要"))
         #expect(request.geminiInput.contains("[u2] {{speaker:r1}} 00:00:05 對我覺得禮拜三"))
         #expect(request.geminiInput.contains("(重點) [u2]"))
@@ -197,32 +197,27 @@ extension StubServer.Request {
         #expect(guesses.isEmpty && server.requests.isEmpty)
     }
 
-    static let englishDirective = "Output language: English"
-
-    @Test func anEnglishMeetingIsAnsweredInEnglishByEveryTask() async throws {
-        let english = LLMTranscript(utterances: [
-            utterance("u1", "me", 0, "Okay, so the remote control has to be under twenty five euros."),
-            utterance("u2", "r1", 6, "Right, and I think we should drop the LCD screen to save cost."),
-            utterance("u3", "r2", 14, "I'll send the market research before the next meeting."),
-        ])
-        let server = StubServer(status: 200, body: Fixture.gemini(#"{"paragraphs":[],"digests":[],"guesses":[],"title":"t","terms":[],"headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
+    @Test(arguments: [MeetingOutputLanguage.traditionalChinese, .english])
+    func summariesAndDigestsUseTheAppLanguageAndCleanupPreservesEachSource(_ language: MeetingOutputLanguage) async throws {
+        let source = language == .traditionalChinese ? "The deadline is Friday." : "交件日期是週五。"
+        let input = LLMTranscript(utterances: [
+            utterance("u1", "me", 0, source),
+            utterance("u2", "r1", 6, "予算の確認 and shipping dates"),
+        ], outputLanguage: language)
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"paragraphs":[],"digests":[],"title":"t","headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
         let llm = gemini(server)
-        _ = try await llm.cleanTranscript(english)
-        _ = try await llm.digestPerPerson(english)
-        _ = try? await llm.summarize(SummaryRequest(transcript: english, prioritized: []))
-        _ = try? await llm.inferNames(NameInferenceRequest(transcript: english, unnamedSpeakers: [SpeakerID("r1")], knownNames: [:]))
+        _ = try await llm.cleanTranscript(input)
+        _ = try await llm.digestPerPerson(input)
+        _ = try await llm.summarize(SummaryRequest(transcript: input, prioritized: []))
 
-        #expect(server.requests.count == 4)
-        for request in server.requests {
-            #expect(request.geminiSystem.contains(Self.englishDirective))
-        }
-    }
-
-    @Test func aMandarinMeetingFullOfEnglishTermsStaysInTraditionalChinese() async throws {
-        let server = StubServer(status: 200, body: Fixture.gemini(#"{"digests":[]}"#))
-        _ = try await gemini(server).digestPerPerson(transcript)
-        let request = try #require(server.requests.first)
-        #expect(!request.geminiSystem.contains(Self.englishDirective))
+        let directive = language == .traditionalChinese ? "輸出語言：繁體中文" : "Output language: English"
+        let requests = server.requests
+        try #require(requests.count == 3)
+        #expect(requests[0].geminiSystem.contains("保留它的原始語言"))
+        #expect(!requests[0].geminiSystem.contains(directive))
+        #expect(requests[0].geminiInput.contains("予算の確認 and shipping dates"))
+        #expect(requests[1].geminiSystem.contains(directive))
+        #expect(requests[2].geminiSystem.contains(directive))
     }
 
     @Test func digestsFollowFirstSpeakingOrder() async throws {

@@ -17,7 +17,7 @@ actor SummaryCheckpointStore {
                   request.transcript.glossary == current.transcript.glossary,
                   request.meetingStartedAt == current.meetingStartedAt,
                   request.timeZoneIdentifier == current.timeZoneIdentifier,
-                  LLMPrompts.isEnglish(previous) == LLMPrompts.isEnglish(utterances)
+                  request.transcript.outputLanguage == current.transcript.outputLanguage
             else { return false }
             let priorIDs = Set(previous.map(\.id))
             return current.prioritized.filter { priorIDs.contains($0.id) } == request.prioritized

@@ -12,7 +12,7 @@ actor DigestCheckpointStore {
             return !previous.isEmpty && previous.count <= current.utterances.count
                 && current.utterances.prefix(previous.count).elementsEqual(previous)
                 && transcript.glossary == current.glossary
-                && LLMPrompts.isEnglish(previous) == LLMPrompts.isEnglish(current.utterances)
+                && transcript.outputLanguage == current.outputLanguage
         }
     }
 

@@ -55,7 +55,7 @@ import Testing
         #expect(try await first.summarize(request).actionItems.first?.due?.hasTime == true)
     }
 
-    @Test(arguments: ["text", "speaker", "id", "time", "highlight", "glossary", "language"])
+    @Test(arguments: ["text", "speaker", "id", "time", "highlight", "glossary"])
     func changedRawInputsOrGlossaryRejectTheNormalizationReference(_ field: String) async throws {
         let store = CleanedCheckpointStore()
         let original = request(raw, glossary: ["原詞彙"]).transcript
@@ -66,7 +66,7 @@ import Testing
         let first = utterance(field == "id" ? "other" : "u1", field == "speaker" ? "r2" : "r1",
                               field == "time" ? 1 : 0, field == "text" ? "新的內容" : raw[0].text,
                               highlighted: field == "highlight")
-        let tail = utterance("u2", "r1", 10, field == "language" ? String(repeating: "English discussion ", count: 1_000) : "繼續討論")
+        let tail = utterance("u2", "r1", 10, "繼續討論")
         let changed = request([first, tail], glossary: field == "glossary" ? [] : ["原詞彙"]).transcript
         #expect(await store.reference(for: changed) == nil)
     }

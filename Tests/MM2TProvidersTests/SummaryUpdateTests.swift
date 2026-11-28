@@ -85,6 +85,21 @@ import Testing
         #expect(server.requests.count == 3)
     }
 
+    @Test(arguments: [false, true])
+    func changedAppLanguageRegeneratesEvenWhenPreviousTextCanBeReused(_ append: Bool) async throws {
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"title":"t","headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
+        let llm = GeminiLLM(apiKey: "test", session: server.session).forRecording()
+        var input = LLMTranscript(utterances: initial, outputLanguage: .traditionalChinese)
+        _ = try await llm.summarize(SummaryRequest(transcript: input, prioritized: []))
+        input = LLMTranscript(utterances: append ? initial + [tail] : initial, outputLanguage: .english)
+        _ = try await llm.summarize(SummaryRequest(transcript: input, prioritized: []))
+        let requests = server.requests
+        try #require(requests.count == 2)
+        #expect(requests[0].geminiSystem.contains("輸出語言：繁體中文"))
+        #expect(requests[1].geminiSystem.contains("Output language: English"))
+        #expect(!requests[1].geminiSystem.contains("只輸出異動"))
+    }
+
     @Test func fallbackFailureDoesNotReturnTheOldSummaryAsIfComplete() async throws {
         let early = self.early
         let invalid = try changes(action: ["remove": [99], "replace": [], "append": []])

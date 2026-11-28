@@ -11,8 +11,7 @@ package enum LLMPrompts {
     共同規則：
     1. 指稱任何人時，只能使用說話者代號，並原樣寫成 {{speaker:代號}}，例如 {{speaker:r2}}。即使逐字稿裡出現人名，也不要用人名取代代號，也不要自創「講者一」「A 先生」之類的稱呼。在文字內容裡一律要有大括號，例如寫「由 {{speaker:r1}} 負責」，不能寫「由 r1 負責」。JSON 的 speaker 與 owner 欄位只填代號本身（例如 r2、me），不加大括號。
     2. 每一項輸出都要在 sources 列出它依據的發言編號（例如 ["u12","u13"]），只能使用逐字稿中出現過的編號。
-    3. 輸出只能使用兩種語言：繁體中文與英文。以華語為主時使用繁體中文與台灣慣用詞（例如「影片」「軟體」「資料庫」「專案」「品質」），英文專有名詞、產品名稱與技術術語保留英文原文；整場是英文時使用英文。絕對不可以出現簡體字或中國大陸用語（「视频」「軟件」「數據庫」「項目」「質量」都不行），也不要輸出其他語言。
-    4. 不要加入逐字稿沒有的資訊，也不要猜測。
+    3. 不要加入逐字稿沒有的資訊，也不要猜測。
     """
 
     static let inferNames = """
@@ -23,6 +22,8 @@ package enum LLMPrompts {
     任務：把語音辨識的逐字稿整理成「這個人如果用打字的，會直接寫出來的樣子」：乾淨、通順、可以直接貼進文件，而且一項實質資訊都不能少。這是忠實清稿，不是摘要，也不是照抄。下面兩種結果都算失敗：
     - 照抄：輸出還留著贅詞、結巴、斷掉的半句，或辨識器的停頓記號（「——」「......」「我-我」）。
     - 漏失或改意：少了任何論點、數字、名稱、條件、原因或提問，把意思改掉，或加了原文沒有的內容。
+
+    整理每則發言時保留它的原始語言與書寫系統。同一段裡混用多種語言時，各部分保留原語；只校正辨識錯誤與表達，不要翻譯或統一成某一種語言。
 
     怎麼整理：
     1. 一則一則整理，不要整段概括。先讀完本段與前文弄懂脈絡，再處理每則發言：去掉贅詞與結巴、修正辨識錯誤，把剩下的意思全部寫成通順的句子；倒裝、斷掉重來的半句依上下文接成完整的句子。只有個別字詞真的聽不出來時，把那個字詞照原樣留著，句子其餘部分照常整理；不要因為一個詞不確定就整句照抄，也不要整句刪掉或自行補完沒說出口的結論。
@@ -197,18 +198,18 @@ package enum LLMPrompts {
     headline 與 title 沒變時填 null（保留原文），有變時填完整新文字。即使只輸出異動，套用後仍必須是完整、沒有過時事項的會議摘要。
     """
 
-    /// Appended to the system prompt of an English meeting. The prompts are written in Chinese, and a
-    /// model reading them answers in Chinese unless the output language is stated outright.
-    static let englishOutput = """
-    Output language: English. This meeting is in English, so write every text you produce in English \
-    (title, headline, decisions, discussion points, action items, digests, cleaned paragraphs, \
-    reasons), even though these instructions are written in Chinese. Keep the {{speaker:…}} tokens as they are.
-    """
+    static func system(_ task: String, language: MeetingOutputLanguage) -> String {
+        let directive = switch language {
+        case .english: "Output language: English. Write all titles, headings and generated prose in English regardless of the transcript language."
+        case .traditionalChinese: "輸出語言：繁體中文。所有標題、預覽、摘要、待辦與依人彙整一律使用台灣繁體中文，無論原始逐字稿使用何種語言。"
+        }
+        return common + "\n\n" + task + "\n\n" + directive
+    }
 
     /// A meeting counts as English when Chinese characters are under 5% of its words. A Latin word is
     /// about five letters and a Chinese character about one word, so a Mandarin meeting full of
     /// English terms stays Chinese.
-    static func isEnglish(_ utterances: [LLMUtterance]) -> Bool {
+    private static func isEnglish(_ utterances: [LLMUtterance]) -> Bool {
         var cjk = 0, latin = 0
         for scalar in utterances.lazy.flatMap(\.text.unicodeScalars) {
             switch scalar.value {
@@ -221,9 +222,9 @@ package enum LLMPrompts {
         return words > 0 && Double(cjk) < words * 0.05
     }
 
-    static func system(_ task: String, for utterances: [LLMUtterance]) -> String {
-        let base = common + "\n\n" + task
-        return isEnglish(utterances) ? base + "\n\n" + englishOutput : base
+    static func nameSystem(for utterances: [LLMUtterance]) -> String {
+        let language = isEnglish(utterances) ? "Output language: English. Write reasons in English." : "reason 使用台灣繁體中文，name 保留稱呼原文。"
+        return common + "\n\n" + inferNames + "\n\n" + language
     }
 
     static func render(_ utterances: [LLMUtterance]) -> String {

@@ -450,10 +450,21 @@ public struct LLMUtterance: Hashable, Sendable {
     public let isHighlighted: Bool
 }
 
+package enum MeetingOutputLanguage: Hashable, Sendable {
+    case english, traditionalChinese
+
+    static var current: Self {
+        let locale = InterfaceLanguage.locale ?? Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        return locale.language.languageCode == .chinese ? .traditionalChinese : .english
+    }
+}
+
 public struct LLMTranscript: Hashable, Sendable {
     public let utterances: [LLMUtterance]
     /// The user's vocabulary and known names: the spelling to prefer when speech recognition wrote a sound-alike.
     public var glossary: [String] = []
+    /// The UI language for the summary and per-person digests produced in this generation.
+    package var outputLanguage: MeetingOutputLanguage = .current
 }
 
 public struct NameInferenceRequest: Hashable, Sendable {

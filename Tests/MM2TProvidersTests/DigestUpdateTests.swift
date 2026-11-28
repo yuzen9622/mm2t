@@ -90,16 +90,19 @@ import Testing
         #expect(server.requests.allSatisfy { !$0.geminiSystem.contains("更新前次依人彙整") })
     }
 
-    @Test func outputLanguageChangesRequireFullGeneration() async throws {
+    @Test(arguments: [false, true])
+    func changedAppLanguageRegeneratesEvenWhenPreviousTextCanBeReused(_ append: Bool) async throws {
         let server = StubServer(status: 200, body: Fixture.gemini(#"{"digests":[]}"#))
         let llm = GeminiLLM(apiKey: "test", session: server.session).forRecording()
-        let first = [utterance("u1", "r1", 0, "同意")]
-        _ = try await llm.digestPerPerson(LLMTranscript(utterances: first))
-        let english = utterance("u2", "r1", 5, String(repeating: "English discussion content ", count: 50))
-        _ = try await llm.digestPerPerson(LLMTranscript(utterances: first + [english]))
-        #expect(server.requests.count == 2)
-        #expect(server.requests.last?.geminiSystem.contains("Output language: English") == true)
-        #expect(server.requests.allSatisfy { !$0.geminiSystem.contains("更新前次依人彙整") })
+        var input = LLMTranscript(utterances: initial, outputLanguage: .traditionalChinese)
+        _ = try await llm.digestPerPerson(input)
+        input = LLMTranscript(utterances: append ? initial + tail : initial, outputLanguage: .english)
+        _ = try await llm.digestPerPerson(input)
+        let requests = server.requests
+        try #require(requests.count == 2)
+        #expect(requests[0].geminiSystem.contains("輸出語言：繁體中文"))
+        #expect(requests[1].geminiSystem.contains("Output language: English"))
+        #expect(!requests[1].geminiSystem.contains("只輸出異動"))
     }
 
     @Test(arguments: ["authentication", "network"])

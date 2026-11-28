@@ -28,6 +28,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Removes the speakers' echo of the remote track from the mic track before it is transcribed
     /// and separated. nil leaves the mic as recorded.
     public let micCleaner: (any MicCleaner)?
+    var outputLanguage: @Sendable () -> MeetingOutputLanguage = { .current }
     private let isSilentTrack: @Sendable (URL) -> Bool
 
     public init(
@@ -91,11 +92,12 @@ public struct MeetingProcessingPipeline: Sendable {
         guard runsConcurrently, let llm else { return false }
         guard !draft.utterances.isEmpty else { return true }
         let generation = withLLM(await llm.forGeneration())
+        let language = outputLanguage()
         return await withTaskGroup(of: Bool.self) { group in
             for step in ProcessingStep.allCases where step >= .inferNames {
                 group.addTask {
                     var copy = draft
-                    do { try await generation.run(step, on: &copy); return true }
+                    do { try await generation.run(step, on: &copy, language: language); return true }
                     catch { return false }
                 }
             }
@@ -144,6 +146,7 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.status = .pending(next: step)
             try await library.save(meeting)
         }
+        var generationLanguage: MeetingOutputLanguage?
         while let step = meeting.status.resumeStep {
             if step >= .inferNames {
                 // A meeting can contain only background voices. Do not generate content from an empty transcript.
@@ -166,16 +169,18 @@ public struct MeetingProcessingPipeline: Sendable {
                     try await library.save(meeting)
                     return meeting
                 }
+                let language = generationLanguage ?? outputLanguage()
+                generationLanguage = language
                 if runsConcurrently {
                     // One label for the group: the summary is the part the user is waiting for.
                     progress(.summarize)
-                    try await generate(from: step, using: llm, on: &meeting)
+                    try await generate(from: step, using: llm, on: &meeting, language: language)
                     return meeting
                 }
             }
             progress(step)
             do {
-                try await run(step, on: &meeting)
+                try await run(step, on: &meeting, language: generationLanguage ?? outputLanguage())
                 // Some steps fall back instead of throwing; a cancelled one must not count as done.
                 try Task.checkCancellation()
                 meeting.status = step.next.map { .pending(next: $0) } ?? .completed
@@ -195,7 +200,7 @@ public struct MeetingProcessingPipeline: Sendable {
     /// Runs `first` and every step after it at once. None of them reads another's result, so the
     /// wait is the slowest one rather than their sum. Each result is saved as it arrives; a failure
     /// leaves the meeting failed at the earliest step that failed, and a retry runs from there.
-    private func generate(from first: ProcessingStep, using llm: any LLMProvider, on meeting: inout Meeting) async throws {
+    private func generate(from first: ProcessingStep, using llm: any LLMProvider, on meeting: inout Meeting, language: MeetingOutputLanguage) async throws {
         let steps = ProcessingStep.allCases.filter { $0 >= first }
         let start = meeting
         let generation = withLLM(await llm.forGeneration())
@@ -205,7 +210,7 @@ public struct MeetingProcessingPipeline: Sendable {
                 group.addTask {
                     var copy = start
                     do {
-                        try await generation.run(step, on: &copy)
+                        try await generation.run(step, on: &copy, language: language)
                         return (step, .success(copy))
                     } catch {
                         return (step, .failure(error))
@@ -266,7 +271,7 @@ public struct MeetingProcessingPipeline: Sendable {
         return try await process(id, progress: progress)
     }
 
-    private func run(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
+    private func run(_ step: ProcessingStep, on meeting: inout Meeting, language: MeetingOutputLanguage) async throws {
         let started = ContinuousClock.now
         var succeeded = false
         defer {
@@ -274,11 +279,11 @@ public struct MeetingProcessingPipeline: Sendable {
             let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
             Self.logger.info("event=processing_step step=\(step.rawValue, privacy: .public) elapsed_seconds=\(seconds, privacy: .public) succeeded=\(succeeded, privacy: .public)")
         }
-        try await perform(step, on: &meeting)
+        try await perform(step, on: &meeting, language: language)
         succeeded = true
     }
 
-    private func perform(_ step: ProcessingStep, on meeting: inout Meeting) async throws {
+    private func perform(_ step: ProcessingStep, on meeting: inout Meeting, language: MeetingOutputLanguage) async throws {
         switch step {
         case .transcribe:
             let names = await voiceprints.spokenNames()
@@ -341,7 +346,7 @@ public struct MeetingProcessingPipeline: Sendable {
                 let known = meeting.speakers.reduce(into: [SpeakerID: String]()) { result, speaker in
                     if let name = speaker.person.flatMap({ names[$0] }) { result[speaker.id] = name }
                 }
-                let transcript = llmTranscript(meeting)
+                let transcript = llmTranscript(meeting, language: language)
                 let guesses = try await llm.inferNames(NameInferenceRequest(
                     transcript: transcript, unnamedSpeakers: unnamed, knownNames: known))
                 inferred = guesses
@@ -354,32 +359,34 @@ public struct MeetingProcessingPipeline: Sendable {
 
         case .cleanTranscript:
             guard let llm else { return }
-            var transcript = llmTranscript(meeting)
+            var transcript = llmTranscript(meeting, language: language)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
-            meeting.outputs.cleaned = try await llm.cleanTranscript(transcript).inTraditionalChinese
+            meeting.outputs.cleaned = try await llm.cleanTranscript(transcript)
 
         case .digestPerPerson:
             guard let llm else { return }
-            var transcript = llmTranscript(meeting)
+            var transcript = llmTranscript(meeting, language: language)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
-            meeting.outputs.digests = try await llm.digestPerPerson(transcript).map(\.inTraditionalChinese)
+            let digests = try await llm.digestPerPerson(transcript)
+            meeting.outputs.digests = language == .traditionalChinese ? digests.map(\.inTraditionalChinese) : digests
 
         case .summarize:
             guard let llm else { return }
-            var transcript = llmTranscript(meeting)
+            var transcript = llmTranscript(meeting, language: language)
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             let summary = try await llm.summarize(SummaryRequest(
                 transcript: transcript,
                 prioritized: transcript.utterances.filter(\.isHighlighted),
                 meetingStartedAt: meeting.metadata.startedAt,
-                timeZoneIdentifier: meeting.metadata.timeZoneIdentifier ?? TimeZone.current.identifier)).inTraditionalChinese
-            meeting.outputs.summary = summary
+                timeZoneIdentifier: meeting.metadata.timeZoneIdentifier ?? TimeZone.current.identifier))
+            let localizedSummary = language == .traditionalChinese ? summary.inTraditionalChinese : summary
+            meeting.outputs.summary = localizedSummary
             meeting.outputs.isStale = false
             // The recorder can only name a meeting after its app ("Google Meet") or "Recording".
-            if let title = summary.title, !meeting.metadata.isTitleEdited { meeting.metadata.title = title }
+            if let title = localizedSummary.title, !meeting.metadata.isTitleEdited { meeting.metadata.title = title }
         }
     }
 
@@ -728,11 +735,11 @@ public struct MeetingProcessingPipeline: Sendable {
         }
     }
 
-    private func llmTranscript(_ meeting: Meeting) -> LLMTranscript {
+    private func llmTranscript(_ meeting: Meeting, language: MeetingOutputLanguage) -> LLMTranscript {
         LLMTranscript(utterances: meeting.utterances.map {
             LLMUtterance(id: $0.id, speaker: $0.speaker, range: $0.range, text: $0.text,
                          isHighlighted: meeting.isHighlighted($0))
-        })
+        }, outputLanguage: language)
     }
 
     /// Answers a model gives in place of a name when the transcript has none.

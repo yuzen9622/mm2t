@@ -65,7 +65,7 @@ package struct LLMTasks: Sendable {
             let guesses: [Guess]
         }
         let output = try await whole(
-            Output.self, system: LLMPrompts.system(LLMPrompts.inferNames, for: request.transcript.utterances), input: LLMPrompts.nameRequest(request),
+            Output.self, system: LLMPrompts.nameSystem(for: request.transcript.utterances), input: LLMPrompts.nameRequest(request),
             schema: LLMPrompts.nameSchema(request.unnamedSpeakers))
         let unnamed = Set(request.unnamedSpeakers)
         return output.guesses.compactMap { guess in
@@ -88,8 +88,7 @@ package struct LLMTasks: Sendable {
         }
         // The glossary rides along with every chunk, so a long one is capped rather than crowding out the transcript.
         let glossary = Array(transcript.glossary.prefix(200))
-        // Decided once for the whole meeting: a short chunk alone could tip either way.
-        let system = LLMPrompts.system(LLMPrompts.cleanTranscript, for: transcript.utterances)
+        let system = LLMPrompts.common + "\n\n" + LLMPrompts.cleanTranscript
         var cleaned = [[CleanedTranscript.Paragraph]](repeating: [], count: chunks.count)
         var next = 0
         try await withThrowingTaskGroup(of: (Int, [CleanedTranscript.Paragraph]).self) { group in
@@ -165,7 +164,7 @@ package struct LLMTasks: Sendable {
             do {
                 let delta = try await whole(
                     DigestDelta.self,
-                    system: LLMPrompts.system(LLMPrompts.digestPerPerson + "\n\n" + LLMPrompts.digestUpdate, for: transcript.utterances),
+                    system: LLMPrompts.system(LLMPrompts.digestPerPerson + "\n\n" + LLMPrompts.digestUpdate, language: transcript.outputLanguage),
                     input: LLMPrompts.digestUpdateRequest(transcript, previous: previous, normalization: normalization),
                     schema: LLMPrompts.digestUpdateSchema(Self.speakers(in: transcript.utterances)),
                     validate: { delta in _ = try delta.applying(to: previous.digests, transcript: transcript, service: service) })
@@ -190,7 +189,7 @@ package struct LLMTasks: Sendable {
         }
         let speakers = Self.speakers(in: transcript.utterances)
         let output = try await whole(
-            Output.self, system: LLMPrompts.system(LLMPrompts.digestPerPerson, for: transcript.utterances),
+            Output.self, system: LLMPrompts.system(LLMPrompts.digestPerPerson, language: transcript.outputLanguage),
             input: LLMPrompts.digestRequest(transcript, normalization: normalization),
             schema: LLMPrompts.digestSchema(speakers), validate: { output in
                 for digest in output.digests { _ = try known(digest.speaker, in: speakers) }
@@ -260,7 +259,7 @@ package struct LLMTasks: Sendable {
                 let delta = try await whole(
                     SummaryDelta.self,
                     system: LLMPrompts.system(LLMPrompts.summarize + "\n\n" + LLMPrompts.summaryUpdate,
-                                              for: request.transcript.utterances),
+                                              language: request.transcript.outputLanguage),
                     input: LLMPrompts.summaryUpdateRequest(request, previous: previous, normalization: normalization),
                     schema: LLMPrompts.summaryUpdateSchema,
                     validate: { delta in _ = try delta.applying(to: previous.summary, request: request, service: service) })
@@ -290,7 +289,7 @@ package struct LLMTasks: Sendable {
         }
         let speakers = Self.speakers(in: utterances)
         let output = try await whole(
-            Output.self, system: LLMPrompts.system(LLMPrompts.summarize, for: utterances),
+            Output.self, system: LLMPrompts.system(LLMPrompts.summarize, language: request.transcript.outputLanguage),
             input: LLMPrompts.summaryRequest(request, normalization: normalization),
             schema: LLMPrompts.summarySchema(speakers), validate: { output in
                 for action in output.actionItems where action.dueDate != nil {
