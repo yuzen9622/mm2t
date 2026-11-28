@@ -5,6 +5,7 @@ import SwiftUI
 /// Rename, accept a suggestion, merge (stories 37-43). Disabled while the pipeline owns the meeting.
 struct SpeakerPanel: View {
     let model: MeetingDetailModel
+    let separateAgain: () -> Void
     @State private var renaming: SpeakerRow?
     @State private var showsBackground = false
 
@@ -27,7 +28,7 @@ struct SpeakerPanel: View {
                         Icon("chevron-down", size: 12)
                             .rotationEffect(.degrees(showsBackground ? 0 : -90))
                             .motion(Motion.touch, value: showsBackground)
-                        Text("\(background.count) Background Voices").font(Typo.caption)
+                        Text("\(background.count) Background Voices to Review").font(Typo.caption)
                     }
                     .foregroundStyle(Palette.secondary)
                     .frame(height: 24)
@@ -36,15 +37,25 @@ struct SpeakerPanel: View {
                 if showsBackground {
                     ForEach(background) { speaker in
                         HStack {
-                            Text(speaker.label).font(Typo.body)
+                            VStack(alignment: .leading, spacing: 2) {
+                                if let line = model.meeting?.backgroundUtterances.first(where: { $0.speaker == speaker.id }) {
+                                    Text(verbatim: "\(speaker.label) · \(MeetingPresentation.timestamp(line.range.start))").font(Typo.caption)
+                                    Text(verbatim: line.text).font(Typo.body).lineLimit(2)
+                                } else {
+                                    Text(speaker.label).font(Typo.body)
+                                }
+                            }
                             Spacer()
                             PillButton("Restore", kind: .ghost) {
                                 Task { await model.restoreBackground(speaker.id) }
                             }
                         }
-                        .frame(height: 28)
+                        .frame(minHeight: 28)
                     }
                 }
+            }
+            if model.canReseparate && model.separationFailure == nil {
+                PillButton("Separate Again…", kind: .ghost, action: separateAgain)
             }
             if model.isProcessing {
                 Text("Speakers can be edited when processing finishes.").font(Typo.caption).foregroundStyle(Palette.secondary)

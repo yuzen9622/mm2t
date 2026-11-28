@@ -131,12 +131,22 @@ public struct PipelineSetup: Sendable {
         if models == nil { issues.append(.diarizationModelsMissing) }
 
         guard issues.isEmpty, let route, let models else { return .needsSetup(issues) }
-        return .ready(MeetingProcessingPipeline(
+        return pipeline(models: models, routes: [route], llm: llm, vocabulary: settings.vocabulary)
+    }
+
+    func speakerSeparationPipeline() -> PipelineBuild {
+        guard let models = catalog.localSpeakerModels() else { return .needsSetup([.diarizationModelsMissing]) }
+        return pipeline(models: models, routes: [], llm: nil, vocabulary: [])
+    }
+
+    private func pipeline(models: LocalSpeakerModels, routes: [TranscriptionChain.Route], llm: (any LLMProvider)?,
+                          vocabulary: [String]) -> PipelineBuild {
+        .ready(MeetingProcessingPipeline(
             library: library, voiceprints: voiceprints,
             diarizer: models.diarizer, embedder: models.embedder,
             diarizationOrder: AppSettings.diarizationOrder,
-            transcription: TranscriptionChain([route]), llm: llm,
-            thresholds: catalog.thresholds, vocabulary: settings.vocabulary,
+            transcription: TranscriptionChain(routes), llm: llm,
+            thresholds: catalog.thresholds, vocabulary: vocabulary,
             runsConcurrently: true, transcribesConcurrently: true, micCleaner: EchoRemover(),
             isSilentTrack: WAVFormat.isDigitalSilence))
     }

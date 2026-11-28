@@ -273,12 +273,12 @@
         }
       }
     },
-    "%lld Background Voices" : {
+    "%lld Background Voices to Review" : {
       "localizations" : {
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 個背景聲音"
+            "value" : "%lld 段背景聲音待確認"
           }
         }
       }

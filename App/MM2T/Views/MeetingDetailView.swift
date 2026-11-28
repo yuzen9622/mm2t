@@ -98,10 +98,12 @@ struct MeetingDetailView: View {
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 if showSpeakers {
-                    SpeakerPanel(model: model)
-                        .frame(width: 248)
-                        .padding(.trailing, 24)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    ScrollView {
+                        SpeakerPanel(model: model, separateAgain: { confirmReseparate = true })
+                    }
+                    .frame(width: 248)
+                    .padding(.trailing, 24)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .motion(Motion.page, value: showSpeakers)

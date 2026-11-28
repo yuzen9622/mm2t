@@ -153,7 +153,7 @@ public final class MeetingDetailModel {
         }
     }
 
-    public var canReseparate: Bool { separationFailure != nil && meeting?.status == .completed && !isProcessing }
+    public var canReseparate: Bool { meeting?.transcription != nil && meeting?.status == .completed && canEditSpeakers }
 
     /// Re-separation rebuilds speakers, dropping names the user assigned and merges they made.
     public var reseparationDiscardsEdits: Bool {

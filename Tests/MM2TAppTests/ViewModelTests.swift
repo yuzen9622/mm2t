@@ -332,12 +332,12 @@ import Testing
         #expect(detail.canEditSpeakers)
     }
 
-    @Test func reseparationIsOfferedOnlyWhenSeparationFailedAndWarnsAboutEdits() async throws {
+    @Test func reseparationIsOfferedForCompletedTranscriptsAndWarnsAboutEdits() async throws {
         let world = try World()
         let good = try await world.recordedMeeting(title: "正常")
         let goodDetail = world.detail(good.id)
         await goodDetail.load()
-        #expect(goodDetail.separationFailure == nil && !goodDetail.canReseparate)
+        #expect(goodDetail.separationFailure == nil && goodDetail.canReseparate)
 
         world.catalog.diarizer.fails.set(true)
         let failed = try await world.recordedMeeting(title: "分群失敗")
@@ -356,7 +356,7 @@ import Testing
         world.catalog.diarizer.fails.set(false)
         await detail.reseparate()
         #expect(detail.speakers.filter { !$0.isMe }.map(\.label) == ["A", "B"])
-        #expect(detail.separationFailure == nil && !detail.canReseparate)
+        #expect(detail.separationFailure == nil && detail.canReseparate)
         #expect(detail.isStale)
     }
 

@@ -158,6 +158,7 @@ public final class AppController {
         }
         let queue = ProcessingQueue(
             makePipeline: { try pipelineSetup.build(settings.settings, accountURL: accountURL) },
+            makeSpeakerPipeline: { pipelineSetup.speakerSeparationPipeline() },
             makeLLM: { try pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) })
         if let account {
             queue.onJobFinished = { Task { await account.refreshProfile(afterJob: true) } }

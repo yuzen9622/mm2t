@@ -52,13 +52,17 @@ public final class ProcessingQueue {
     @ObservationIgnored public var onCompleted: (@MainActor (Meeting) -> Void)?
     @ObservationIgnored var onJobFinished: (@MainActor () -> Void)?
     @ObservationIgnored private let makePipeline: @MainActor () throws -> PipelineBuild
+    @ObservationIgnored private let makeSpeakerPipeline: @MainActor () throws -> PipelineBuild
+    @ObservationIgnored private var waitingOperations: [MeetingID: ProcessingOperation] = [:]
     @ObservationIgnored private let makeLLM: @MainActor () throws -> LLMBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
     @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>, finish: @MainActor () -> Void)] = [:]
 
     public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild,
+                makeSpeakerPipeline: (@MainActor () throws -> PipelineBuild)? = nil,
                 makeLLM: @escaping @MainActor () throws -> LLMBuild) {
+        self.makeSpeakerPipeline = makeSpeakerPipeline ?? makePipeline
         self.makePipeline = makePipeline
         self.makeLLM = makeLLM
     }
@@ -106,6 +110,7 @@ public final class ProcessingQueue {
                  finalize: (@MainActor @Sendable () async -> Void)? = nil,
                  whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) -> Task<Void, Never>? {
         guard !isBusy(id) else { return nil }
+        waitingOperations[id] = nil
         jobs[id] = finalize == nil ? .queued : .running(.transcribe)
         revision += 1
         let previous = tail
@@ -168,9 +173,9 @@ public final class ProcessingQueue {
 
     /// Retries every meeting that was waiting on setup.
     public func retryAfterSetup() async {
-        let waiting = jobs.filter { if case .needsSetup = $0.value { true } else { false } }.map(\.key)
+        let waiting = waitingOperations
         await withTaskGroup(of: Void.self) { group in
-            for id in waiting { group.addTask { await self.run(.process, on: id) } }
+            for (id, operation) in waiting { group.addTask { await self.run(operation, on: id) } }
         }
     }
 
@@ -205,9 +210,11 @@ public final class ProcessingQueue {
             pipeline = ready
         } else {
             do {
-                switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
+                let build = operation == .reseparate ? makeSpeakerPipeline : makePipeline
+                switch try prepared.map(PipelineBuild.ready) ?? build() {
                 case .ready(let ready): pipeline = ready
                 case .needsSetup(let issues):
+                    waitingOperations[id] = operation
                     jobs[id] = .needsSetup(issues)
                     return
                 }
