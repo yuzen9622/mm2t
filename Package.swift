@@ -23,7 +23,10 @@ let package = Package(
     targets: [
         .target(name: "MM2TCore"),
         .target(name: "MM2TProviders", dependencies: ["MM2TCore"]),
-        .target(name: "MM2TSystem", dependencies: ["MM2TCore"]),
+        .target(name: "MM2TSystem", dependencies: ["MM2TCore", "CMm2tAEC3"],
+                linkerSettings: [.linkedLibrary("c++"), .linkedFramework("CoreFoundation")]),
+        .target(name: "CMm2tAEC3", dependencies: ["MM2TAEC3"]),
+        .binaryTarget(name: "MM2TAEC3", path: "Vendor/MM2TAEC3.xcframework.zip"),
         .target(
             name: "MM2TDiarization",
             dependencies: ["MM2TCore", .product(name: "FluidAudio", package: "FluidAudio")]),

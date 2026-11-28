@@ -211,7 +211,9 @@ public struct SpeakerEditing: Sendable {
         if let transcription = meeting.transcription {
             func keeping(_ track: Track, _ transcript: TrackTranscript) -> TrackTranscript {
                 let turns = segments[track] ?? []
-                return transcript.keeping { Alignment.speaker(for: $0, in: turns) != removed.id }
+                return transcript.keeping {
+                    Alignment.speaker(for: $0, in: turns, preferUserOnTie: track == .me && main != .me) != removed.id
+                }
             }
             meeting.transcription = Transcription(me: keeping(.me, transcription.me), remote: keeping(.remote, transcription.remote))
         }

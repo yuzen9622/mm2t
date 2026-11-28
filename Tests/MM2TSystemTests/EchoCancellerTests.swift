@@ -44,6 +44,117 @@ import Testing
         #expect(!cleaned.echo.isEcho(TimeRange(start: 5, end: 5.3)))
     }
 
+    @Test func aec3SuppressesResidualEchoWithoutSuppressingDoubleTalk() throws {
+        let rate = Self.rate
+        let played = Self.noise(8 * rate, seed: 1, level: 0.5)
+        let voice = played.indices.map { index -> Double in
+            let time = Double(index) / Double(rate) - 4
+            guard (0..<2).contains(time) else { return 0 }
+            let syllable = 0.6 + 0.4 * sin(2 * .pi * 3.6 * time)
+            let phase = 2 * Double.pi * (170 * time + 2 * sin(2 * .pi * 0.6 * time))
+            let formants = 0.48 * sin(phase) + 0.31 * sin(2 * phase) + 0.18 * sin(4 * phase) + 0.12 * sin(7 * phase)
+            return 0.45 * syllable * formants
+        }
+        let mic = played.indices.map { index -> Int16 in
+            let first = index >= 1_354 ? 0.3 * played[index - 1_354] : 0
+            let second = index >= 1_500 ? 0.15 * played[index - 1_500] : 0
+            return Int16((first + second + voice[index]) * 32_767)
+        }
+        let remote = played.map { Int16($0 * 32_767) }
+        let aec = try #require(AEC3())
+        let linear = try #require(EchoCanceller.clean(mic: mic, remote: remote, sampleRate: rate))
+        let cleaned = aec.clean(mic: mic, remote: remote)
+        let echo = 2 * rate..<3 * rate
+        let talking = 4 * rate + 4_000..<6 * rate - 4_000
+        let cleanVoice = voice.map { Int16($0 * 32_767) }
+        #expect(Self.decibels(linear.samples[echo]) - Self.decibels(cleaned.samples[echo]) > 6)
+        #expect(abs(Self.decibels(cleanVoice[talking]) - Self.decibels(cleaned.samples[talking])) < 1.5)
+        #expect((aec.estimatedDelayMilliseconds ?? 0) > 0)
+    }
+
+    @Test func uncoupledMicrophoneIsBitIdenticalDespiteLoudPlayback() throws {
+        let remote = Self.room.remote
+        let mic = Self.noise(remote.count, seed: 8, level: 0.08).map { Int16($0 * 32767) }
+        let aec = try #require(AEC3())
+        let result = aec.clean(mic: mic, remote: remote)
+        #expect(result.samples == mic)
+        #expect(result.echo.before == result.echo.after)
+        #expect(!result.echo.speakerFrames().contains(true))
+    }
+
+    @Test func quietWordsJustAfterSpeakerPlaybackAreDropped() throws {
+        let remote = Array(Self.room.remote.prefix(2 * Self.rate)) + Array(repeating: Int16(0), count: 2 * Self.rate)
+        var mic = remote
+        for sample in (Int(2.55 * Double(Self.rate))..<Int(2.85 * Double(Self.rate))) {
+            mic[sample] = sample.isMultiple(of: 2) ? 64 : -64
+        }
+        let echo = try #require(EchoCanceller.clean(mic: mic, remote: remote, sampleRate: Self.rate)).echo
+        let words = [TimedWord("quiet tail", 2.55, 2.85)]
+        let transcript = TrackTranscript(source: .cloud, content: .unlabeled(words))
+        #expect(!echo.isEcho(words[0].range), "the existing 5 dB word rule cannot catch the tail")
+        #expect(transcript.dropping(echo).words.isEmpty)
+    }
+
+    private static func speakerProfile(evidence: Float = 4, loudFrame: Int? = nil) -> EchoProfile {
+        var after = [Float](repeating: 0.0001, count: 600)
+        if let loudFrame { after[loudFrame] = 0.0025 }
+        var before = after
+        // At the words the old 5 dB test sees no loss. Only nearby playback provides evidence.
+        for index in 40..<100 { before[index] *= evidence }
+        var playback = [Float](repeating: 0, count: 600)
+        for index in 40..<160 { playback[index] = 0.01 }
+        return EchoProfile(frameDuration: 0.05, before: before, after: after, remote: playback)
+    }
+
+    @Test func quietRunDuringPlaybackIsDropped() {
+        let words = [TimedWord("quiet", 5, 5.2), TimedWord("run", 5.7, 5.9)]
+        let profile = Self.speakerProfile()
+        #expect(words.allSatisfy { !profile.isEcho($0.range) })
+        #expect(profile.droppingEcho(from: words).isEmpty)
+    }
+
+    @Test func loudDoubleTalkKeepsTheEntireRun() {
+        let words = [TimedWord("quiet", 5, 5.2), TimedWord("loud", 5.7, 5.9)]
+        let profile = Self.speakerProfile(loudFrame: 116)
+        #expect(profile.droppingEcho(from: words) == words)
+    }
+
+    @Test func aQuietTailAfterASpokenPauseStaysWithTheLoudWord() {
+        let words = [TimedWord("loud", 5.5, 5.9), TimedWord("tail", 6.83, 7.1)]
+        let profile = Self.speakerProfile(loudFrame: 116)
+        #expect(profile.droppingEcho(from: [words[1]]).isEmpty)
+        #expect(profile.droppingEcho(from: words) == words)
+    }
+
+    @Test func headphonesKeepTheSameQuietRun() {
+        let words = [TimedWord("quiet", 5, 5.2), TimedWord("run", 5.7, 5.9)]
+        let profile = Self.speakerProfile(evidence: 1)
+        #expect(profile.droppingEcho(from: words) == words)
+    }
+
+    @Test func quietRunWithoutNearbyPlaybackIsKept() {
+        let words = [TimedWord("quiet", 9.2, 9.5)]
+        let profile = Self.speakerProfile()
+        #expect(profile.droppingEcho(from: words) == words)
+    }
+
+    @Test func aLongerGapSeparatesQuietAndLoudWords() {
+        let words = [TimedWord("quiet", 5, 5.15), TimedWord("loud", 7.2, 7.4)]
+        let profile = Self.speakerProfile(loudFrame: 146)
+        #expect(words.allSatisfy { !profile.isEcho($0.range) })
+        #expect(profile.droppingEcho(from: words) == Array(words.suffix(1)))
+    }
+
+    @Test func playbackEvidenceIsTimedAtTheMicsMeasuredLag() throws {
+        let lag = Self.rate / 10
+        let noise = Self.noise(Self.rate, seed: 42, level: 0.5).map { Int16($0 * 32767) }
+        let remote = Array(repeating: Int16(0), count: Self.rate) + noise + Array(repeating: 0, count: Self.rate)
+        let mic = Array(repeating: Int16(0), count: lag) + Array(remote.dropLast(lag))
+        let echo = try #require(EchoCanceller.clean(mic: mic, remote: remote, sampleRate: Self.rate)).echo
+        #expect(echo.remote[20] == 0 && echo.remote[21] == 0)
+        #expect((echo.remote[22] ?? 0) > 0.01)
+    }
+
     @Test func aSilentRemoteTrackLeavesNothingToRemove() {
         let (mic, remote) = Self.room
         #expect(EchoCanceller.clean(mic: mic, remote: [Int16](repeating: 0, count: remote.count), sampleRate: Self.rate) == nil)

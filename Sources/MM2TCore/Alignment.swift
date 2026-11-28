@@ -17,7 +17,7 @@ public enum Alignment {
         overlaps: [TimeRange],
         micSegments: [SpeakerSegment] = []
     ) -> [Utterance] {
-        let mine = group(me.map { (speaker(for: $0.range, in: micSegments) ?? .me, $0) })
+        let mine = group(me.map { (speaker(for: $0.range, in: micSegments, preferUserOnTie: true) ?? .me, $0) })
         let remoteSpeakers = Set(segments.map(\.speaker)).subtracting([.me])
         let theirs = group(remote.compactMap { word in
             speaker(for: word.range, in: segments).map { ($0, word) }
@@ -98,10 +98,17 @@ public enum Alignment {
         return drafts
     }
 
-    static func speaker(for range: TimeRange, in segments: [SpeakerSegment]) -> SpeakerID? {
+    static func speaker(for range: TimeRange, in segments: [SpeakerSegment], preferUserOnTie: Bool = false) -> SpeakerID? {
         segments.min { a, b in
             let overlapA = a.range.overlap(with: range), overlapB = b.range.overlap(with: range)
             if overlapA != overlapB { return overlapA > overlapB }
+            // A voiceprint-confirmed local turn is stronger evidence than cluster order.
+            if preferUserOnTie, a.speaker != b.speaker,
+               (overlapA > 0 || (range.duration == 0 && a.range.start <= range.start && a.range.end >= range.end
+                                   && b.range.start <= range.start && b.range.end >= range.end)) {
+                if a.speaker == .me { return true }
+                if b.speaker == .me { return false }
+            }
             return a.range.distance(to: range) < b.range.distance(to: range)
         }?.speaker
     }

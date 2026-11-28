@@ -45,11 +45,12 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
         self.holdsSnapshot = holdsSnapshot
     }
 
-    func append(samples: [Float], track: Track) async {
+    func append(samples: [Float], track: Track) async throws {
         if holdsAppend {
             await appendStarted.open(true)
             _ = await releaseAppend.wait()
         }
+        try Task.checkCancellation()
         frames[track, default: 0] += samples.count
     }
 
@@ -235,6 +236,26 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
         #expect(result.me.words.count == 3)
         #expect(stt.pieces.files.get.filter { $0 == "me-0.wav" }.count == 2)
         #expect(await live.transcribedSeconds == 50)
+    }
+
+    @MainActor @Test func finalSpeakerSnapshotCompletesWhileTailRecognitionIsPending() async throws {
+        let files = try configurationRecording()
+        let session = ConfigurationSpeakerSession()
+        let processor = try configurationProcessor(World(), session: session, directory: files.directory)
+        let stt = HeldPieceSTT()
+        let live = LiveTranscriber(mic: files.mic, remote: files.remote, chain: TranscriptionChain([.init(.cloud, stt)]),
+                                   hints: [], scratch: files.directory.appending(path: "scratch"), pieceSeconds: 90,
+                                   processing: processor)
+        let finishing = Task { await live.finish(mic: files.mic, remote: files.remote) }
+        _ = await stt.started.wait()
+        for _ in 0..<1_000 {
+            if await session.snapshots == [true] { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await session.snapshots == [true])
+        await stt.release.open(true)
+        #expect(await finishing.value?.me.words.count == 1)
+        #expect(await session.frames == [.me: 80 * 16_000, .remote: 80 * 16_000])
     }
 
     @MainActor @Test(arguments: [false, true])

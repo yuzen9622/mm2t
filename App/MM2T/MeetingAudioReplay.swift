@@ -8,7 +8,9 @@ import MM2TCore
 struct MeetingAudioReplay: Recorder {
     let root: URL
     func start(_ configuration: RecorderConfiguration) async throws -> any RecordingSession {
-        try ReplaySession(root: root, configuration: configuration)
+        let session = try ReplaySession(root: root, configuration: configuration)
+        await session.startReplay()
+        return session
     }
 }
 
@@ -32,7 +34,7 @@ private actor ReplaySession: RecordingSession {
         self.root = root
         self.configuration = configuration
         (events, eventWriter) = AsyncStream.makeStream()
-        (stream, audio) = AsyncStream.makeStream()
+        (stream, audio) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(20))
         manifest = RecordingManifest(title: configuration.title, startedAt: Date(), platform: configuration.platform,
                                      targetBundleID: configuration.systemAudio.appBundleID)
         try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
@@ -57,9 +59,9 @@ private actor ReplaySession: RecordingSession {
     func pause() { paused = true }
     func resume() { paused = false }
     func markHighlight() -> Highlight { Highlight(time: elapsed) }
-    func audioStream() -> AsyncStream<[Float]> {
+    func audioStream() -> AsyncStream<[Float]> { stream }
+    func startReplay() {
         if replay == nil { replay = Task { await play() } }
-        return stream
     }
 
     private func play() async {

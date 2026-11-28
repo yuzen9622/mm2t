@@ -68,6 +68,19 @@ import Testing
         #expect(full.flatMap(\.words).filter { $0.text.hasPrefix("call") } == call)
     }
 
+    @Test func anOverlappingPlaybackClusterDoesNotClaimTheUsersMicWord() {
+        let playback = SpeakerSegment(speaker: SpeakerID("playback"), range: TimeRange(start: 22.87, end: 36))
+        let user = SpeakerSegment(speaker: .me, range: TimeRange(start: 33.78, end: 36.57))
+        let mic = [TimedWord("我", 34.14, 34.20)]
+        let remote = [TimedWord("word", 34.14, 34.20)]
+        for turns in [[playback, user], [user, playback]] {
+            let utterances = Alignment.utterances(me: mic, remote: remote, segments: [playback],
+                                                  overlaps: [], micSegments: turns)
+            #expect(utterances.first { $0.words == mic }?.speaker == .me)
+            #expect(utterances.first { $0.words == remote }?.speaker == playback.speaker)
+        }
+    }
+
     @Test func pausesAndSpeakerChangesStillCloseShortUtterances() {
         let input = [TimedWord("one", 0, 1), TimedWord("two", 2.5, 3),
                      TimedWord("three", 4.6, 5), TimedWord("four", 5, 6)]

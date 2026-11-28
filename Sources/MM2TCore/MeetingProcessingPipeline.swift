@@ -114,6 +114,7 @@ public struct MeetingProcessingPipeline: Sendable {
         meeting.transcription = Transcription(me: transcription.me.inTraditionalChinese, remote: transcription.remote.inTraditionalChinese)
         await diarize(&meeting, recorded: diarizations, echo: echo, micEnergy: micEnergy)
         await matchVoiceprints(&meeting)
+        Self.logger.info("event=live_speakers_matched")
         align(&meeting)
         meeting.status = .pending(next: .inferNames)
         try await library.save(meeting)
@@ -519,10 +520,12 @@ public struct MeetingProcessingPipeline: Sendable {
         if !played.isEmpty {
             meeting.transcription = Transcription(
                 me: transcription.me.keeping { word in
-                    let voice = heard.segments.enumerated().max { $0.element.range.overlap(with: word) < $1.element.range.overlap(with: word) }
-                    guard let (index, segment) = voice, segment.range.overlap(with: word) > 0,
-                          case .foreground(let cluster) = decisions[index] else { return true }
-                    return !played.contains(cluster)
+                    // A simultaneous near-end turn must survive removal of the playback cluster.
+                    let active = heard.segments.indices.filter { heard.segments[$0].range.overlap(with: word) > 0 }
+                    return active.isEmpty || active.contains { index in
+                        guard case .foreground(let cluster) = decisions[index] else { return true }
+                        return !played.contains(cluster)
+                    }
                 }, remote: transcription.remote)
         }
 
@@ -758,7 +761,12 @@ public struct MeetingProcessingPipeline: Sendable {
 extension TrackTranscript {
     /// Without the words the mic only heard because the speakers played them.
     public func dropping(_ echo: EchoProfile) -> TrackTranscript {
-        keeping { !echo.isEcho($0) }
+        switch content {
+        case .unlabeled(let words):
+            TrackTranscript(source: source, content: .unlabeled(echo.droppingEcho(from: words)))
+        case .labeled(let words):
+            TrackTranscript(source: source, content: .labeled(echo.droppingEcho(from: words, word: \.word)))
+        }
     }
 
     func keeping(_ isKept: (TimeRange) -> Bool) -> TrackTranscript {

@@ -188,7 +188,6 @@ public final class AppController {
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
                 let mic = directory.appending(path: RecordingManifest.micFile)
                 let remote = directory.appending(path: RecordingManifest.remoteFile)
-                guard current.transcriptionService != .mm2t else { return nil }
                 let pipeline: MeetingProcessingPipeline?
                 if case .ready(let configured)? = try? pipelineSetup.build(current, accountURL: accountURL) {
                     if let gemini = configured.llm as? GeminiLLM {
@@ -201,11 +200,15 @@ public final class AppController {
                 if let pipeline {
                     transcription = pipeline.transcription
                 } else {
-                    guard let route = try? pipelineSetup.transcriptionRoute(current, accountURL: nil) else { return nil }
+                    guard let route = try? pipelineSetup.transcriptionRoute(current, accountURL: accountURL) else { return nil }
                     transcription = TranscriptionChain([route])
                 }
                 guard let chain = LiveTranscriber.recordingChain(transcription) else { return nil }
-                let transcriptionCredential: Credential = current.transcriptionService == .elevenLabs ? .elevenLabsAPIKey : .selfHostedToken
+                let transcriptionCredential: Credential? = switch current.transcriptionService {
+                case .elevenLabs: .elevenLabsAPIKey
+                case .server: .selfHostedToken
+                case .mm2t: nil // HostedAuthorization handles token rotation.
+                }
                 let summaryCredential: Credential? = switch current.summaryService {
                 case .gemini: .geminiAPIKey
                 case .openAICompatible: .openAICompatibleAPIKey
@@ -213,8 +216,11 @@ public final class AppController {
                 }
                 let credentialKinds = [transcriptionCredential, pipeline == nil ? nil : summaryCredential].compactMap { $0 }
                 guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
+                let accountID = account?.user?.id
                 let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
-                    settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
+                    (current.transcriptionService != .mm2t || account?.user?.id == accountID) &&
+                        settings.settings.forProcessing == current.forProcessing &&
+                        (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
                 }
                 let processing: LiveRecordingProcessor?
                 let diarizer = pipeline?.diarizer ?? catalog.localSpeakerModels()?.diarizer
@@ -229,7 +235,8 @@ public final class AppController {
                 return LiveTranscriber(
                     mic: mic, remote: remote,
                     chain: chain, hints: names + current.vocabulary.filter { !names.contains($0) },
-                    scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
+                    scratch: scratch, hostedMeeting: current.transcriptionService == .mm2t ? directory.lastPathComponent : nil,
+                    processing: processing, keepsPlayback: true, configurationIsCurrent: configurationIsCurrent)
             },
             makeCollaboration: { title in
                 account.map { CollabSession(account: $0, title: title, now: now, llmSnapshot: {
@@ -238,9 +245,9 @@ public final class AppController {
                             { try pipelineSetup.buildLLM(snapshot, accountURL: accountURL) })
                 }) }
             },
-            makeCaptions: { captions in
+            makeCaptions: { captions, meeting in
                 let current = settings.settings
-                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current, accountURL: accountURL) else { return nil }
+                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current, accountURL: accountURL, hostedMeeting: current.transcriptionService == .mm2t ? meeting.description : nil) else { return nil }
                 // Translation on this Mac, only once its models are downloaded.
                 let source = current.captionEngine == .apple ? current.transcriptionLanguage.fixedCaptionSource : nil
                 if current.translationEnabled, let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
