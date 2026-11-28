@@ -7,6 +7,7 @@ import MM2TCore
 /// start on whole seconds, and the backend charges each piece once, at its longest track.
 public struct HostedTranscription: TranscriptionProvider {
     /// `…/v1/hosted/stt`.
+    public static let recordingPieceSeconds = 30
     let baseURL: URL
     let authorization: HostedAuthorization
     let languageCode: String?
@@ -17,7 +18,7 @@ public struct HostedTranscription: TranscriptionProvider {
     let timeout: TimeInterval
 
     public init(baseURL: URL, authorization: HostedAuthorization, languageCode: String? = nil, leases: HostedLeases,
-                session: URLSession = .shared, pieceSeconds: Int = 110, parallelPieces: Int = 3, timeout: TimeInterval = 600) {
+                session: URLSession = .shared, pieceSeconds: Int = 110, parallelPieces: Int = 1, timeout: TimeInterval = 600) {
         self.baseURL = baseURL
         self.authorization = authorization
         self.languageCode = languageCode
@@ -64,6 +65,12 @@ public struct HostedTranscription: TranscriptionProvider {
         }
     }
 
+    public func canParallelizeTail(of meeting: String, through seconds: Double) async -> Bool {
+        await leases.canParallelizeTail(of: meeting, through: seconds)
+    }
+
+    public func releaseRecording(_ meeting: String) async { await leases.releaseRecording(meeting) }
+
     public func finishSession(meeting: String) async {
         guard let id = await leases.end(meeting) else { return }
         await finish(id)
@@ -72,7 +79,10 @@ public struct HostedTranscription: TranscriptionProvider {
     // MARK: Pieces
 
     private func transcribe(_ audio: URL, key: String, track: Track, hints: [String]) async throws -> [TimedWord] {
-        let pieces = try HostedPieces(audio, seconds: pieceSeconds)
+        let offset = TranscriptionContext.current?.recordingOffset
+        if offset != nil { await leases.beginRecording(key) }
+        let recording = await leases.isRecording(key)
+        let pieces = try HostedPieces(audio, seconds: recording ? Self.recordingPieceSeconds : pieceSeconds)
         guard !pieces.starts.isEmpty else { return [] }
         let form = Form(languageCode: languageCode, hints: hints)
         var words: [Int: [TimedWord]] = [:]
@@ -83,8 +93,9 @@ public struct HostedTranscription: TranscriptionProvider {
                 guard let start = next.next() else { return false }
                 group.addTask {
                     do {
-                        return (start, try await piece(start, of: pieces, key: key, track: track, form: form))
+                        return (start, try await piece(start, of: pieces, key: key, track: track, offset: offset ?? 0, form: form))
                     } catch let error as ProviderError where error.kind == .sessionLimitReached {
+                        if recording { await leases.reachedLimit(key, at: (offset ?? 0) + start) }
                         return (start, nil)
                     }
                 }
@@ -102,6 +113,7 @@ public struct HostedTranscription: TranscriptionProvider {
             }
         }
         let kept = words.keys.sorted().flatMap { words[$0]! }
+        if limited != nil, offset != nil { return kept }
         if let limited, kept.isEmpty { throw limited }
         return kept
     }
@@ -118,9 +130,10 @@ public struct HostedTranscription: TranscriptionProvider {
 
     /// One piece, from the cache when this meeting already got it. A retry sends the bytes sent before,
     /// since the backend answers different bytes for a piece it has seen with `piece_conflict`.
-    private func piece(_ start: Int, of pieces: HostedPieces, key: String, track: Track, form: Form) async throws -> [TimedWord] {
-        let id = HostedLeases.Piece(meeting: key, track: track, start: start)
-        if let words = await leases.result(id) { return words }
+    private func piece(_ start: Int, of pieces: HostedPieces, key: String, track: Track, offset: Int, form: Form) async throws -> [TimedWord] {
+        let id = HostedLeases.Piece(meeting: key, track: track, start: offset + start)
+        if let words = await leases.result(id) { return shifted(words, by: start) }
+        if await leases.exceedsLimit(key, at: id.start) { throw ProviderError(.mm2tPlan, .sessionLimitReached) }
         let audio: Data
         if let sent = await leases.sent(id) {
             audio = sent
@@ -130,16 +143,20 @@ public struct HostedTranscription: TranscriptionProvider {
             await leases.remember(audio, for: id)
         }
         let response = try await upload(audio, piece: id, form: form)
-        let words = try SelfHostedTranscription.parse(response.body, service: .mm2tPlan).map {
-            TimedWord($0.text, $0.range.start + Double(start), $0.range.end + Double(start))
-        }
+        let words = try SelfHostedTranscription.parse(response.body, service: .mm2tPlan)
         await leases.store(words, for: id)
-        return words
+        return shifted(words, by: start)
+    }
+
+    private func shifted(_ words: [TimedWord], by seconds: Int) -> [TimedWord] {
+        words.map { TimedWord($0.text, $0.range.start + Double(seconds), $0.range.end + Double(seconds)) }
     }
 
     private func upload(_ audio: Data, piece: HostedLeases.Piece, form: Form) async throws -> HTTPResponse {
         var reopened = false
+        var retries = 0
         while true {
+            try await leases.waitForUpload()
             let lease = try await leases.lease(for: piece.meeting) { try await open(meeting: piece.meeting) }
             let response = try await authorization.send(session) { token in
                 var multipart = MultipartForm()
@@ -157,6 +174,13 @@ public struct HostedTranscription: TranscriptionProvider {
                 return request
             }
             if response.status == 200 { return response }
+            if let delay = response.hostedRetryDelay, delay <= 240 {
+                await leases.pauseUploads(seconds: delay)
+                if retries < 2 {
+                    retries += 1
+                    continue
+                }
+            }
             // A lease idle for ten minutes closes; a new one carries on, and its pieces are charged afresh.
             if response.status == 409, response.hostedCode == "session_closed" {
                 await leases.closed(lease, meeting: piece.meeting)
@@ -180,21 +204,22 @@ public struct HostedTranscription: TranscriptionProvider {
             let abandoned = await leases.abandoned(except: meeting)
             if !abandoned.isEmpty {
                 for id in abandoned { await finish(id) }
-                return try lease(from: try await post(sessionsURL))
+                return try await lease(from: try await post(sessionsURL))
             }
         }
-        return try lease(from: first)
+        return try await lease(from: first)
     }
 
-    private struct LeaseBody: Decodable { let id: String }
+    private struct LeaseBody: Decodable { let id: String; let maxSeconds: Int? }
 
-    private func lease(from response: HTTPResponse) throws -> String {
+    private func lease(from response: HTTPResponse) async throws -> String {
         guard response.status == 200 || response.status == 201 else {
             throw ProviderError(.mm2tPlan, response.hostedFailure)
         }
         guard let lease = try? JSONDecoder().decode(LeaseBody.self, from: response.body) else {
             throw ProviderError(.mm2tPlan, .malformedResponse)
         }
+        await leases.setDurationLimit(lease.maxSeconds, for: lease.id)
         return lease.id
     }
 
@@ -300,6 +325,31 @@ public actor HostedLeases {
         let start: Int
     }
 
+    private var recordings: Set<String> = []
+    private var capturing: Set<String> = []
+    private var limitStarts: [String: Int] = [:]
+    func beginRecording(_ meeting: String) {
+        recordings.insert(meeting)
+        capturing.insert(meeting)
+    }
+    func releaseRecording(_ meeting: String) { capturing.remove(meeting) }
+    func isRecording(_ meeting: String) -> Bool { recordings.contains(meeting) }
+    func exceedsLimit(_ meeting: String, at start: Int) -> Bool { start >= (limitStarts[meeting] ?? Int.max) }
+    func reachedLimit(_ meeting: String, at start: Int) {
+        limitStarts[meeting] = min(start, limitStarts[meeting] ?? start)
+    }
+
+    // Only a lease opened for ASR has a known budget. An adopted caption lease may already have spent it.
+    private var durationLimits: [String: Int] = [:]
+    func setDurationLimit(_ seconds: Int?, for id: String) { durationLimits[id] = seconds }
+
+    func canParallelizeTail(of meeting: String, through seconds: Double) -> Bool {
+        guard limitStarts[meeting] == nil, let id = leaseIDs[meeting], let limit = durationLimits[id] else { return false }
+        // Allow a full second of codec padding per recording piece. Near the limit, upload in order.
+        let pieces = ceil(seconds / Double(HostedTranscription.recordingPieceSeconds))
+        return seconds + pieces < Double(limit)
+    }
+
     private var opening: [String: Task<String, any Error>] = [:]
     private var leaseIDs: [String: String] = [:]
     private var users: [String: Int] = [:]
@@ -312,6 +362,20 @@ public actor HostedLeases {
     public init(recall: @escaping @Sendable () -> [String] = { [] }, keep: @escaping @Sendable ([String]) -> Void = { _ in }) {
         self.recall = recall
         self.keep = keep
+    }
+
+    // The two audio tracks use the same upstream budget and must observe the same cooldown.
+    private var resumeUploadsAt = ContinuousClock.now
+
+    func pauseUploads(seconds: Int) {
+        resumeUploadsAt = max(resumeUploadsAt, .now.advanced(by: .seconds(seconds)))
+    }
+
+    func waitForUpload() async throws {
+        while ContinuousClock.now < resumeUploadsAt {
+            try await Task.sleep(until: resumeUploadsAt, clock: .continuous)
+        }
+        try Task.checkCancellation()
     }
 
     func withUse<T: Sendable>(of meeting: String, _ work: @Sendable () async throws -> T) async rethrows -> T {
@@ -368,7 +432,7 @@ public actor HostedLeases {
         var ids = Set(recall())
         var protected: Set<String> = []
         for (key, id) in leaseIDs {
-            if key == meeting || users[key] != nil {
+            if key == meeting || users[key] != nil || capturing.contains(key) {
                 protected.insert(id)
             } else {
                 leaseIDs[key] = nil
@@ -381,6 +445,9 @@ public actor HostedLeases {
 
     /// Forgets the meeting and returns its lease to finish.
     func end(_ meeting: String) async -> String? {
+        capturing.remove(meeting)
+        recordings.remove(meeting)
+        limitStarts[meeting] = nil
         clear(meeting)
         if let task = opening[meeting] {
             guard let id = try? await task.value, leaseIDs[meeting] == id else { return nil }
@@ -389,6 +456,7 @@ public actor HostedLeases {
     }
 
     func finished(_ id: String) {
+        durationLimits[id] = nil
         keep(recall().filter { $0 != id })
     }
 

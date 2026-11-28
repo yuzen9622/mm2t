@@ -89,22 +89,24 @@ public actor HostedCaptions: StreamingTranscriptionProvider {
     private let traditionalChinese: Bool
     private let leases: HostedLeases
     private var leaseTask: Task<Lease, Error>?
+    private let meeting: String?
     private var stopped = false
 
-    public init(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, leases: HostedLeases) {
+    public init(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, leases: HostedLeases, meeting: String? = nil) {
         self.init(url: url, authorization: authorization, traditionalChinese: traditionalChinese,
-                  leases: leases, http: .shared, socket: { url in
+                  leases: leases, meeting: meeting, http: .shared, socket: { url in
                       let task = URLSession.shared.webSocketTask(with: URLRequest(url: url, timeoutInterval: 10))
                       task.resume()
                       return task
                   })
     }
 
-    init(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, leases: HostedLeases, http: URLSession,
+    init(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, leases: HostedLeases, meeting: String? = nil, http: URLSession,
          socket: @escaping @Sendable (URL) -> any CaptionWebSocket) {
         api = API(url: url, authorization: authorization, http: http, leases: leases)
         self.traditionalChinese = traditionalChinese
         self.leases = leases
+        self.meeting = meeting
         self.socket = socket
     }
 
@@ -126,13 +128,23 @@ public actor HostedCaptions: StreamingTranscriptionProvider {
     }
 
     public func open(_ request: StreamingTranscriptionRequest) async throws -> any StreamingTranscriptionSession {
-        let lease = try await lease()
+        let leaseID: String
+        let expiresAt: Date
+        if let meeting {
+            leaseID = try await leases.lease(for: meeting) { [api] in try await api.begin().id }
+            expiresAt = .distantFuture // The backend caps every ticket at the remaining lease duration.
+        } else {
+            let lease = try await lease()
+            guard lease.features.liveCaptions else { throw StreamingTranscriptionAvailability.ineligible }
+            leaseID = lease.id
+            expiresAt = lease.expiresAt
+        }
         try Task.checkCancellation()
         guard !stopped else { throw CancellationError() }
-        guard lease.features.liveCaptions, lease.expiresAt > Date() else {
+        guard expiresAt > Date() else {
             throw StreamingTranscriptionAvailability.ineligible
         }
-        let ticket = try Self.decode(Ticket.self, from: api.body(await api.post(lease.id, "captions")))
+        let ticket = try Self.decode(Ticket.self, from: api.body(await api.post(leaseID, "captions")))
         try Task.checkCancellation()
         guard !stopped else { throw CancellationError() }
         guard ticket.websocketUrl == Self.endpoint else {
@@ -156,7 +168,7 @@ public actor HostedCaptions: StreamingTranscriptionProvider {
             try Task.checkCancellation()
             throw SonioxConnection.Interrupted()
         }
-        let duration = min(Double(ticket.maxSessionSeconds), lease.expiresAt.timeIntervalSinceNow)
+        let duration = min(Double(ticket.maxSessionSeconds), expiresAt.timeIntervalSinceNow)
         let renewAfter = max(duration / 2, duration - 5)
         let connection = SonioxConnection(socket: transport, traditionalChinese: traditionalChinese || request.languageCode == "zh")
         await connection.start(renewAfter: .seconds(max(0, renewAfter)))
@@ -166,6 +178,10 @@ public actor HostedCaptions: StreamingTranscriptionProvider {
     public func stop(retainingLeaseFor meeting: MeetingID?) async {
         guard !stopped else { return }
         stopped = true
+        if let shared = self.meeting {
+            if meeting == nil, let id = await leases.end(shared) { await api.finish(id) }
+            return
+        }
         defer { leaseTask = nil }
         guard let leaseTask, let lease = try? await leaseTask.value, lease.features.liveCaptions else { return }
         if let meeting, lease.expiresAt > Date(), await leases.adopt(lease.id, for: meeting.description) { return }

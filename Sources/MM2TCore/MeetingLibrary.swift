@@ -54,8 +54,7 @@ public actor MeetingLibrary {
     }
 
     /// Moves the track files into the meeting's directory, so the library owns them from here on.
-    public func create(_ recording: Recording, room: MeetingRoom? = nil) throws -> Meeting {
-        let id = MeetingID()
+    public func create(_ recording: Recording, room: MeetingRoom? = nil, id: MeetingID = MeetingID()) throws -> Meeting {
         let directory = self.directory(id)
         try files.createDirectory(at: directory, withIntermediateDirectories: true)
         let audio = RecordingAudio(

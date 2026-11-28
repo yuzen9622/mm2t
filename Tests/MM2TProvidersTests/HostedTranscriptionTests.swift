@@ -55,6 +55,65 @@ import Testing
         #expect(server.requests.last?.method == "POST")
     }
 
+    @Test func finalPiecesRunConcurrentlyOnlyWithKnownRoomOnTheRecordingLease() async throws {
+        let server = StubServer { request in
+            if request.url.path == "/v1/hosted/sessions" { return .status(201, #"{"id":"lease","maxSeconds":1800}"#) }
+            return .status(200, Self.word)
+        }
+        let leases = HostedLeases()
+        let hosted = provider(server, leases: leases)
+        #expect(await !hosted.canParallelizeTail(of: "m1", through: 120))
+        _ = try await run(hosted, try tone(seconds: 1))
+        #expect(await hosted.canParallelizeTail(of: "m1", through: 120))
+        #expect(await !hosted.canParallelizeTail(of: "m1", through: 1790))
+        await leases.reachedLimit("m1", at: 90)
+        #expect(await !hosted.canParallelizeTail(of: "m1", through: 120))
+        await hosted.finishSession(meeting: "m1")
+        #expect(await leases.adopt("captions", for: "m1"))
+        #expect(await !hosted.canParallelizeTail(of: "m1", through: 120))
+    }
+
+    @Test func waitsForBudgetAndOnlyResendsTheRefusedPiece() async throws {
+        let attempts = Counter()
+        let server = StubServer { request in
+            if request.url.path == "/v1/hosted/sessions" { return .status(201, #"{"id":"lease-1"}"#) }
+            if request.headers["X-MM2T-Piece"] == "2", attempts.next() == 0 {
+                return .status(429, #"{"error":{"code":"rate_limited","retryAfter":1}}"#)
+            }
+            return .status(200, Self.word)
+        }
+        let started = ContinuousClock.now
+        let words = try await run(provider(server, parallel: 1), try tone(seconds: 3))
+        #expect(started.duration(to: .now) >= .seconds(1))
+        #expect(words.count == 2)
+        #expect(uploads(server).compactMap { $0.headers["X-MM2T-Piece"] } == ["0", "2", "2"])
+    }
+
+    @Test func recordingClipsShareOneLeaseAndKeepOffsetsWhenReusedAtStop() async throws {
+        let server = StubServer { request in
+            if request.url.path == "/v1/hosted/sessions" { return .status(201, #"{"id":"recording"}"#) }
+            if request.headers["X-MM2T-Piece"] == "60" {
+                return .status(402, #"{"error":{"code":"session_limit_reached"}}"#)
+            }
+            return .status(200, Self.word)
+        }
+        let provider = provider(server, parallel: 1)
+        let clip = try tone(seconds: 1)
+        for start in [0, 30, 30, 60, 90] {
+            let context = TranscriptionContext(meeting: "m1", track: .remote, recordingOffset: start)
+            let words = try await TranscriptionContext.$current.withValue(context) {
+                try await provider.transcribe(audio: clip, hints: [], labelSpeakers: false).words
+            }
+            #expect(words.map(\.range.start) == (start < 60 ? [0.5] : []))
+        }
+        let saved = try await run(provider, try tone(seconds: 62))
+        #expect(saved.map(\.range.start) == [0.5, 30.5])
+        #expect(uploads(server).compactMap { $0.headers["X-MM2T-Piece"] } == ["0", "30", "60"])
+        #expect(paths(server).filter { $0 == "/v1/hosted/sessions" }.count == 1)
+        await provider.finishSession(meeting: "m1")
+        #expect(server.requests.last?.url.path == "/v1/hosted/sessions/recording/finish")
+    }
+
     @Test func micTrackIsSentAsMic() async throws {
         let server = StubServer { request in
             request.url.path == "/v1/hosted/sessions" ? .status(201, #"{"id":"lease-1"}"#) : .status(200, Self.word)

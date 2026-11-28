@@ -138,8 +138,8 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider {
         OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", authorization: authorization)
     }
-    public func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool) -> any StreamingTranscriptionProvider {
-        HostedCaptions(url: url, authorization: authorization, traditionalChinese: traditionalChinese, leases: hostedLeases)
+    public func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, meeting: String?) -> any StreamingTranscriptionProvider {
+        HostedCaptions(url: url, authorization: authorization, traditionalChinese: traditionalChinese, leases: hostedLeases, meeting: meeting)
     }
     public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
         ElevenLabsRealtime(apiKey: apiKey)

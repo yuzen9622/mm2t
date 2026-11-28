@@ -31,7 +31,12 @@ public struct HostedAuthorization: Sendable {
     }
 
     private static func signedOut(_ error: any Error) -> any Error {
-        error is CancellationError ? error : ProviderError(.mm2tPlan, .invalidCredential)
+        if error is CancellationError { return error }
+        switch error as? CollabError {
+        case .unreachable: return ProviderError(.mm2tPlan, .unreachable)
+        case .server: return ProviderError(.mm2tPlan, .unavailable)
+        default: return ProviderError(.mm2tPlan, .invalidCredential)
+        }
     }
 
     func token() async throws -> Secret { try await current() }

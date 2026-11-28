@@ -50,6 +50,7 @@ extension HTTPResponse {
         struct Detail: Decodable {
             let code: String
             let scope: String?
+            let retryAfter: Int?
         }
         let error: Detail
     }
@@ -57,6 +58,12 @@ extension HTTPResponse {
     /// The mm2t backend's `{error:{code}}`, when it sent one.
     var hostedCode: String? {
         (try? JSONDecoder().decode(HostedErrorBody.self, from: body))?.error.code
+    }
+
+    var hostedRetryDelay: Int? {
+        guard status == 429, let detail = (try? JSONDecoder().decode(HostedErrorBody.self, from: body))?.error,
+              detail.code == "rate_limited", let delay = detail.retryAfter, delay > 0 else { return nil }
+        return delay
     }
 
     /// The mm2t plan backend names each refusal; status codes alone don't tell minutes from AI quota.

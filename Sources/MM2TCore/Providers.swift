@@ -267,7 +267,9 @@ extension TranscriptionProvider {
 public struct TranscriptionContext: Sendable, Hashable {
     public let meeting: String
     public let track: Track
-    public init(meeting: String, track: Track) {
+    public let recordingOffset: Int?
+    public init(meeting: String, track: Track, recordingOffset: Int? = nil) {
+        self.recordingOffset = recordingOffset
         self.meeting = meeting
         self.track = track
     }

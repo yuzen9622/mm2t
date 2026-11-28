@@ -127,7 +127,7 @@ public final class CaptureController {
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
     @ObservationIgnored private let makeCollaboration: @MainActor (String) -> CollabSession?
-    @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions) async -> CaptionStream?
+    @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions, MeetingID) async -> CaptionStream?
     @ObservationIgnored private var closingCollaboration: Task<Void, Never>?
     @ObservationIgnored private var captionStream: CaptionStream?
     @ObservationIgnored private var captionTask: Task<Void, Never>?
@@ -135,6 +135,7 @@ public final class CaptureController {
     /// Declined calls by bundle ID, kept out of detection so they neither prompt again nor hide
     /// another meeting. `releasedAt` is when the app last let go of the mic; nil while it holds it.
     @ObservationIgnored private var declined: [String: (meeting: DetectedMeeting, releasedAt: Date?)] = [:]
+    @ObservationIgnored private var recordingID: MeetingID?
     @ObservationIgnored private var session: (any RecordingSession)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private let endCountdown: Duration
@@ -157,7 +158,7 @@ public final class CaptureController {
         appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
         makeCollaboration: @escaping @MainActor (String) -> CollabSession? = { _ in nil },
-        makeCaptions: @escaping @MainActor (LiveCaptions) async -> CaptionStream? = { _ in nil },
+        makeCaptions: @escaping @MainActor (LiveCaptions, MeetingID) async -> CaptionStream? = { _, _ in nil },
         enqueueRecording: (@MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?)? = nil,
         onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void = { _, _ in }
     ) {
@@ -324,14 +325,16 @@ public final class CaptureController {
         if target.mode == .inPerson { systemAudio = .off }
         else if let id = target.bundleID { systemAudio = .app(id) }
         else { systemAudio = .automatic(ignoring: Set(rules().apps.filter { !$0.prompts }.map(\.key))) }
+        let recordingID = MeetingID()
         let configuration = RecorderConfiguration(
             systemAudio: systemAudio,
-            directory: recordingsDirectory.appending(path: UUID().uuidString),
+            directory: recordingsDirectory.appending(path: recordingID.description),
             title: target.name,
             platform: target.platform)
         do {
             let session = try await recorder.start(configuration)
             self.session = session
+            self.recordingID = recordingID
             meters.reset()
             collaboration = makeCollaboration(target.name)
             if let collaboration {
@@ -349,7 +352,7 @@ public final class CaptureController {
                     if !Task.isCancelled { await live.advance() }
                 }
             }
-            startCaptions(session, sampleRate: configuration.sampleRate)
+            startCaptions(session, sampleRate: configuration.sampleRate, meeting: recordingID)
             eventTask = Task { [weak self] in
                 for await event in session.events {
                     await self?.apply(event, from: session)
@@ -364,10 +367,10 @@ public final class CaptureController {
 
     /// Captions run beside the recording and the batch pieces and never feed either; a caption
     /// failure only shows in `captions.status`.
-    private func startCaptions(_ session: any RecordingSession, sampleRate: Int) {
+    private func startCaptions(_ session: any RecordingSession, sampleRate: Int, meeting: MeetingID) {
         captions.clear()
         captionTask = Task { [weak self] in
-            guard let self, let stream = await self.makeCaptions(self.captions), !Task.isCancelled else { return }
+            guard let self, let stream = await self.makeCaptions(self.captions, meeting), !Task.isCancelled else { return }
             self.captionStream = stream
             await stream.start(audio: await session.audioStream(), sampleRate: sampleRate)
             if case .paused = self.state { await stream.pause() }
@@ -456,7 +459,7 @@ public final class CaptureController {
 
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
-        guard state.isCapturing, let target = state.target, let session else { return }
+        guard state.isCapturing, let target = state.target, let session, let recordingID else { return }
         let started = ContinuousClock.now
         countdown?.task.cancel()
         countdown = nil
@@ -470,15 +473,17 @@ public final class CaptureController {
         let live = self.live
         self.live = nil
         self.session = nil
+        self.recordingID = nil
         await live?.prepareForMove()
         captionTask?.cancel()
         let id: MeetingID
         do {
             let recording = try await session.stop()
-            id = try await library.create(recording, room: room).id
+            id = try await library.create(recording, room: room, id: recordingID).id
             try? FileManager.default.removeItem(at: recording.micTrack.deletingLastPathComponent())
         } catch {
             await stopCaptions()
+            await live?.discard()
             state = .failed(.saveFailed(String(describing: error)))
             return
         }

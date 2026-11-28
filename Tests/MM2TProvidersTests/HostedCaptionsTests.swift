@@ -104,6 +104,28 @@ struct HostedCaptionsTests {
         #expect(server.requests.allSatisfy { $0.method == "POST" && $0.headers["Authorization"] == "Bearer account-fixture" })
     }
 
+    @Test func simultaneousRecordingAndCaptionsKeepOneLeaseUntilTranscriptFinishes() async throws {
+        let server = paidServer()
+        let leases = HostedLeases(), id = MeetingID()
+        let captions = HostedCaptions(url: Self.sessions, authorization: .fixed("account-fixture"),
+            traditionalChinese: false, leases: leases, meeting: id.description, http: server.session,
+            socket: { _ in Socket() })
+        let stt = HostedTranscriptionTests().provider(server, leases: leases)
+        let clip = try HostedTranscriptionTests().tone(seconds: 1)
+        async let socket = captions.open(.init(languageCode: nil, hints: [], sampleRate: 16_000))
+        async let words = TranscriptionContext.$current.withValue(.init(meeting: id.description, track: .me, recordingOffset: 30)) {
+            try await stt.transcribe(audio: clip, hints: [], labelSpeakers: false)
+        }
+        let (stream, transcript) = try await (socket, words)
+        #expect(transcript.words.count == 1)
+        await stream.close()
+        await captions.stop(retainingLeaseFor: id)
+        #expect(!server.requests.contains { $0.url.path.hasSuffix("/finish") })
+        await stt.finishSession(meeting: id.description)
+        #expect(server.requests.filter { $0.url.path == Self.sessions.path }.count == 1)
+        #expect(server.requests.filter { $0.url.path.hasSuffix("/finish") }.count == 1)
+    }
+
     @Test func aDroppedSocketGetsAFreshKeyAndTheSavedMeetingKeepsItsLease() async throws {
         let server = paidServer()
         let pool = SocketPool()

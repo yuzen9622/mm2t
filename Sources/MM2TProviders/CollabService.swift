@@ -380,7 +380,7 @@ public actor CollabService {
                 }
                 try store(login)
                 return login.tokens
-            } catch {
+            } catch CollabError.notSignedIn {
                 if version == generation { try invalidate() }
                 throw CollabError.notSignedIn
             }

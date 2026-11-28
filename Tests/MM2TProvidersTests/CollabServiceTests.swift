@@ -313,7 +313,7 @@ struct CollabServiceTests {
         let user: CollabUser
     }
 
-    @Test(arguments: [200, 401, 503]) func failedAuthenticationClearsStoredCredentials(refreshStatus: Int) async throws {
+    @Test(arguments: [200, 401]) func failedAuthenticationClearsStoredCredentials(refreshStatus: Int) async throws {
         let server = StubServer { call in
             switch call.url.path {
             case "/v1/auth/exchange": .status(200, Self.login)
@@ -330,6 +330,23 @@ struct CollabServiceTests {
         #expect(server.requests.map(\.url.path) == expected)
         await #expect(throws: CollabError.notSignedIn) { try await service.me() }
         #expect(server.requests.count == expected.count)
+    }
+
+    @Test(arguments: [true, false])
+    func refreshRetriesAfterConnectivityReturns(offline: Bool) async throws {
+        let attempts = Counter()
+        let server = StubServer { call in
+            if call.url.path == "/v1/auth/exchange" { return .status(200, Self.login) }
+            if attempts.next() == 0 { return offline ? .failure(.networkConnectionLost) : .status(503, "") }
+            return .status(200, Self.rotated)
+        }
+        let store = MemoryTokens()
+        let service = store.service(using: server)
+        _ = try await service.exchange(code: "code", codeVerifier: Self.verifier)
+        await #expect(throws: offline ? CollabError.unreachable : .server(status: 503)) { try await service.refresh() }
+        #expect(store.saved?.isEmpty == false)
+        try await service.refresh()
+        #expect(try await service.accessToken().revealed == "a2")
     }
 
     @Test func savedTokensAreNotSentWhenAnOverrideChangesTheAPIURL() async throws {

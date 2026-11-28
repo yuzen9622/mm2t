@@ -345,7 +345,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
 
     let hostedStreaming = FakeStreamingSTT()
     let makeHostedCaptions = Box<(@Sendable (URL, HostedAuthorization, Bool) -> any StreamingTranscriptionProvider)?>(nil)
-    func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool) -> any StreamingTranscriptionProvider {
+    func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, meeting: String?) -> any StreamingTranscriptionProvider {
         makeHostedCaptions.get?(url, authorization, traditionalChinese) ?? hostedStreaming
     }
 
