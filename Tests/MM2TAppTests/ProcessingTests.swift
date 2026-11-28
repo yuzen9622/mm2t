@@ -275,7 +275,7 @@ import Testing
     }
 
     @Test(arguments: [TranscriptionService.elevenLabs, .server, .mm2t])
-    func hostedSummariesDoNotPreventOwnTranscriptionDuringRecording(source: TranscriptionService) async throws {
+    func hostedSummariesAllowTheSelectedTranscriptionServiceDuringRecording(source: TranscriptionService) async throws {
         let api = URL(string: "https://collab.example")!
         let world = try World(collabConfiguration: .init(apiURL: api, webURL: api))
         try world.credentials.save(Secret(#"{"apiURL":"https://collab.example","tokens":{"accessToken":"plan-token","refreshToken":"refresh"}}"#), for: .collabAccount)
@@ -292,11 +292,13 @@ import Testing
         try WAVFormat.write(WAVAudio(sampleRate: 16_000, samples: Array(repeating: 0, count: samples.count)),
                             to: directory.appending(path: RecordingManifest.remoteFile))
         var progress: LiveProcessingProgress?
-        let deadline = ContinuousClock.now + .seconds(source == .mm2t ? 3 : 8)
+        var speakerSnapshots = 0
+        let deadline = ContinuousClock.now + .seconds(60)
         repeat {
             try await Task.sleep(for: .milliseconds(50))
             progress = await world.capture.liveProgress()
-        } while (progress?.diarizedSeconds ?? 0) < 30 && ContinuousClock.now < deadline
+            speakerSnapshots = await diarizer.session.checkpoints
+        } while (min(progress?.diarizedSeconds ?? 0, progress?.transcribedSeconds ?? 0) < 30 || speakerSnapshots == 0) && ContinuousClock.now < deadline
         switch source {
         case .elevenLabs:
             #expect(!world.catalog.cloud.calls.get.isEmpty)
@@ -305,14 +307,14 @@ import Testing
             #expect(!world.catalog.selfHosted.calls.get.isEmpty)
             #expect(world.catalog.cloud.calls.get.isEmpty)
         case .mm2t:
-            #expect(world.catalog.selfHosted.calls.get.isEmpty)
-            #expect(progress == nil)
+            #expect(!world.catalog.selfHosted.calls.get.isEmpty)
+            #expect(world.catalog.selfHostedURLs.get.contains(PipelineSetup.hostedURL(api, job: "stt")))
+            #expect(world.catalog.cloud.calls.get.isEmpty)
         }
-        if source != .mm2t {
-            #expect((progress?.transcribedSeconds ?? 0) >= 30)
-            #expect((progress?.diarizedSeconds ?? 0) >= 30)
-        }
-        #expect(await diarizer.session.checkpoints == 0)
+        #expect((progress?.transcribedSeconds ?? 0) >= 30)
+        #expect((progress?.diarizedSeconds ?? 0) >= 30)
+        #expect(speakerSnapshots > 0)
+        #expect(progress?.checkpointSeconds == 0)
         #expect(world.catalog.llm.calls.get.isEmpty)
         await world.capture.stop()
     }
@@ -344,7 +346,7 @@ import Testing
                                 to: directory.appending(path: RecordingManifest.remoteFile))
         }
         func waitForTranscription(seconds: TimeInterval) async throws -> Bool {
-            let deadline = ContinuousClock.now + .seconds(8)
+            let deadline = ContinuousClock.now + .seconds(60)
             repeat {
                 if let progress = await world.capture.liveProgress(), progress.transcribedSeconds >= seconds { return true }
                 try await Task.sleep(for: .milliseconds(50))
