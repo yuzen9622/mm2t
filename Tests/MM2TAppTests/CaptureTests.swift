@@ -20,6 +20,29 @@ import Testing
         #expect(world.recorder.last?.configuration.systemAudio == .app("us.zoom.xos"))
     }
 
+    @Test func acceptingGoogleMeetConsumesHoverUntilThePointerEntersAgain() async throws {
+        let world = try World()
+        let signals = SystemSignals(micBundleIDs: ["com.google.Chrome"], frontmostBundleID: "com.google.Chrome",
+                                    browserURL: URL(string: "https://meet.google.com/abc-defg-hij"))
+        await world.capture.handle(signals)
+        guard case .prompting(let meeting) = world.capture.state else { Issue.record("Expected Meet prompt"); return }
+        #expect(meeting.platform == .googleMeet)
+
+        var hover = NotchHover.outside
+        hover.pointerChanged(inside: true)
+        #expect(hover == .inside)
+        await world.capture.startPrompted()
+        #expect(world.capture.state.isCapturing)
+        hover.recordingBegan()
+        hover.pointerChanged(inside: true)
+        #expect(hover == .waitingForExit)
+        await world.capture.handle(signals)
+        #expect(world.capture.state.isCapturing)
+        hover.pointerChanged(inside: false)
+        hover.pointerChanged(inside: true)
+        #expect(hover == .inside)
+    }
+
     @Test func aDismissedMeetingDoesNotPromptAgainUntilItHasReallyEnded() async throws {
         let world = try World()
         await world.capture.handle(Signals.zoom())
