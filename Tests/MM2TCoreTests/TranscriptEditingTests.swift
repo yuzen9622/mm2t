@@ -20,6 +20,32 @@ import Testing
         }
     }
 
+    @Test func shortConsecutiveCleanedFragmentsKeepTheirSourcesAndTranslationOnReopen() async throws {
+        let world = try await World()
+        var meeting = try await world.processed()
+        let texts = ["餵，餵，餵，王老師。", "抓，明天才回來。", "投公投啊。", "真的嗎？", "好。"]
+        let speakers: [SpeakerID] = [.me, .me, .me, SpeakerID("r1"), SpeakerID("r1")]
+        let starts = [2.25, 5.43, 9.63, 12.09, 25.0]
+        meeting.utterances = texts.indices.map { i in
+            Utterance(id: UtteranceID("u" + String(i)), speaker: speakers[i],
+                      range: TimeRange(start: starts[i], end: starts[i] + 1.5),
+                      isOverlapping: false, text: texts[i], words: [])
+        }
+        let old = CleanedTranscript(paragraphs: meeting.utterances.map {
+            .init(speaker: $0.speaker, text: $0.text, sources: [$0.id])
+        })
+        meeting.outputs.cleaned = old
+        meeting.translation = .init(target: "en", source: old,
+                                    paragraphs: [0: "Hello.", 1: "Tomorrow.", 2: "Voting.", 3: "Really?"])
+        let reopened = try JSONDecoder().decode(Meeting.self, from: JSONEncoder().encode(meeting))
+        let cleaned = try #require(reopened.outputs.cleaned)
+        #expect(cleaned.paragraphs.map(\.text) == [texts.prefix(3).joined(), texts[3], texts[4]])
+        #expect(cleaned.paragraphs[0].sources == meeting.utterances.prefix(3).map(\.id))
+        #expect(reopened.currentTranslation?.paragraphs == [0: "Hello. Tomorrow. Voting.", 1: "Really?"])
+        let again = try JSONDecoder().decode(Meeting.self, from: JSONEncoder().encode(reopened))
+        #expect(again.outputs.cleaned == cleaned)
+    }
+
     @Test func aMeetingBeingProcessedCannotBeEdited() async throws {
         let world = try await World()
         let meeting = try await world.record()
