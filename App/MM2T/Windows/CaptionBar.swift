@@ -225,16 +225,16 @@ struct CaptionBarView: View {
                 }
             }
             .overlay(alignment: .trailing) {
-                HStack(spacing: 6) {
-                    if hovering {
+                if hovering {
+                    HStack(spacing: 6) {
                         GlassControl("Open Live Page", icon: "maximize") { MainNavigation.shared.openLive() }
                         GlassControl("Hide Captions", icon: "x", action: model.hide)
+                        GlassControl(isTranslating || captions.preparingTranslation ? "Turn off live translation" : "Turn on live translation",
+                                     icon: "language", isOn: isTranslating || captions.preparingTranslation,
+                                     action: model.toggleTranslation)
                     }
-                    GlassControl(isTranslating || captions.preparingTranslation ? "Turn off live translation" : "Turn on live translation",
-                                 icon: "language", isOn: isTranslating || captions.preparingTranslation,
-                                 action: model.toggleTranslation)
+                    .padding(.trailing, 12)
                 }
-                .padding(.trailing, 12)
             }
             .animation(.easeOut(duration: 0.12), value: hovering)
             .motion(Motion.reveal, value: captions.status)
@@ -365,7 +365,7 @@ struct CaptionBarView: View {
         }
     }
 
-    private var controlInset: CGFloat { hovering ? 100 : 30 }
+    private var controlInset: CGFloat { hovering ? 100 : 0 }
 
     private func refresh() {
         // With translation on, the main text is the translation (or the last one while the next is out).
