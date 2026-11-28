@@ -3,7 +3,7 @@ import MM2TCore
 import MM2TProviders
 import OSLog
 
-/// Streams the recording's mixed audio to a streaming speech service and hands what comes back to
+/// Streams the recording's selected caption track to a streaming speech service and hands what comes back to
 /// `LiveCaptions`. Runs beside the recording and never touches it: a failure here only changes the
 /// caption status.
 public actor CaptionStream {

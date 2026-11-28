@@ -19,7 +19,7 @@ public protocol RecordingSession: AnyObject, Sendable {
     func resume() async
     func markHighlight() async throws -> Highlight
     func stop() async throws -> Recording
-    /// Both tracks mixed to mono at the recording's rate as they are captured, for live captions.
+    /// Mono audio for live captions: system audio for online meetings, microphone for in-person meetings.
     func audioStream() async -> AsyncStream<[Float]>
 }
 

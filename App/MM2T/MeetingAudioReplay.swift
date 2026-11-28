@@ -73,7 +73,7 @@ private actor ReplaySession: RecordingSession {
                 try await ContinuousClock().sleep(until: deadline)
                 guard !ended else { return }
                 if paused { continue }
-                var mixed = [Float](repeating: 0, count: count)
+                let captionIndex = configuration.systemAudio.captionTrack == .me ? 0 : 1
                 var levels: [AudioLevel] = []
                 for track in inputs.indices {
                     let bytes = try inputs[track].read(upToCount: count * 2) ?? Data()
@@ -83,10 +83,9 @@ private actor ReplaySession: RecordingSession {
                     captured.withUnsafeBytes { ptr in
                         let pcm = ptr.bindMemory(to: Int16.self).map { Float($0) / 32768 }
                         levels.append(pcm.withUnsafeBufferPointer { AudioLevel(samples: $0) })
-                        for i in pcm.indices { mixed[i] += pcm[i] }
+                        if track == captionIndex { audio.yield(pcm) }
                     }
                 }
-                audio.yield(mixed.map { min(1, max(-1, $0)) })
                 frames += count
                 if frames % 16_000 == 0 { try flush() }
                 eventWriter.yield(.levels(TrackLevels(me: levels[0], remote: levels[1])))

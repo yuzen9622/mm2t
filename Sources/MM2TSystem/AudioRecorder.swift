@@ -10,6 +10,10 @@ public enum SystemAudioCapture: Sendable, Equatable {
     /// Follow apps holding the microphone, except for bundle IDs silenced in detection rules.
     case automatic(ignoring: Set<String>)
 
+    public var captionTrack: Track {
+        self == .off ? .me : .remote
+    }
+
     public var appBundleID: String? {
         if case .app(let id) = self { return id }
         return nil
@@ -104,8 +108,9 @@ public actor AudioRecorder {
     private var tapStartedAt = 0.0
     private var remoteSilentSince: Double?
     private var reportedSilence = false
-    /// The mixed audio for live captions, while someone listens.
-    private var liveAudio: (continuation: AsyncStream<[Float]>.Continuation, mix: LiveMix, id: UUID)?
+    private var captionPipeline: TrackPipeline { configuration.systemAudio.captionTrack == .me ? mic : remote }
+
+    private var liveAudio: (continuation: AsyncStream<[Float]>.Continuation, id: UUID)?
 
     static let stallTimeout = 2.0
     static let silenceTimeout = 6.0
@@ -197,9 +202,7 @@ public actor AudioRecorder {
 
     public var state: RecordingTimeline.State { timeline.state }
 
-    /// Both tracks summed to mono at the file rate, as they are written: about every 50 ms, at most
-    /// 250 ms behind the track that is ahead. Paused time yields nothing. The files flush only once a
-    /// second, too slowly to tail for captions. One listener at a time; a second call replaces the first.
+    /// Mono audio from the caption track. A new listener replaces the previous one.
     public func audioStream() -> AsyncStream<[Float]> {
         liveAudio?.continuation.finish()
         let (stream, continuation) = AsyncStream.makeStream(of: [Float].self, bufferingPolicy: .bufferingNewest(100))
@@ -207,11 +210,9 @@ public actor AudioRecorder {
             continuation.finish()
             return stream
         }
-        mic.setTapping(true)
-        remote.setTapping(true)
+        captionPipeline.setTapping(true)
         let id = UUID()
-        let positions = [mic.writer.framesAppended, remote.writer.framesAppended]
-        liveAudio = (continuation, LiveMix(positions: positions, lag: configuration.sampleRate / 4), id)
+        liveAudio = (continuation, id)
         continuation.onTermination = { [weak self] _ in
             Task { await self?.endAudioStream(id) }
         }
@@ -221,18 +222,12 @@ public actor AudioRecorder {
     private func endAudioStream(_ id: UUID) {
         guard liveAudio?.id == id else { return }
         liveAudio = nil
-        mic.setTapping(false)
-        remote.setTapping(false)
+        captionPipeline.setTapping(false)
     }
 
     private func publishLiveAudio() {
-        guard var live = liveAudio else { return }
-        for (index, pipeline) in [mic, remote].enumerated() {
-            if let written = pipeline.takeWritten() { live.mix.add(written.samples, track: index, at: written.start) }
-        }
-        let mixed = live.mix.take()
-        liveAudio = live
-        if !mixed.isEmpty { live.continuation.yield(mixed) }
+        guard let liveAudio, let chunk = captionPipeline.takeWritten(), !chunk.samples.isEmpty else { return }
+        liveAudio.continuation.yield(chunk.samples)
     }
 
     /// Recorded seconds so far, paused time excluded; what the capsule's clock shows.
