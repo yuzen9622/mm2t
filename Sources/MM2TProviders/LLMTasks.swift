@@ -108,7 +108,19 @@ package struct LLMTasks: Sendable {
                 add()
             }
         }
-        let reviewed = try await reviewReadability(cleaned.flatMap { $0 }, transcript: transcript)
+        var reviewed = try await reviewReadability(cleaned.flatMap { $0 }, transcript: transcript)
+        // Correct a repeated singular/plural only when both the source and the draft
+        // put it directly after the same Chinese plural construction.
+        let pluralRestart = #"(不同[^，、。！？,.!?]{0,8}的\s*)([A-Za-z]{3,})\s*[，、,]\s*(\2s)\b"#
+        let sourceByID = Dictionary(transcript.utterances.map { ($0.id, $0.text) }, uniquingKeysWith: { first, _ in first })
+        for index in reviewed.indices {
+            let paragraph = reviewed[index]
+            guard paragraph.text.range(of: pluralRestart, options: .regularExpression) != nil,
+                  paragraph.sources.contains(where: { sourceByID[$0]?.range(of: pluralRestart, options: .regularExpression) != nil }) else { continue }
+            reviewed[index] = .init(speaker: paragraph.speaker,
+                                    text: paragraph.text.replacingOccurrences(of: pluralRestart, with: "$1$3", options: .regularExpression),
+                                    sources: paragraph.sources)
+        }
         let result = CleanedTranscript(paragraphs: reviewed)
         try Task.checkCancellation()
         if let cleanedCheckpoints, let revision {
@@ -184,8 +196,8 @@ package struct LLMTasks: Sendable {
             for index in sources {
                 let line = lines[index]
                 let context = Array(lines[max(0, index - Self.contextUtterances)..<index])
-                let original = Self.removingOrphanedEnding(line.text)
-                let input = LLMPrompts.readabilityRequest(original, context: context, glossary: Array(transcript.glossary.prefix(200)))
+                let original = Self.restoringMixedWordOrder(Self.removingOrphanedEnding(line.text))
+                let input = LLMPrompts.readabilityRequest(original, context: context, glossary: Array(transcript.glossary.prefix(200)), issue: Self.readabilityIssue(original))
                 do {
                     let edit = try await generate(Edit.self, system: LLMPrompts.cleanSystem, input: input,
                                                   schema: .object([("text", .string)]))
@@ -201,8 +213,8 @@ package struct LLMTasks: Sendable {
                 result += edits
             } else {
                 var text = paragraph.text
-                if let last = sources.last, Self.removingOrphanedEnding(lines[last].text) != lines[last].text {
-                    text = Self.removingOrphanedEnding(text)
+                if let last = sources.last, Self.restoringMixedWordOrder(Self.removingOrphanedEnding(lines[last].text)) != lines[last].text {
+                    text = Self.restoringMixedWordOrder(Self.removingOrphanedEnding(text))
                 }
                 result.append(.init(speaker: paragraph.speaker, text: text, sources: paragraph.sources))
             }
@@ -226,6 +238,9 @@ package struct LLMTasks: Sendable {
     private static let hesitantTail = #"[。！？]\s*[哦喔呃欸哎]\p{Han}{1,4}[。！]?\s*$"#
     private static func readabilityIssue(_ text: String) -> String? {
         let cues = [
+            (#"(?:呃[，,。]|就是說|你[懂知道]+嘛|[，,]那個[，,]|而已[哦喔]|的話[，,。])[^！？?]{0,180}(?:呃[，,。]|就是說|你[懂知道]+嘛|[，,]那個[，,]|而已[哦喔]|的話[，,。])"#, "把這段改成講者自己會寫下的完整句子。刪除只在等下一個詞的起頭、插話式口頭禪和已經說完的重述。直接提議、條件、例外、疑問和有實意的簡短答覆都保留。"),
+            (#"(?i)\b([a-z]{3,})\s*[，、,]\s*\1s\b"#, "本句有相鄰的英文單複數詞形。若為改口，交付的句子只出現最後採用的詞形一次。"),
+            (#"([\p{Han}0-9]{1,8})[、，,。]\s*\1"#, "將結巴或重複起頭接回完整句。若重複傳達強調、列舉或不同選項，保留原意。"),
             (#"([一二三四五六七八九十百千\d]+)\s*[，,]\s*(?:最少|至少|大概|大約|應該|差不多).{0,5}\1"#, "核對同一數量是否說到一半重新起頭，只留下最後說完整的數量、單位和限定詞。依前後文校正量測項目的同音詞。"),
             (#"(?:看|取決於).{0,5}[量速數率].{0,32}(?:分鐘|小時|秒|\d+\s*筆)"#, "這段在回答耗時。找出問句在問哪個動作、回答用哪個量詞計數，再核對決定耗時的是數量還是某種速度。例：若討論從系統抓資料，並用幾筆來說明耗時，這裡的量是資料筆數。保留疑問、實測數量與約略的時間。"),
             (#"(不是|不對)[，,]?\1[，,]|([才就十])\2.{0,12}[筆人分鐘]"#, "將同一位講者中斷重來的語句寫成完整句。自我更正時只留最後採用的說法與更正語氣。")
@@ -240,9 +255,33 @@ package struct LLMTasks: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // ASR sometimes puts the English predicate before the Chinese clause that qualifies it.
+    private static func restoringMixedWordOrder(_ text: String) -> String {
+        text.replacingOccurrences(of: #"^([A-Za-z]{3,})[.。]\s*([\p{sc=Han}][^。？！?!]*(?:不太|有點|非常))\s*$"#,
+                                  with: "$2 $1。", options: .regularExpression)
+    }
+
     private static func keepsMixedLanguage(source: String, output: String) -> Bool {
         let terms = source.lowercased().split { !$0.isASCII || !$0.isLetter }.filter { $0.count >= 3 }
         return terms.isEmpty || terms.contains { output.lowercased().contains($0) }
+    }
+
+    /// A model may copy a complete English passage from the preceding context into a new citation.
+    private static func copiedUncitedPassage(_ output: String, source: String, otherLines: [LLMUtterance]) -> Bool {
+        func words(_ text: String) -> [Substring] {
+            text.lowercased().split { !$0.isLetter }
+        }
+        let draft = words(output)
+        let original = words(source)
+        guard draft.count > original.count + 8 else { return false }
+        let draftWords = " " + draft.joined(separator: " ") + " "
+        let sourceWords = " " + original.joined(separator: " ") + " "
+        return otherLines.contains { line in
+            let beginning = words(line.text).prefix(8)
+            guard beginning.count == 8 else { return false }
+            let phrase = " " + beginning.joined(separator: " ") + " "
+            return draftWords.contains(phrase) && !sourceWords.contains(phrase)
+        }
     }
 
     static let contextUtterances = 6
@@ -298,7 +337,10 @@ package struct LLMTasks: Sendable {
                 let cited = Set(paragraph.sources)
                 let source = chunk.filter { cited.contains($0.id) }
                 if !source.contains(where: { Self.hasContent($0.text) }) { continue }
-                if Self.lostShortPhrase(in: source, output: paragraph.text) || Self.changedLanguage(source: source.map(\.text).joined(separator: " "), output: paragraph.text) {
+                let original = source.map(\.text).joined(separator: " ")
+                if Self.lostShortPhrase(in: source, output: paragraph.text)
+                    || Self.changedLanguage(source: original, output: paragraph.text)
+                    || Self.copiedUncitedPassage(paragraph.text, source: original, otherLines: context + chunk.filter { !cited.contains($0.id) }) {
                     checked += allowLanguageRetry
                         ? try await repair(source, context: Array((context + chunk.prefix { $0.id != source.first?.id }).suffix(Self.contextUtterances)), glossary: glossary, system: system)
                         : Self.originalParagraphs(source)
@@ -349,8 +391,25 @@ package struct LLMTasks: Sendable {
         let normalized = output.lowercased().filter { $0.isLetter || $0.isNumber }
         let boundaries = CharacterSet(charactersIn: "。！？!?")
         for utterance in source {
-            for phrase in utterance.text.components(separatedBy: boundaries) where hasContent(phrase) {
-                let key = phrase.lowercased().filter { $0.isLetter || $0.isNumber }
+            let text = utterance.text
+            // Keep a direct question even when nearby instructions and observations are merged.
+            if text.range(of: #"(?:要不要|能不能|可不可以|怎麼|如何)[^。！？!?]{0,40}[？?]"#, options: .regularExpression) != nil,
+               output.range(of: #"[？?]|是否|要不要|能不能|可不可以|怎麼|如何"#, options: .regularExpression) == nil { return true }
+            var start = text.startIndex
+            while start < text.endIndex {
+                let boundary = text.rangeOfCharacter(from: boundaries, range: start..<text.endIndex)
+                let end = boundary?.lowerBound ?? text.endIndex
+                let phrase = String(text[start..<end])
+                let sentenceStart = start
+                start = boundary?.upperBound ?? text.endIndex
+                let delimiter = boundary.map { text[$0] }
+                guard hasContent(String(text[sentenceStart..<start])) else { continue }
+                // A stutter can make a short clause look like a different word after cleanup.
+                let fluent = phrase.replacingOccurrences(of: #"([\p{Han}0-9]{1,8})[、，,]\s*\1"#, with: "$1", options: .regularExpression)
+                let key = fluent.lowercased().filter { $0.isLetter || $0.isNumber }
+                // Detached hesitations can be dropped alongside speech, but keep a questioning interjection.
+                if delimiter == "。", ["欸", "哎"].contains(key),
+                   text.components(separatedBy: boundaries).contains(where: { $0 != phrase && hasContent($0) }) { continue }
                 if key == "うん", phrase != utterance.text, utterance.text.hasPrefix("うん。") { continue }
                 // A trailing preposition after a completed sentence is a common ASR fragment.
                 if utterance.text.hasSuffix(phrase), phrase != utterance.text, ["in", "at", "of", "to", "and", "the"].contains(key) { continue }
@@ -369,9 +428,15 @@ package struct LLMTasks: Sendable {
             let language = NLLanguageRecognizer.dominantLanguage(for: text)
             return language == .traditionalChinese || language == .simplifiedChinese
         }
-        let kana = #"\p{Hiragana}|\p{Katakana}"#
+        let kana = #"\p{sc=Hiragana}|\p{sc=Katakana}"#
         if source.range(of: kana, options: .regularExpression) != nil,
            output.range(of: kana, options: .regularExpression) == nil { return true }
+        if hasHan(source), hasHan(output),
+           !keepsMixedLanguage(source: removingOrphanedEnding(source), output: output) { return true }
+        // Code-switching can leave an English term intact while the surrounding Chinese is translated.
+        if !hasHan(output), source.range(of: #"(?:\p{sc=Han}[^A-Za-z]*){4}"#, options: .regularExpression) != nil,
+           source.range(of: #"[A-Za-z]{3}"#, options: .regularExpression) != nil,
+           output.range(of: #"[A-Za-z]{2,}\s+[A-Za-z]{2,}"#, options: .regularExpression) != nil { return true }
         guard source.filter(\.isLetter).count >= 16, output.filter(\.isLetter).count >= 8 else { return false }
         if !hasHan(source), hasHan(output) {
             return NLLanguageRecognizer.dominantLanguage(for: source) == .english && isChinese(output)

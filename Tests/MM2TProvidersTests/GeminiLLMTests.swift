@@ -128,6 +128,82 @@ extension StubServer.Request {
         #expect(server.requests.count == 2)
     }
 
+    @Test(arguments: ["欸。", "欸？"])
+    func distinguishesAHesitationFromAQuestion(_ opening: String) async throws {
+        let edited = "你明天才回來嗎？"
+        let original = opening + "你、你明天才回來嗎？"
+        let line = utterance("u1", "me", 0, original)
+        let server = StubServer { _ in
+            .status(200, Fixture.gemini(#"{"paragraphs":[{"speaker":"me","text":"你明天才回來嗎？","sources":["u1"]}]}"#))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: [line]))
+        #expect(result.paragraphs.map(\.text) == [opening == "欸。" ? edited : original])
+    }
+
+    @Test func retainsAQuestionAfterAnInstruction() async throws {
+        let source = "請畫出登入頁面。它要怎麼觸發啊？我發現它開不了。"
+        let lines = [utterance("u1", "me", 0, source)]
+        let server = StubServer { request in
+            let text = request.geminiInput.contains("本次僅編輯所附原句")
+                ? "請畫出登入頁面。它要如何觸發？我發現它開不了。"
+                : "請畫出登入頁面的觸發圖示。目前開不了。"
+            let row: [String: Any] = ["speaker": "me", "text": text, "sources": ["u1"]]
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": [row]])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == ["請畫出登入頁面。它要如何觸發？我發現它開不了。"])
+    }
+
+    @Test func rejectsTranslationOfChineseAroundAnEnglishTerm() {
+        let source = "specific. 他這個，這個翻譯真的不太"
+        #expect(LLMTasks.changedLanguage(source: source, output: "Specific. His translation really is not very..."))
+        #expect(!LLMTasks.changedLanguage(source: source, output: "他的翻譯不太 specific。"))
+        #expect(LLMTasks.changedLanguage(source: source, output: "他的翻譯不太具體。"))
+    }
+
+    @Test func rejectsAnEnglishPassageBorrowedFromThePreviousSpeaker() async throws {
+        let first = "We asked the model to read stories about emotions."
+        let second = "The next experiment measured behavior."
+        let lines = [utterance("u1", "me", 0, first), utterance("u2", "r1", 1, second)]
+        let server = StubServer { request in
+            var rows: [[String: Any]] = []
+            if request.utteranceIDs.contains("u1") { rows.append(["speaker": "me", "sources": ["u1"], "text": first]) }
+            rows.append(["speaker": "r1", "sources": ["u2"], "text": first + " " + second])
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": rows])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == [first, second])
+    }
+
+    @Test func acceptsJoinedFragmentsWithAStutter() async throws {
+        let lines = [utterance("u1", "me", 0, "反"), utterance("u2", "me", 1, "正都，都一樣。哎。")]
+        let server = StubServer { _ in
+            .status(200, Fixture.gemini(#"{"paragraphs":[{"speaker":"me","text":"反正都一樣。","sources":["u1","u2"]}]}"#))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == ["反正都一樣。"])
+        #expect(server.requests.count == 1)
+    }
+
+    @Test(arguments: [("不同會員的 record、records。", "不同會員的 records。"),
+                      ("老師在比較 record、records。", "老師在比較 record、records。")])
+    func distinguishesAnEnglishRestartFromAWordComparison(_ text: String, _ expected: String) async throws {
+        let lines = [utterance("u1", "me", 0, text)]
+        let server = StubServer { request in
+            if request.geminiInput.contains("唯一要編輯的發言：") {
+                let data = try! JSONSerialization.data(withJSONObject: ["text": text])
+                return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+            }
+            let row: [String: Any] = ["speaker": "me", "text": text, "sources": ["u1"]]
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": [row]])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == [expected])
+    }
+
     @Test func keepsEditedRetryWhenOnlyAnIsolatedFillerWasOmitted() async throws {
         let lines = [utterance("u1", "me", 0, "うん。どうぞよろしくお願いします。"),
                      utterance("u2", "me", 3, "等一下。"), utterance("u3", "me", 5, "嗯。")]
