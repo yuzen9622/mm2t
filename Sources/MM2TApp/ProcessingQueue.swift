@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 /// Where one meeting stands in this app session. The meeting document's own `status` is the
@@ -26,6 +27,7 @@ public enum JobState: Equatable, Sendable {
 public enum ProcessingOperation: Sendable {
     /// Run from the meeting's resume step: a new recording, or a retry after a failure.
     case process
+    case resumeDeferredAI
     /// Name inference and the three generated views again, after speakers changed.
     case regenerate
     /// Speaker separation, voiceprints and alignment again, on the stored transcription.
@@ -35,17 +37,25 @@ public enum ProcessingOperation: Sendable {
 /// Runs pipeline jobs one at a time, since each loads the on-device models and uploads audio.
 @MainActor @Observable
 public final class ProcessingQueue {
+    public enum Outcome: Equatable, Sendable {
+        case completed(MeetingID, title: String)
+        case failed(MeetingID, reason: String)
+    }
+
     public private(set) var jobs: [MeetingID: JobState] = [:]
+    /// The final result and its revision let observers present it once, even if queue changes coalesce.
+    public private(set) var lastResult: (revision: Int, outcome: Outcome)?
     /// Bumped whenever a meeting document may have changed, so open views reload.
     public private(set) var revision = 0
 
     /// Called with each meeting a job finished processing.
     @ObservationIgnored public var onCompleted: (@MainActor (Meeting) -> Void)?
+    @ObservationIgnored var onJobFinished: (@MainActor () -> Void)?
     @ObservationIgnored private let makePipeline: @MainActor () throws -> PipelineBuild
     @ObservationIgnored private let makeLLM: @MainActor () throws -> LLMBuild
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var running: (id: MeetingID, token: UUID)?
-    @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>)] = [:]
+    @ObservationIgnored private var tasks: [MeetingID: (token: UUID, task: Task<Void, Never>, finish: @MainActor () -> Void)] = [:]
 
     public init(makePipeline: @escaping @MainActor () throws -> PipelineBuild,
                 makeLLM: @escaping @MainActor () throws -> LLMBuild) {
@@ -56,8 +66,8 @@ public final class ProcessingQueue {
     /// Rewrites a passage with the configured large language model, outside any job: it changes nothing
     /// until the user saves the result.
     public func rewrite(_ text: String, instruction: String) async throws -> String {
-        guard case .ready(let pipeline) = try makePipeline() else { throw RewriteUnsupported() }
-        return try await pipeline.llm.rewrite(text, instruction: instruction)
+        guard case .ready(let pipeline) = try makePipeline(), let llm = pipeline.llm else { throw RewriteUnsupported() }
+        return try await llm.rewrite(text, instruction: instruction)
     }
 
     /// Only the passage explicitly corrected by the user is sent to the selected model.
@@ -87,25 +97,59 @@ public final class ProcessingQueue {
     /// Returns when this job (and every job queued before it) has finished.
     public func run(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline? = nil,
                     whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) async {
-        guard !isBusy(id) else { return }
-        jobs[id] = .queued
+        await enqueue(operation, on: id, using: prepared, whileValid: whileValid)?.value
+    }
+
+    /// Claims the meeting synchronously, before capture exposes its ID to the views.
+    /// Recording finalization can make its transcript readable while another meeting runs.
+    func enqueue(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline? = nil,
+                 finalize: (@MainActor @Sendable () async -> Void)? = nil,
+                 whileValid: @escaping @MainActor @Sendable () async -> Bool = { true }) -> Task<Void, Never>? {
+        guard !isBusy(id) else { return nil }
+        jobs[id] = finalize == nil ? .queued : .running(.transcribe)
+        revision += 1
         let previous = tail
         let token = UUID()
-        let task = Task { @MainActor in
-            await previous?.value
-            guard !Task.isCancelled else { return }
-            let current = await whileValid()
-            guard !Task.isCancelled else { return }
-            await self.execute(operation, on: id, using: current ? prepared : nil)
+        var completion = onJobFinished
+        // A cancelled queued job leaves the UI before its place in the serial task chain.
+        let finish: @MainActor () -> Void = {
+            let notify = completion
+            completion = nil
+            notify?()
         }
-        tasks[id] = (token, task)
+        let task = Task { @MainActor in
+            defer { finish() }
+            await HostedRequestGroup.$current.withValue(token) {
+                defer {
+                    if self.tasks[id]?.token == token {
+                        self.tasks[id] = nil
+                        if Task.isCancelled, self.jobs[id]?.isActive == true { self.jobs[id] = nil }
+                        self.revision += 1
+                    }
+                }
+                if let finalize {
+                    await finalize()
+                    if Task.isCancelled {
+                        if self.tasks[id]?.token == token {
+                            self.tasks[id] = nil
+                            self.jobs[id] = nil
+                            finish()
+                        }
+                    } else {
+                        self.jobs[id] = .queued
+                    }
+                    self.revision += 1
+                }
+                await previous?.value
+                guard !Task.isCancelled else { return }
+                let current = await whileValid()
+                guard !Task.isCancelled else { return }
+                await self.execute(operation, on: id, using: current ? prepared : nil)
+            }
+        }
+        tasks[id] = (token, task, finish)
         tail = task
-        await task.value
-        // A newer job for this meeting may have started after this one was cancelled; it is not ours to clear.
-        guard tasks[id]?.token == token else { return }
-        tasks[id] = nil
-        if task.isCancelled, jobs[id]?.isActive == true { jobs[id] = nil }
-        revision += 1
+        return task
     }
 
     /// Stops a queued or running job. The meeting keeps its audio and every finished step, and
@@ -118,6 +162,7 @@ public final class ProcessingQueue {
             tasks[id] = nil
             jobs[id] = nil
             revision += 1
+            entry.finish()
         }
     }
 
@@ -129,18 +174,47 @@ public final class ProcessingQueue {
         }
     }
 
+    /// Schedules persisted work oldest first, using the same queue as manual processing.
+    public func resumeDeferredAI() async {
+        guard let pipeline = readyWithAI(), let meetings = try? await pipeline.library.list() else { return }
+        let resumed = meetings.reversed().compactMap { meeting -> Task<Void, Never>? in
+            guard meeting.deferredAIStep != nil else { return nil }
+            return enqueue(.resumeDeferredAI, on: meeting.id)
+        }
+        for task in resumed { await task.value }
+    }
+
+    private func readyWithAI() -> MeetingProcessingPipeline? {
+        guard case .ready(let pipeline) = try? makePipeline(), pipeline.llm != nil else { return nil }
+        return pipeline
+    }
+
     private func execute(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline?) async {
+        lastResult = nil
+        defer {
+            if case .failed(_, let reason) = jobs[id] {
+                lastResult = (revision, .failed(id, reason: reason))
+            }
+        }
         let pipeline: MeetingProcessingPipeline
-        do {
-            switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
-            case .ready(let ready): pipeline = ready
-            case .needsSetup(let issues):
-                jobs[id] = .needsSetup(issues)
+        if case .resumeDeferredAI = operation {
+            guard let ready = readyWithAI() else {
+                jobs[id] = nil
                 return
             }
-        } catch {
-            jobs[id] = .failed(step: nil, reason: String(describing: error))
-            return
+            pipeline = ready
+        } else {
+            do {
+                switch try prepared.map(PipelineBuild.ready) ?? makePipeline() {
+                case .ready(let ready): pipeline = ready
+                case .needsSetup(let issues):
+                    jobs[id] = .needsSetup(issues)
+                    return
+                }
+            } catch {
+                jobs[id] = .failed(step: nil, reason: String(describing: error))
+                return
+            }
         }
 
         let token = UUID()
@@ -154,6 +228,7 @@ public final class ProcessingQueue {
             let meeting: Meeting
             switch operation {
             case .process: meeting = try await pipeline.process(id, progress: progress)
+            case .resumeDeferredAI: meeting = try await pipeline.process(id, resumeDeferredAI: true, progress: progress)
             case .regenerate: meeting = try await pipeline.regenerateLLMOutputs(id, progress: progress)
             case .reseparate:
                 jobs[id] = .running(.diarize)
@@ -161,8 +236,13 @@ public final class ProcessingQueue {
             }
             switch meeting.status {
             case .completed:
+                lastResult = (revision, .completed(meeting.id, title: meeting.metadata.title))
                 jobs[id] = .completed
                 onCompleted?(meeting)
+                // Sign-in may have happened while this job was finishing without an LLM.
+                if pipeline.llm == nil, meeting.deferredAIStep != nil, readyWithAI() != nil {
+                    _ = enqueue(.resumeDeferredAI, on: id)
+                }
             case .failed(let step, let reason): jobs[id] = .failed(step: step, reason: reason)
             case .pending(let step): jobs[id] = .failed(step: step, reason: "processing stopped before \(step.rawValue)")
             }

@@ -55,4 +55,9 @@ public struct AudioLevel: Sendable, Equatable {
 public struct TrackLevels: Sendable, Equatable {
     public let me: AudioLevel
     public let remote: AudioLevel
+
+    public init(me: AudioLevel, remote: AudioLevel) {
+        self.me = me
+        self.remote = remote
+    }
 }

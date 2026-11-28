@@ -1,5 +1,6 @@
 import AppKit
 import MM2TApp
+import MM2TLocal
 import MM2TProviders
 import MM2TSystem
 import Observation
@@ -15,13 +16,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let signedIn = String(localized: "mm2t is connected. You can close this tab and go back to the app.")
             var defaults = UserDefaults.standard
+            var recorder: any Recorder = LiveRecorder()
+            var machine = MachineProfile.current
             var fixture = false
             #if DEBUG
             if let isolated = try AssistantScenarioRunner.fixtureDefaults() { defaults = isolated; fixture = true }
+            if fixture && UserDefaults.standard.bool(forKey: "MM2TFixtureIntel") {
+                machine = MachineProfile(isAppleSilicon: false, memoryBytes: machine.memoryBytes)
+            }
+            if fixture, let root = AssistantScenarioRunner.fixtureRoot, UserDefaults.standard.bool(forKey: "MM2TReplayAudio") {
+                recorder = MeetingAudioReplay(root: root)
+                var settings = SettingsStore(defaults: defaults).settings
+                settings.localCaptionModel = .nemotron
+                settings.liveCaptions = true
+                settings.captionTranslation = .off
+                settings.transcriptionLanguage = .auto
+                SettingsStore(defaults: defaults).settings = settings
+            }
             #endif
             app = try AppController.live(defaults: defaults, credentials: Self.credentials, signedInPage: signedIn,
                                          calendars: fixture ? [] : nil, recordingTitle: String(localized: "Recording"),
-                                         recorder: LiveRecorder(), permissions: LivePermissions(), shareWidget: !fixture)
+                                         recorder: recorder, permissions: LivePermissions(), shareWidget: !fixture, machine: machine)
             startupError = nil
         } catch {
             app = nil
@@ -50,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         floating = FloatingPanelController(app: app)
         captionBar = CaptionBarController(app: app)
+        if app.collabAccount != nil {
+            observeChanges { [weak app] in
+                let collaboration = app?.capture.collaboration
+                collaboration?.onRoomCreated = MainNavigation.shared.openCollaboration
+                CollabHostPage.shared.prepare(for: collaboration?.room?.hostUrl, retaining: collaboration?.retainedHostURL)
+            }
+        }
         var fixture = false
         #if DEBUG
         fixture = AssistantScenarioRunner.fixtureRoot != nil
@@ -74,6 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let app, let closing = app.collabAccount?.prepareToQuit(closing: app.capture.collaboration) else { return .terminateNow }
+        Task {
+            await closing.value
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         app?.setup.refresh()

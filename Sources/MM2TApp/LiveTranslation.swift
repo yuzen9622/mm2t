@@ -15,6 +15,8 @@ final class LiveTranslation {
 
     private weak var captions: LiveCaptions?
     private let translator: any CaptionTranslator
+    private let source: CaptionLanguage?
+    private let engine: CaptionEngine
     private let target: CaptionTarget
     private let now: @Sendable () -> Date
     private let sleep: @Sendable (Duration) async throws -> Void
@@ -31,10 +33,12 @@ final class LiveTranslation {
     private var hasLoggedFailure = false
     private var isStopped = false
 
-    init(captions: LiveCaptions, translator: any CaptionTranslator, target: CaptionTarget,
+    init(captions: LiveCaptions, translator: any CaptionTranslator, target: CaptionTarget, engine: CaptionEngine = .firefox, source: CaptionLanguage? = nil,
          now: @escaping @Sendable () -> Date, sleep: @escaping @Sendable (Duration) async throws -> Void) {
         self.captions = captions
         self.translator = translator
+        self.source = source
+        self.engine = engine
         self.target = target
         self.now = now
         self.sleep = sleep
@@ -43,7 +47,7 @@ final class LiveTranslation {
     /// How the text reaches the target language; nil when it is already there or has no language.
     private func route(of text: String) -> CaptionRoute? {
         guard let language = CaptionLanguage.of(text) else { return nil }
-        let route = target.route(from: language)
+        let route = target.route(from: source ?? language, engine: engine)
         return route == .none ? nil : route
     }
 
@@ -52,7 +56,8 @@ final class LiveTranslation {
         captions?.willTranslate(segment.id)
         run { [weak self] in
             let result = await self?.translated(segment.text, along: route)
-            self?.captions?.attach(result, to: segment.id)
+            guard let self, !self.isStopped else { return }
+            self.captions?.attach(result, to: segment.id)
         }
     }
 

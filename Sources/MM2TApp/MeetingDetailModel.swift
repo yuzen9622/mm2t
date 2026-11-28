@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import Observation
 
 public struct SpeakerRow: Hashable, Sendable, Identifiable {
@@ -37,11 +38,15 @@ public final class MeetingDetailModel {
     public var selectedView: TranscriptView = .raw
     /// The utterance a jump landed on, for the transcript to scroll to and mark.
     public private(set) var focusedUtterance: UtteranceID?
+    public private(set) var trackPreview: [Utterance] = []
     public private(set) var meeting: Meeting?
     public private(set) var names: [PersonID: String] = [:]
     public private(set) var people: [Person] = []
     public private(set) var errorMessage: String?
 
+    public private(set) var openingRoom = false
+    public private(set) var openRoomFailed = false
+    @ObservationIgnored private let account: CollabAccount?
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let voiceprints: VoiceprintStore
     @ObservationIgnored private let queue: ProcessingQueue
@@ -56,8 +61,9 @@ public final class MeetingDetailModel {
     /// `learn` receives the names and terms corrected in a saved transcript passage.
     public init(id: MeetingID, library: MeetingLibrary, voiceprints: VoiceprintStore, queue: ProcessingQueue,
                 labels: PresentationLabels, playback: (any MeetingPlayback)?,
-                todos: TodoStatus? = nil, reminders: RemindersSync? = nil,
+                todos: TodoStatus? = nil, reminders: RemindersSync? = nil, account: CollabAccount? = nil,
                 learn: @escaping @MainActor (String) -> Void = { _ in }) {
+        self.account = account
         self.learn = learn
         self.todos = todos
         self.reminders = reminders
@@ -69,9 +75,27 @@ public final class MeetingDetailModel {
         self.playback = playback
     }
 
+    public var canOpenRoom: Bool {
+        guard let room = meeting?.room else { return false }
+        return account?.owns(room) == true
+    }
+
+    public func openRoom(using open: (URL) -> Bool) async {
+        guard let account, let room = meeting?.room, account.owns(room), !openingRoom else { return }
+        openingRoom = true
+        openRoomFailed = false
+        defer { openingRoom = false }
+        do { try await account.openHostBrowser(for: room, using: open) }
+        catch { openRoomFailed = account.owns(room) }
+    }
+
     public func load(at utterance: UtteranceID? = nil) async {
         do {
             let meeting = try await library.meeting(id)
+            if self.meeting?.status != meeting.status || self.meeting?.transcription != meeting.transcription
+                || self.meeting?.utterances.isEmpty != meeting.utterances.isEmpty || self.meeting?.metadata.duration != meeting.metadata.duration {
+                trackPreview = meeting.rawTrackPreview
+            }
             self.meeting = meeting
             names = await voiceprints.names()
             people = await voiceprints.allPersons().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -91,7 +115,7 @@ public final class MeetingDetailModel {
     }
 
     public var presentation: MeetingPresentation? {
-        meeting.map { MeetingPresentation(meeting: $0, names: names, labels: labels) }
+        meeting.map { MeetingPresentation(meeting: $0, names: names, labels: labels, trackPreview: trackPreview) }
     }
 
     public var job: JobState? { queue.jobs[id] }
@@ -103,7 +127,10 @@ public final class MeetingDetailModel {
         return false
     }
 
-    public var canEditSpeakers: Bool { meeting != nil && !isProcessing }
+    private var isEditingSpeakers = false
+    private var isRegenerating = false
+    public var canEditSpeakers: Bool { meeting != nil && !isProcessing && !isEditingSpeakers && !isRegenerating }
+    public var canRegenerate: Bool { canEditSpeakers }
 
     /// Whether "this is me" applies: only a voice the mic heard can be the user.
     public func canClaimAsMe(_ speaker: SpeakerID) -> Bool {
@@ -167,8 +194,29 @@ public final class MeetingDetailModel {
         return TodoStatus.id(meeting: id, index: index)
     }
 
+    public func markKey(_ row: SourcedRow) -> String? {
+        guard let index = Int(row.id.dropFirst("action-".count)), let items = meeting?.outputs.summary?.actionItems,
+              items.indices.contains(index) else { return nil }
+        guard let meeting else { return nil }
+        return AssistantTaskRef.markKey(in: meeting, at: index, fingerprint: AssistantTaskRef.fingerprint(items[index]))
+    }
+
+    public func isPersonal(_ row: SourcedRow) -> Bool {
+        guard let meeting, let index = Int(row.id.dropFirst("action-".count)), let items = meeting.outputs.summary?.actionItems,
+              items.indices.contains(index) else { return false }
+        return AssistantTaskRef.isPersonal(owner: items[index].owner, in: meeting, user: people.first { $0.isUser == true }?.id)
+    }
+
     public func isDone(_ row: SourcedRow) -> Bool {
         todoID(row).map { todos?.isDone($0) ?? false } ?? false
+    }
+
+    public func visibleActionItems(_ rows: [SourcedRow]) -> [SourcedRow] {
+        func marked(_ row: SourcedRow, _ mark: TodoStatus.Mark) -> Bool {
+            guard let key = markKey(row) else { return false }
+            return todos?.marks[key]?.contains(mark) == true
+        }
+        return rows.filter { !marked($0, .deleted) }.sorted { marked($0, .pinned) && !marked($1, .pinned) }
     }
 
     public func toggleDone(_ row: SourcedRow) {
@@ -194,7 +242,7 @@ public final class MeetingDetailModel {
         guard let meeting, let all = presentation?.summary?.actionItems else { return [] }
         let date = meeting.metadata.startedAt.formatted(date: .abbreviated, time: .shortened)
         return (rows ?? all).compactMap { row -> ReminderDraft? in
-            guard let id = todoID(row) else { return nil }
+            guard let id = todoID(row), let key = markKey(row), todos?.marks[key]?.contains(.deleted) != true else { return nil }
             let owner = row.speakerName.map { "\($0)\n" } ?? ""
             return ReminderDraft(todoID: id, title: row.text, notes: "\(owner)\(meeting.metadata.title), \(date)", due: row.due)
         }
@@ -205,6 +253,11 @@ public final class MeetingDetailModel {
     // MARK: Actions
 
     public func regenerate() async {
+        guard canRegenerate else { return }
+        isRegenerating = true
+        defer { isRegenerating = false }
+        await documentWriter?.value
+        guard documentDrafts.isEmpty, !isProcessing else { return }
         await queue.run(.regenerate, on: id)
         await load()
     }
@@ -225,7 +278,7 @@ public final class MeetingDetailModel {
         queue.cancel(id)
     }
 
-    /// Shows the source utterance in the raw transcript and plays from it.
+    /// Shows the original utterance and plays from the original time.
     public func jump(to target: JumpTarget) {
         selectedView = .raw
         focusedUtterance = target.utterance
@@ -270,18 +323,155 @@ public final class MeetingDetailModel {
         await edit { try await $0.merge(source, into: target, in: self.id) }
     }
 
+    public func restoreBackground(_ speaker: SpeakerID) async {
+        await edit { try await $0.restoreBackground(speaker, in: self.id) }
+    }
+
+    public func delete(_ speaker: SpeakerID) async {
+        await edit { try await $0.delete(speaker, in: self.id) }
+    }
+
     /// "This is me": the speaker's speech becomes the user's and teaches their voiceprint.
     public func claimAsMe(_ speaker: SpeakerID) async {
         await edit { try await $0.claimAsMe(speaker, in: self.id) }
     }
 
-    public func export(_ view: TranscriptView, as format: ExportFormat) -> String? {
-        presentation?.export(view, as: format)
+    public private(set) var translationProgress: Int?
+    public private(set) var translationTotal = 0
+    public var translationError: String?
+
+    public func translate(target: CaptionTarget, engine: CaptionEngine,
+                          catalog: any ProviderCatalog) async {
+        guard canEditSpeakers, translationProgress == nil, let source = meeting?.outputs.cleaned,
+              let rows = presentation?.cleaned, !rows.isEmpty else { return }
+        translationTotal = rows.count
+        translationProgress = 0
+        translationError = nil
+        defer { translationProgress = nil }
+        var results: [Int: String] = [:]
+        var translators: [CaptionLanguage: any CaptionTranslator] = [:]
+        do {
+            for index in rows.indices {
+                var outputs: [String] = []
+                let passages = TranscriptTranslation.passages(rows[index].text)
+                guard !passages.isEmpty else { throw CocoaError(.formatting) }
+                for text in passages {
+                    var output = text
+                    if let language = CaptionLanguage.of(text) {
+                        switch target.route(from: language, engine: engine) {
+                        case .none: break
+                        case .simplify: output = TraditionalChinese.simplified(text)
+                        case .models(let path):
+                            if translators[language] == nil {
+                                translators[language] = await catalog.captionTranslator(for: target, engine: engine, source: language)
+                            }
+                            guard let translator = translators[language] else {
+                                translationError = String(localized: "Download the translation model in Settings first.")
+                                return
+                            }
+                            output = try await translator.translate(text, through: path)
+                        }
+                    }
+                    output = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !output.isEmpty else { throw CocoaError(.formatting) }
+                    outputs.append(target == .traditionalChinese ? TraditionalChinese.convert(output) : output)
+                }
+                results[index] = outputs.joined(separator: "\n\n")
+                translationProgress = results.count
+                await Task.yield()
+            }
+            meeting = try await library.saveTranslation(.init(target: target.id, source: source, paragraphs: results), for: id)
+        } catch { translationError = error.localizedDescription }
+    }
+
+    private struct DocumentDraft {
+        var text: String
+        var original: Meeting
+        var failure: String?
+    }
+
+    private var documentDrafts: [MeetingDocumentKind: DocumentDraft] = [:]
+    @ObservationIgnored private var documentWriter: Task<Void, Never>?
+
+    public func updateDocument(_ text: String, kind: MeetingDocumentKind) {
+        guard let meeting, canEditSpeakers else { return }
+        let original = documentDrafts[kind]?.original ?? meeting
+        documentDrafts[kind] = DocumentDraft(text: text, original: original)
+        writePendingDocuments()
+    }
+
+    public func documentSaveFailure(_ kind: MeetingDocumentKind) -> String? { documentDrafts[kind]?.failure }
+
+    public func retryDocumentSave(_ kind: MeetingDocumentKind) {
+        documentDrafts[kind]?.failure = nil
+        writePendingDocuments()
+    }
+
+    /// Coalesce edits made while an atomic write is in flight. Navigation can release the
+    /// page immediately: this task owns the pending writes until they have finished.
+    private func writePendingDocuments() {
+        guard documentWriter == nil else { return }
+        documentWriter = Task {
+            defer { documentWriter = nil }
+            while let (kind, draft) = documentDrafts.first(where: { $0.value.failure == nil }) {
+                do {
+                    guard !isProcessing, !isEditingSpeakers else { throw TranscriptEditError.meetingIsProcessing }
+                    meeting = try await library.saveMarkdown(draft.text, kind: kind, editing: draft.original)
+                    if documentDrafts[kind]?.text == draft.text {
+                        documentDrafts[kind] = nil
+                    } else if let meeting {
+                        documentDrafts[kind]?.original = meeting
+                    }
+                } catch {
+                    documentDrafts[kind]?.failure = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    public func saveDocument(_ text: String, kind: MeetingDocumentKind, editing original: Meeting) async throws {
+        guard canEditSpeakers else { throw TranscriptEditError.meetingIsProcessing }
+        meeting = try await library.saveMarkdown(text, kind: kind, editing: original)
+    }
+
+    public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String? {
+        if let kind = view.document, let draft = documentDrafts[kind] {
+            return format == .markdown ? draft.text : MeetingMarkdown.attributed(draft.text).string
+        }
+        guard let presentation else { return nil }
+        if view == .summary, format == .markdown, presentation.meeting.summaryMarkdown == nil,
+           let summary = presentation.summary {
+            let rows = visibleActionItems(summary.actionItems)
+            return presentation.documentMarkdown(.summary, actionItems: rows, completed: Set(rows.filter(isDone).map(\.id)))
+        }
+        return presentation.export(view, as: format, includeTranslation: includeTranslation)
     }
 
     /// SubRip text; nil for the views that are not a timed transcript.
-    public func subtitles(_ view: TranscriptView) -> String? {
+    public func subtitles(_ view: TranscriptView, includeTranslation: Bool = false) -> String? {
         guard let meeting, let presentation else { return nil }
+        let headings = includeTranslation ? presentation.translationHeadings(view) : [:]
+        if !headings.isEmpty {
+            let rows: [(TimeRange, String, String, String?)]
+            if view == .raw {
+                rows = presentation.raw.map { (TimeRange(start: $0.start, end: $0.end), $0.speakerName, $0.text, headings[$0.id.rawValue]) }
+            } else {
+                rows = (presentation.cleaned ?? []).compactMap { row in
+                    guard let start = row.jump?.time, let end = row.end else { return nil }
+                    let text = headings[row.id].map { translated in
+                        TranscriptTranslation.pairs(original: row.text, translated: translated)
+                            .map { $0.translated + "\n" + $0.original }.joined(separator: "\n")
+                    } ?? row.text
+                    return (TimeRange(start: start, end: end), row.speakerName ?? "", text, nil)
+                }
+            }
+            return Subtitles.bilingual(rows)
+        }
+        if view == .raw {
+            return Subtitles.srt(lines: presentation.raw.map {
+                (TimeRange(start: $0.start, end: $0.end), $0.speakerName, $0.text)
+            })
+        }
         return Subtitles.srt(meeting, view: view, name: presentation.speakerName)
     }
 
@@ -299,7 +489,9 @@ public final class MeetingDetailModel {
 
     /// A cleaned paragraph rewritten the way `instruction` asks, for the user to review and save.
     public func rewrite(_ text: String, instruction: String) async throws -> String {
-        try await queue.rewrite(text, instruction: instruction)
+        try await HostedRequestGroup.$current.withValue(UUID()) {
+            try await queue.rewrite(text, instruction: instruction)
+        }
     }
 
     public func rename(to title: String) async {
@@ -344,6 +536,8 @@ public final class MeetingDetailModel {
 
     private func edit(_ change: (SpeakerEditing) async throws -> Meeting) async {
         guard canEditSpeakers else { return }
+        isEditingSpeakers = true
+        defer { isEditingSpeakers = false }
         do {
             meeting = try await change(SpeakerEditing(library: library, voiceprints: voiceprints))
             errorMessage = nil

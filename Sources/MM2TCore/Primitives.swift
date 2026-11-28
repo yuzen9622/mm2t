@@ -53,6 +53,21 @@ public struct TimeRange: Hashable, Codable, Sendable {
         max(0, min(end, other.end) - max(start, other.start))
     }
 
+    // Nemotron turn boundaries are on a 10 ms grid and can move by a frame on reruns.
+    static let speakerTurnTolerance: TimeInterval = 0.02
+
+    func hasBoundaries(of other: TimeRange, within tolerance: TimeInterval) -> Bool {
+        abs(start - other.start) <= tolerance && abs(end - other.end) <= tolerance
+    }
+
+    func subtracting(_ cut: TimeRange) -> [TimeRange] {
+        guard overlap(with: cut) > 0 else { return [self] }
+        var pieces: [TimeRange] = []
+        if start < cut.start { pieces.append(TimeRange(start: start, end: cut.start)) }
+        if end > cut.end { pieces.append(TimeRange(start: cut.end, end: end)) }
+        return pieces
+    }
+
     public func intersects(_ other: TimeRange) -> Bool {
         start < other.end && other.start < end
     }

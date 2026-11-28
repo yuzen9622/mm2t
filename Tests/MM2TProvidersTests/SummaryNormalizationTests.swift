@@ -21,7 +21,7 @@ import Testing
     @Test func newlyCompletedNormalizationUpdatesAnOtherwiseIdenticalSummaryRequest() async throws {
         let clean = self.clean, early = self.early, delta = self.delta
         let server = StubServer { request in
-            let result = request.geminiSystem.contains("怎麼整理：") ? clean
+            let result = request.geminiSystem.hasPrefix(LLMPrompts.cleanSystem) ? clean
                 : request.geminiSystem.contains("只輸出異動") ? delta : early
             return .status(200, Fixture.gemini(result))
         }
@@ -43,7 +43,7 @@ import Testing
     @Test func recordingReferencesDoNotLeakToAnotherRecordingOrTheBaseProvider() async throws {
         let clean = self.clean, early = self.early, final = self.final
         let server = StubServer { request in
-            .status(200, Fixture.gemini(request.geminiSystem.contains("怎麼整理：") ? clean
+            .status(200, Fixture.gemini(request.geminiSystem.hasPrefix(LLMPrompts.cleanSystem) ? clean
                 : request.geminiInput.contains("辨識正規化參考（") ? final : early))
         }
         let base = GeminiLLM(apiKey: "test", session: server.session)
@@ -55,7 +55,7 @@ import Testing
         #expect(try await first.summarize(request).actionItems.first?.due?.hasTime == true)
     }
 
-    @Test(arguments: ["text", "speaker", "id", "time", "highlight", "glossary", "language"])
+    @Test(arguments: ["text", "speaker", "id", "time", "highlight", "glossary"])
     func changedRawInputsOrGlossaryRejectTheNormalizationReference(_ field: String) async throws {
         let store = CleanedCheckpointStore()
         let original = request(raw, glossary: ["原詞彙"]).transcript
@@ -66,7 +66,7 @@ import Testing
         let first = utterance(field == "id" ? "other" : "u1", field == "speaker" ? "r2" : "r1",
                               field == "time" ? 1 : 0, field == "text" ? "新的內容" : raw[0].text,
                               highlighted: field == "highlight")
-        let tail = utterance("u2", "r1", 10, field == "language" ? String(repeating: "English discussion ", count: 1_000) : "繼續討論")
+        let tail = utterance("u2", "r1", 10, "繼續討論")
         let changed = request([first, tail], glossary: field == "glossary" ? [] : ["原詞彙"]).transcript
         #expect(await store.reference(for: changed) == nil)
     }
@@ -148,7 +148,7 @@ import Testing
         let generator = GatedCleanup(summary: final)
         await generator.release()
         await generator.release()
-        let result = try await generator.generate(system: "怎麼整理：", input: "", schema: .dict([]))
+        let result = try await generator.generate(system: LLMPrompts.cleanSystem, input: "", schema: .dict([]))
         #expect(result == #"{"paragraphs":[]}"#)
         #expect(await generator.cleanupStarted)
     }
@@ -171,7 +171,7 @@ import Testing
         private var released = false
         init(summary: String) { self.summary = summary }
         func generate(system: String, input: String, schema: JSON) async throws -> String {
-            if system.contains("怎麼整理：") {
+            if system.hasPrefix(LLMPrompts.cleanSystem) {
                 cleanupStarted = true
                 if released { return #"{"paragraphs":[]}"# }
                 return await withCheckedContinuation { pending = $0 }

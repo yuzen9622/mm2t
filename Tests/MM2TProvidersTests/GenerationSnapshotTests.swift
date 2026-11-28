@@ -54,7 +54,7 @@ import Testing
         let clean = self.clean, summary = self.summary, summaryDelta = self.summaryDelta
         let server = StubServer { request in
             let (system, _) = Self.prompts(request, provider: provider)
-            let output = system.contains("怎麼整理：") ? clean
+            let output = system.hasPrefix(LLMPrompts.cleanSystem) ? clean
                 : system.contains("更新前次依人彙整") ? #"{"changes":[]}"#
                 : system.contains("依說話者整理") ? #"{"digests":[]}"#
                 : system.contains("只輸出異動") ? summaryDelta : summary
@@ -100,7 +100,7 @@ import Testing
             self.clean = clean; self.summary = summary; self.summaryDelta = summaryDelta
         }
         func generate(system: String, input: String, schema: JSON) async throws -> String {
-            if system.contains("怎麼整理：") {
+            if system.hasPrefix(LLMPrompts.cleanSystem) {
                 cleanupStarted = true
                 return await withCheckedContinuation { pending = $0 }
             }

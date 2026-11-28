@@ -135,6 +135,38 @@ import Testing
         return present ? models : nil
     }
 
+    static var chineseToEnglish: TranslationModels? {
+        guard let root = RealModels.root else { return nil }
+        let models = TranslationModels.mozilla(in: root).for(.english)
+        guard let direction = models.direction(ModelPair("zh_hant", "en")) else { return nil }
+        let paths = models.paths(direction)
+        return [paths.model, paths.sourceVocabulary, paths.targetVocabulary].allSatisfy {
+            FileManager.default.fileExists(atPath: $0.path)
+        } ? models : nil
+    }
+
+    @Test(.enabled(if: chineseToEnglish != nil), arguments: [
+        "客戶想知道我們能不能在本季結束前支援單一登入。",
+        "我們下週會測試單一登入和雙因素驗證。",
+        "支援單一登入。",
+        "單一登入",
+    ]) func singleSignOnAcrossContexts(source: String) async throws {
+        let translator = try BergamotTranslator(models: #require(Self.chineseToEnglish))
+        let output = try await translator.translate(source, through: ["zh_hant", "en"]).lowercased()
+        #expect(output.contains("single sign-on"))
+        #expect(!output.contains("sign-i-sign-i"))
+    }
+
+    @Test(.enabled(if: chineseToEnglish != nil)) func chineseToEnglishPreservesMeaningfulRepetition() async throws {
+        let translator = try BergamotTranslator(models: #require(Self.chineseToEnglish))
+        for (source, repeated) in [("第一階段預算是三萬，第二階段也是三萬。", "30,000"),
+                                   ("謝謝，謝謝大家。", "thank you"),
+                                   ("這不是測試，這不是測試。", "not a test")] {
+            let output = try await translator.translate(source, through: ["zh_hant", "en"]).lowercased()
+            #expect(output.ranges(of: repeated).count == 2, "\(source) → \(output)")
+        }
+    }
+
     static let english = [
         "Let's move on to the next agenda item, which is the Q3 budget review.",
         "Can everyone see my screen, or should I zoom in a little?",

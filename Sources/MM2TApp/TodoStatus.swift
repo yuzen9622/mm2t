@@ -9,8 +9,29 @@ public final class TodoStatus {
     }
     public private(set) var done: Set<String> = []
     public private(set) var storageError: String?
+    public enum Mark: String, Codable { case pinned, deleted, personal }
+    public private(set) var lastDeleted: String?
+    public private(set) var marks: [String: Set<Mark>] = [:]
+    private var marksFile: URL { file.deletingLastPathComponent().appending(path: "todo-marks.json") }
+
+    @discardableResult public func set(_ mark: Mark, for key: String, enabled: Bool) -> Bool {
+        guard !loadFailed else { return false }
+        var next = marks
+        if enabled { next[key, default: []].insert(mark) } else { next[key]?.remove(mark) }
+        if next[key]?.isEmpty == true { next.removeValue(forKey: key) }
+        do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(next).write(to: marksFile, options: .atomic)
+            if mark == .deleted {
+                if enabled { lastDeleted = key } else if lastDeleted == key { lastDeleted = nil }
+            }
+            marks = next; storageError = nil
+            return true
+        } catch { storageError = String(describing: error); return false }
+    }
+
     public var snapshot: TodoSnapshot {
-        .init(done: done, anchors: anchors.mapValues(\.fingerprint), anchorMarks: anchors.mapValues(\.done), storageError: storageError)
+        .init(done: done, anchors: anchors.mapValues(\.fingerprint), anchorMarks: anchors.mapValues(\.done), storageError: storageError, deleted: Set(marks.compactMap { $0.value.contains(.deleted) ? $0.key : nil }))
     }
     @ObservationIgnored public var onToggle: ((String, Bool) -> Void)?
     @ObservationIgnored private let file: URL
@@ -21,6 +42,7 @@ public final class TodoStatus {
     public init(file: URL) {
         self.file = file
         do {
+            if FileManager.default.fileExists(atPath: marksFile.path) { marks = try JSONDecoder().decode([String: Set<Mark>].self, from: Data(contentsOf: marksFile)) }
             if FileManager.default.fileExists(atPath: file.path) { done = Set(try JSONDecoder().decode([String].self, from: Data(contentsOf: file))) }
             if FileManager.default.fileExists(atPath: anchorFile.path) { anchors = try JSONDecoder().decode([String: Anchor].self, from: Data(contentsOf: anchorFile)) }
         } catch { storageError = String(describing: error); loadFailed = true }

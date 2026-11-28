@@ -4,6 +4,23 @@ import Testing
 @testable import MM2TApp
 
 @MainActor @Suite struct SearchPaletteTests {
+    @Test func currentFolderOutranksMoreRecentHitsBeforeLimit() async throws {
+        let world = try World(), folders = world.app.folders
+        let folder = try #require(folders.create("驗收"))
+        var ids: [MeetingID] = []
+        for n in 0..<7 {
+            var meeting = try await world.recordedMeeting(title: "專案會議 \(n)")
+            meeting.metadata.startedAt = Date(timeIntervalSince1970: Double(n)); try await world.library.save(meeting); ids.append(meeting.id)
+        }
+        folders.move([ids[0]: folder], origin: .manual); folders.selected = folder
+        try await world.app.searchIndex.rebuild(from: world.library.list())
+        let model = SearchPaletteModel(index: world.app.searchIndex, voiceprints: world.app.voiceprints); model.folders = folders
+        await model.open(); #expect(model.rows.first?.id == .meeting(ids[0]))
+        model.query = "專案"; await model.refresh(); #expect(model.rows.first?.id == .meeting(ids[0]))
+        folders.selected = nil; await model.refresh(); #expect(model.rows.first?.id == .meeting(ids[6]))
+        #expect(model.rows.contains { $0.id == .meeting(ids[0]) })
+    }
+
     @Test func recentMeetingsPeopleAndWrapping() async throws {
         let world = try World()
         for number in 0..<7 {

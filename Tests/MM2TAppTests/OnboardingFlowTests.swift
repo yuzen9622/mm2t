@@ -1,5 +1,5 @@
 import Foundation
-import MM2TApp
+@testable import MM2TApp
 import MM2TCore
 import MM2TProviders
 import Testing
@@ -21,291 +21,194 @@ import Testing
         await world.app.enrollment.refresh()
     }
 
-    @Test func eachStepContinuesOnlyOnceItsOwnRequirementIsMet() async throws {
+    @Test func servicesComeBeforePermissionsAndCaptionDownloadsAreNotRequired() async throws {
         let world = try firstRun()
+        world.app.settings.settings.transcriptionService = .server
+        world.app.settings.settings.summaryService = .openAICompatible
         let flow = world.app.onboarding
-        #expect(flow.step == .usage)
-        #expect(flow.choice == .ownKeys, "own keys is chosen by default")
-        #expect(flow.canContinue && !flow.canGoBack)
+        #expect(flow.step == .usage && flow.choice == .ownKeys && flow.canContinue && !flow.canGoBack)
         #expect(flow.advance())
-
-        #expect(flow.step == .permissions)
-        #expect(!flow.canContinue, "the microphone comes first")
-        #expect(!flow.advance())
-        #expect(flow.step == .permissions)
+        #expect(flow.step == .services && !flow.canContinue)
+        let elevenLabs = world.app.setup.field(.elevenLabsAPIKey)
+        elevenLabs.text = "eleven"
+        elevenLabs.save()
+        #expect(!flow.canContinue)
+        let gemini = world.app.setup.field(.geminiAPIKey)
+        gemini.text = "gemini"
+        gemini.save()
+        #expect(world.app.settings.settings.transcriptionService == .server)
+        #expect(world.app.settings.settings.summaryService == .openAICompatible)
+        #expect(flow.advance())
+        #expect(world.app.settings.settings.transcriptionService == .elevenLabs)
+        #expect(world.app.settings.settings.summaryService == .gemini)
+        #expect(flow.step == .permissions && flow.note == .needsMicrophone)
         world.permissions.mic.set(.granted)
         world.app.setup.refreshPermissions()
-        #expect(flow.canContinue, "the other permissions may wait")
-        flow.advance()
-
-        #expect(flow.step == .models)
-        #expect(flow.canContinue, "the downloads carry on in the background")
-        flow.advance()
-
-        #expect(flow.step == .voice)
-        #expect(!flow.canContinue)
+        #expect(flow.advance())
+        #expect(flow.step == .models && flow.canContinue)
+        #expect(flow.advance())
+        #expect(flow.step == .voice && flow.primary == .start && !flow.canContinue)
         try await enrollVoice(world)
-        #expect(flow.canContinue)
-        flow.advance()
-
-        #expect(flow.step == .services)
-        #expect(!flow.canContinue, "keys and models are still missing")
-        #expect(!flow.advance(), "the last step finishes instead of moving on")
-        try world.credentials.save("eleven-key", for: .elevenLabsAPIKey)
-        try world.credentials.save("gemini-key", for: .geminiAPIKey)
-        world.app.setup.recheck()
-        #expect(!flow.canContinue, "both models have to be downloaded too")
         await flow.startDownloads()
         #expect(flow.canContinue)
-        #expect(flow.step == .services)
+        #expect(world.offlineInstallers.values.allSatisfy { $0.downloads.get == 0 })
     }
 
-    @Test func backReversesTheTravelAndForwardRestoresIt() throws {
-        let world = try World()
-        let flow = world.app.onboarding
-        flow.reopen()
-        #expect(flow.step == .usage && flow.forward)
-        flow.advance()
-        flow.advance()
-        #expect(flow.step == .models && flow.forward)
-        flow.back()
-        #expect(flow.step == .permissions && !flow.forward)
-        flow.advance()
-        #expect(flow.step == .models && flow.forward)
-        flow.back()
-        flow.back()
-        #expect(flow.step == .usage && !flow.canGoBack)
-        flow.back()
-        #expect(flow.step == .usage, "nothing before the first step")
-    }
-
-    @Test func reopeningStartsAtTheFirstIncompleteStep() async throws {
+    @Test func aRejectedKeyBlocksContinueEvenAfterRebuildingSetup() async throws {
         let world = try firstRun()
-        let flow = world.app.onboarding
-        world.app.settings.settings.hasCompletedOnboarding = true
-        flow.reopen()
-        #expect(flow.step == .permissions, "microphone not granted yet")
-
-        world.permissions.mic.set(.granted)
-        world.app.setup.refresh()
-        flow.reopen()
-        #expect(flow.step == .models, "models count as done only once downloaded")
-
-        await flow.startDownloads()
-        flow.reopen()
-        #expect(flow.step == .voice)
-
-        try await enrollVoice(world)
-        flow.reopen()
-        #expect(flow.step == .services, "the keys are still missing")
-        flow.back()
-        #expect(flow.step == .voice, "completed steps stay reachable")
-
-        try world.credentials.save("eleven-key", for: .elevenLabsAPIKey)
-        try world.credentials.save("gemini-key", for: .geminiAPIKey)
-        world.app.setup.recheck()
-        flow.reopen()
-        #expect(flow.step == .services, "everything is met: the last step")
-        #expect(flow.forward)
-    }
-
-    @Test func beforeSetupWasEverFinishedItReopensAtTheChoice() async throws {
-        let world = try World()
-        try await enrollVoice(world)
-        world.app.onboarding.reopen()
-        #expect(world.app.onboarding.step == .usage)
-    }
-
-    @Test func theChoiceIsWrittenIntoTheExistingSettings() throws {
-        let world = try World()
-        let flow = world.app.onboarding
-        let store = world.app.settings
-
-        flow.select(.signIn)
-        #expect(flow.choice == .ownKeys, "signing in is not offered yet")
-
-        flow.select(.ownServer)
-        #expect(flow.choice == .ownServer)
-        #expect(store.settings.transcriptionOrder == [.selfHosted])
-        #expect(store.settings.llmLocation == .cloud && store.settings.cloudLLM == .openAICompatible)
-        #expect(flow.services == [.transcriptionServer, .llmServer])
-        #expect(world.app.setup.issues.contains(.missingSelfHostedURL), "the issues follow the new settings")
-        #expect(world.app.setup.issues.allSatisfy { OnboardingFlow.entry(for: $0).map(flow.services.contains) ?? true },
-                "every issue has its own row on the last step")
-
-        flow.select(.ownKeys)
-        #expect(store.settings.transcriptionOrder == [.cloud])
-        #expect(store.settings.llmLocation == .cloud && store.settings.cloudLLM == .gemini)
-        #expect(flow.services == [.elevenLabs, .gemini])
-        #expect(world.app.setup.issues.isEmpty)
-    }
-
-    @Test func reopeningKeepsTheUsersOwnMixOfSettings() throws {
-        let world = try World()
-        let store = world.app.settings
-        store.settings.transcriptionOrder = [.selfHosted, .cloud]
-        store.settings.cloudLLM = .gemini
-        let flow = world.app.onboarding
-        flow.reopen()
-        #expect(flow.choice == .ownServer)
-        flow.select(.ownServer)
-        #expect(store.settings.transcriptionOrder == [.selfHosted, .cloud], "choosing what is set changes nothing")
-        #expect(flow.services == [.transcriptionServer, .elevenLabs, .gemini])
-
-        store.settings.transcriptionOrder = [.local]
-        store.settings.llmLocation = .local
-        world.app.setup.recheck()
-        flow.reopen()
-        #expect(flow.choice == .ownKeys)
-        #expect(flow.services == [.offlineModel(.transcription), .offlineModel(.llm)])
-        #expect(flow.note == nil, "not on the last step")
-    }
-
-    /// Every issue there is, so that a new one cannot be left without a row.
-    private static var everyIssue: [SetupIssue] {
-        let issues: [SetupIssue] = Credential.allCases.map { .missingCredential($0) }
-            + [.missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource, .diarizationModelsMissing]
-            + OfflineModel.allCases.map { .offlineModelMissing($0) }
-        // Fails to compile when SetupIssue gains a case, until it is added above.
-        for issue in issues {
-            switch issue {
-            case .missingCredential, .missingSelfHostedURL, .missingLLMEndpoint, .noTranscriptionSource,
-                 .diarizationModelsMissing, .offlineModelMissing: break
-            }
-        }
-        return issues
-    }
-
-    @Test func everyIssueIsResolvedOnTheLastStepOrByAnEarlierOne() {
-        var keys = AppSettings()
-        keys.transcriptionOrder = [.cloud]
-        var server = AppSettings()
-        server.transcriptionOrder = [.selfHosted]
-        server.cloudLLM = .openAICompatible
-        var none = AppSettings()
-        none.transcriptionOrder = []
-        none.llmLocation = .local
-        for settings in [keys, server, none] {
-            for issue in Self.everyIssue {
-                let services = OnboardingFlow.services(settings: settings, issues: [issue])
-                if let entry = OnboardingFlow.entry(for: issue) {
-                    #expect(services.contains(entry), "\(issue) has a row")
-                } else {
-                    #expect(issue == .diarizationModelsMissing, "only the speaker model is left to the models step")
-                }
-            }
-            let all = OnboardingFlow.services(settings: settings, issues: Self.everyIssue)
-            #expect(Set(all).count == all.count, "no row twice")
-        }
-        #expect(OnboardingFlow.entry(for: .offlineModelMissing(.transcription)) == .offlineModel(.transcription))
-        #expect(OnboardingFlow.entry(for: .noTranscriptionSource) == .transcriptionSource)
-        #expect(OnboardingFlow.entry(for: .missingSelfHostedURL) == .transcriptionServer)
-        #expect(OnboardingFlow.entry(for: .missingCredential(.googleCalendarRefreshToken)) == .settings(.missingCredential(.googleCalendarRefreshToken)))
-    }
-
-    /// The last step with keys stored, both models in and the voice enrolled.
-    private func atTheLastStep(_ change: (inout AppSettings) -> Void) async throws -> World {
-        let world = try World()
-        world.catalog.translationDownloaded.set(true)
-        try await enrollVoice(world)
-        world.app.settings.settings.hasCompletedOnboarding = true
-        change(&world.app.settings.settings)
-        world.app.setup.refresh()
-        world.app.onboarding.reopen()
-        #expect(world.app.onboarding.step == .services)
-        return world
-    }
-
-    @Test func aMissingOnDeviceModelIsDownloadedOnTheLastStep() async throws {
-        let world = try await atTheLastStep {
-            $0.transcriptionOrder = [.cloud, .local]
-            $0.captionTranslation = CaptionTranslation(.traditionalChinese)
-        }
-        let flow = world.app.onboarding
         let setup = world.app.setup
-        #expect(flow.services == [.elevenLabs, .offlineModel(.transcription), .gemini])
-        #expect(!flow.canContinue)
-        #expect(flow.note == .issue(.offlineModelMissing(.transcription)))
+        let flow = world.app.onboarding
+        #expect(flow.advance())
+        let elevenLabs = setup.field(.elevenLabsAPIKey)
+        elevenLabs.text = "eleven"
+        elevenLabs.save()
+        let gemini = setup.field(.geminiAPIKey)
+        gemini.text = "bad"
+        await gemini.validate()
+        #expect(try world.credentials.read(.geminiAPIKey) == nil)
+        #expect(!gemini.hasSavedValue)
+        #expect(gemini.text == "bad")
+        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
+        #expect(!setup.isConfigured(.gemini, signedIn: false))
+        #expect(!flow.canContinue && !flow.advance())
 
+        let rebuiltSetup = SetupModel(permissions: world.permissions, installer: world.speakerInstaller,
+            offlineInstallers: world.offlineInstallers, translationInstaller: { _, _ in world.translationInstaller },
+            suitability: setup.suitability, credentials: world.credentials, validator: world.validator,
+            settings: world.app.settings, runningBrowsers: { [] }, checkSetup: { [] })
+        let rebuiltFlow = OnboardingFlow(setup: rebuiltSetup, settings: world.app.settings,
+            enrollment: world.app.enrollment, account: nil)
+        #expect(rebuiltFlow.advance())
+        #expect(!rebuiltSetup.field(.geminiAPIKey).isConfigured)
+        #expect(!rebuiltSetup.isConfigured(.gemini, signedIn: false))
+        #expect(!rebuiltFlow.canContinue && !rebuiltFlow.advance())
+
+        gemini.text = "timeout"
+        await gemini.validate()
+        #expect(gemini.state == .checked(.inconclusive("Could not reach Gemini")))
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("timeout"))
+        #expect(setup.isConfigured(.gemini, signedIn: false))
+        #expect(flow.canContinue)
+    }
+
+    @Test func aRejectedReplacementKeepsThePreviouslySavedKey() async throws {
+        let world = try World()
+        let gemini = world.app.setup.field(.geminiAPIKey)
+        gemini.text = "bad"
+        await gemini.validate()
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("gemini-key"))
+        #expect(gemini.text == "bad")
+        #expect(gemini.state == .checked(.rejected("Gemini API Key 無效")))
+    }
+
+    @Test func aValidKeyIsConfiguredAfterRebuildingTheField() async throws {
+        let world = try firstRun()
+        let gemini = world.app.setup.field(.geminiAPIKey)
+        gemini.text = "valid-key"
+        await gemini.validate()
+        #expect(gemini.state == .checked(.valid))
+        #expect(try world.credentials.read(.geminiAPIKey) == Secret("valid-key"))
+        let rebuilt = CredentialField(credential: .geminiAPIKey, store: world.credentials,
+            validator: world.validator, selfHostedURL: { nil })
+        #expect(rebuilt.isConfigured)
+    }
+
+    @Test func independentSelectionsDownloadSharedWeightsOnlyOnce() async throws {
+        let world = try firstRun()
+        let setup = world.app.setup
+        let installer = try #require(world.offlineInstallers[.parakeet])
         let gate = Gate<Bool>()
-        world.offlineInstallers[.transcription]!.hold.set(gate)
-        let download = Task { await setup.downloadOfflineModel(.transcription) }
-        #expect(await eventually { setup.offlineModels[.transcription] == .downloading(0.5) })
-        // 220 MB + 75 MB done, 1 GB half way.
-        #expect(flow.note == .finishingDownloads((295 + 500) / 1295.0))
-
-        await gate.open(false)
-        await download.value
-        #expect(flow.note == .issue(.offlineModelMissing(.transcription)), "Retry is in the row")
-
-        world.offlineInstallers[.transcription]!.hold.set(nil)
-        await setup.downloadOfflineModel(.transcription)
-        #expect(setup.issues.isEmpty)
-        #expect(flow.canContinue && flow.note == nil)
-        #expect(flow.services.contains(.offlineModel(.transcription)), "the row stays, now with its check")
+        installer.hold.set(gate)
+        let first = setup.selectSpeechModel(.parakeet, for: \.localSpeechModel)
+        #expect(world.app.settings.settings.effectiveCaptionModel == .parakeet)
+        #expect(await eventually { setup.offlineModels[.parakeet] == .downloading(0.5) })
+        await setup.selectSpeechModel(.parakeet, for: \.localCaptionModel).value
+        await gate.open(true)
+        await first.value
+        await setup.selectSpeechModel(.parakeet, for: \.localSpeechModel).value
+        #expect(installer.downloads.get == 1)
+        await setup.selectSpeechModel(.nemotron, for: \.localCaptionModel).value
+        let saved = SettingsStore(defaults: world.defaults).settings
+        #expect(saved.localSpeechModel == .parakeet && saved.localCaptionModel == .nemotron)
+        #expect(world.offlineInstallers[.nemotron]?.downloads.get == 1)
+        await setup.selectSpeechModel(.parakeet, for: \.localCaptionModel).value
+        await setup.selectSpeechModel(.nemotron, for: \.localSpeechModel).value
+        let reopened = SettingsStore(defaults: world.defaults).settings
+        #expect(reopened.localCaptionModel == nil && reopened.effectiveCaptionModel == .nemotron)
     }
 
-    @Test func turningAnOnDeviceSourceOffClearsItsIssue() async throws {
-        let world = try await atTheLastStep { $0.transcriptionOrder = [.selfHosted, .local]; $0.llmLocation = .local }
-        let flow = world.app.onboarding
-        let store = world.app.settings
-        store.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8000")
-        world.app.setup.recheck()
-        #expect(world.app.setup.issues == [.offlineModelMissing(.transcription), .offlineModelMissing(.llm)])
-
-        flow.turnOff(.transcription)
-        #expect(store.settings.transcriptionOrder == [.selfHosted], "the same as the Settings switch")
-        flow.turnOff(.llm)
-        #expect(store.settings.llmLocation == .cloud)
-        #expect(world.app.setup.issues.isEmpty)
-        #expect(flow.services == [.transcriptionServer, .gemini])
-        #expect(flow.canContinue)
+    @Test func oldModelSettingsKeepTheirChoiceAndFreshSettingsStillNeedOneAfterReload() throws {
+        let old = Data(#"{"localSpeechModel":"parakeet"}"#.utf8)
+        let saved = try JSONDecoder().decode(AppSettings.self, from: old)
+        #expect(saved.localSpeechModel == .parakeet && saved.effectiveCaptionModel == .parakeet)
+        let fresh = try JSONEncoder().encode(AppSettings())
+        #expect(try JSONDecoder().decode(AppSettings.self, from: fresh).effectiveCaptionModel == nil)
     }
 
-    @Test func turningTheOnlySourceOffOffersTheChosenOneBack() async throws {
-        let world = try await atTheLastStep { $0.transcriptionOrder = [.local] }
-        let flow = world.app.onboarding
-        flow.turnOff(.transcription)
-        #expect(world.app.setup.issues == [.noTranscriptionSource])
-        #expect(flow.services == [.gemini, .transcriptionSource])
-        #expect(flow.note == .issue(.noTranscriptionSource))
-        flow.turnOnTranscriptionSource()
-        #expect(world.app.settings.settings.transcriptionOrder == [.cloud])
-        #expect(flow.services == [.elevenLabs, .gemini])
-        #expect(flow.canContinue)
-    }
-
-    @Test func aDisabledPrimaryAlwaysSaysWhy() async throws {
+    @Test func eachChoicePresentsOnlyItsEditorsAndDoesNotSaveBeforeContinue() throws {
         let world = try firstRun()
         let flow = world.app.onboarding
-        func check() { #expect(flow.canContinue == (flow.note == nil), "step \(flow.step)") }
-        check()
-        flow.advance()
-        check()
-        #expect(flow.note == .needsMicrophone)
-        world.permissions.mic.set(.granted)
-        world.app.setup.refreshPermissions()
-        check()
-        flow.advance()
-        check()
-        flow.advance()
-        check()
-        #expect(flow.note == .needsVoice)
-        try await enrollVoice(world)
-        check()
-        flow.advance()
-        check()
-        #expect(flow.note == .issue(.missingCredential(.elevenLabsAPIKey)))
-        try world.credentials.save("eleven-key", for: .elevenLabsAPIKey)
-        world.app.setup.recheck()
-        #expect(flow.note == .issue(.missingCredential(.geminiAPIKey)))
-        try world.credentials.save("gemini-key", for: .geminiAPIKey)
-        world.app.setup.recheck()
-        check()
-        #expect(flow.note == .modelsNotDownloaded, "keys are in; the models never started")
-        await flow.startDownloads()
-        check()
-        #expect(flow.note == nil)
+        let original = world.app.settings.settings
+        let editors: [(OnboardingChoice, [ModelService])] = [
+            (.plan, [.mm2t]), (.ownKeys, [.elevenLabs, .gemini]), (.ownServer, [.transcriptionServer, .openAICompatible]),
+        ]
+        for (choice, expected) in editors {
+            flow.select(choice)
+            #expect(flow.advance())
+            #expect(flow.services == expected)
+            #expect(!flow.canContinue)
+            #expect(!flow.advance())
+            #expect(world.app.settings.settings == original)
+            flow.back()
+            #expect(flow.step == .usage && !flow.forward)
+        }
+    }
+
+    @Test func ownServersRequireBothURLsAndAModelWithoutKeys() throws {
+        let world = try firstRun()
+        let flow = world.app.onboarding
+        flow.select(.ownServer)
+        #expect(flow.advance())
+        world.app.settings.settings.selfHostedURL = URL(string: "http://speech.example")
+        #expect(!flow.canContinue)
+        world.app.settings.settings.openAIBaseURL = URL(string: "http://llm.example/v1")
+        #expect(!flow.canContinue)
+        world.app.settings.settings.openAIModel = "qwen"
+        #expect(flow.advance())
+        #expect(world.app.settings.settings.transcriptionService == .server)
+        #expect(world.app.settings.settings.summaryService == .openAICompatible)
+        #expect(world.app.settings.settings.captionSources == [.local, .selfHosted])
+    }
+
+    @Test func planRequiresSignInAndConfiguresBothJobsTogether() async throws {
+        let world = try firstRun()
+        let api = URL(string: "https://onboarding.invalid")!
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [OnboardingLogin.self]
+        let account = CollabAccount(configuration: .init(apiURL: api, webURL: api), credentials: world.credentials,
+                                    pendingEndsFile: world.root.appending(path: "pending.json"), session: URLSession(configuration: config))
+        let flow = OnboardingFlow(setup: world.app.setup, settings: world.app.settings, enrollment: world.app.enrollment, account: account)
+        flow.select(.plan)
+        #expect(flow.advance() && !flow.canContinue)
+        try await account.completeSignIn(code: "fixture", verifier: "fixture")
+        #expect(flow.advance())
+        #expect(world.app.settings.settings.transcriptionService == .mm2t)
+        #expect(world.app.settings.settings.summaryService == .mm2t)
+        #expect(world.app.settings.settings.captionSources == [.mm2t, .local])
+    }
+
+    @Test func reopeningRepairKeepsTheExistingPairOfServices() throws {
+        let world = try World()
+        let flow = world.app.onboarding
+        world.app.settings.settings.hasCompletedOnboarding = true
+        world.app.settings.settings.transcriptionService = .server
+        flow.open()
+        #expect(flow.step == .services && flow.services == [.transcriptionServer, .gemini])
+        #expect(!flow.canContinue && !flow.canGoBack)
+        world.app.settings.settings.selfHostedURL = URL(string: "https://speech.example")
+        #expect(flow.advance())
+        #expect(world.app.settings.settings.transcriptionService == .server)
+        #expect(world.app.settings.settings.summaryService == .gemini)
     }
 
     @Test func theLastStepWaitsForBothModelsAndSaysHowFarTheyAre() async throws {
@@ -330,8 +233,7 @@ import Testing
         let downloads = Task { await flow.startDownloads() }
         #expect(await eventually { setup.models == .downloading(0.5) && setup.translationModels == .downloading(0.5) })
         flow.advance()
-        flow.advance()
-        #expect(flow.step == .services)
+        #expect(flow.step == .voice)
         #expect(flow.primary == .start)
         #expect(!flow.canContinue)
         #expect(flow.note == .finishingDownloads(0.5))
@@ -462,4 +364,19 @@ import Testing
         #expect(flow.modelBytes == 295_000_000, "follows the chosen language's models")
         #expect(!flow.modelsReady)
     }
+}
+
+private final class OnboardingLogin: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "onboarding.invalid" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) else { return }
+        let body = url.path.hasSuffix("/exchange")
+            ? #"{"accessToken":"fixture-access","refreshToken":"fixture-refresh","user":{"id":"fixture","email":"user@example.invalid","name":"Fixture"}}"#
+            : #"{"quota":{"used":0,"limit":10,"period":"month"},"user":{"id":"fixture","email":"user@example.invalid","name":"Fixture"}}"#
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

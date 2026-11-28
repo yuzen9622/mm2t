@@ -39,7 +39,9 @@ import Testing
     @Test func theSummaryNamesTheMeetingUnlessTheUserAlreadyDid() async throws {
         let world = try await World()
         world.llm.title.update { $0 = "软件检讨" }
-        let meeting = try await world.processed()
+        var pipeline = world.pipeline
+        pipeline.outputLanguage = { .traditionalChinese }
+        let meeting = try await pipeline.process(world.record().id)
         #expect(meeting.metadata.title == "軟件檢討")
 
         var renamed = try await world.record()
@@ -49,12 +51,23 @@ import Testing
         #expect(try await world.pipeline.process(renamed.id).metadata.title == "My name")
     }
 
-    @Test func nothingTheModelWritesStaysInSimplifiedChinese() async throws {
+    @Test(arguments: [MeetingOutputLanguage.english, .traditionalChinese])
+    func normalizesChineseSummaryTextOnlyForTraditionalChineseOutput(_ language: MeetingOutputLanguage) async throws {
         let world = try await World()
-        let meeting = try await world.processed()
+        var pipeline = world.pipeline
+        pipeline.outputLanguage = { language }
+        // A Latin title containing a name with nontraditional characters must survive in English.
+        world.llm.title.update { $0 = "Release for 国立大学" }
+        let meeting = try await pipeline.process(world.record().id)
 
-        #expect(meeting.outputs.summary?.headline == "討論軟件")
-        #expect(meeting.outputs.summary?.terms == ["mm2t", "軟件"])
+        #expect(world.llm.summaryRequests.get.first?.transcript.outputLanguage == language)
+        if language == .traditionalChinese {
+            #expect(meeting.outputs.summary?.headline == "討論軟件")
+            #expect(meeting.outputs.summary?.terms == ["mm2t", "軟件"])
+            #expect(meeting.metadata.title == "Release for 國立大學")
+        } else {
+            #expect(meeting.metadata.title == "Release for 国立大学")
+        }
     }
 
     @Test func theCleanupSeesKnownNamesAndTheVocabulary() async throws {

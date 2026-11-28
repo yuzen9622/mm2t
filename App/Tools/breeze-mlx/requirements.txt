@@ -1,0 +1,5 @@
+# Choose the macOS 14 arm64 wheels even when archiving on a newer Mac.
+mlx @ https://files.pythonhosted.org/packages/7b/fd/f7af63951d6f4d39b47bbda462f2ed0341ce1293967de36ce9bbd4b836a9/mlx-0.32.4-cp311-cp311-macosx_14_0_arm64.whl#sha256=dd0c9070d9c362fe280a0224806b1b47719b154984735041ebcc907e597c08ca
+mlx-metal @ https://files.pythonhosted.org/packages/77/24/7e5b7ed5d28abacab4577c7a8dd1fca6e9058504f5f95ae4333c09420e2e/mlx_metal-0.32.4-py3-none-macosx_14_0_arm64.whl#sha256=8019b2db622599267d66cc168b2f0dbf5af929790a6c3b3913e00eabc42a7947
+mlx-whisper==0.4.3
+pyinstaller==6.19.0

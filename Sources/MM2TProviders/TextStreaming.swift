@@ -28,10 +28,9 @@ enum TextStreaming {
     enum Format: Sendable { case gemini, openAI }
     enum Chunk { case text(String), done }
 
-    static func decode(_ data: String, format: Format) throws -> Chunk {
+    static func decode(_ data: String, format: Format, service: Service) throws -> Chunk {
         if data == "[DONE]" { return .done }
-        let service: Service = format == .gemini ? .gemini : .openAICompatible
-        guard let object = try JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any],
+        guard let object = try? JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any],
               object["error"] == nil else { throw ProviderError(service, .malformedResponse) }
         switch format {
         case .gemini:
@@ -89,7 +88,7 @@ enum TextStreaming {
     }
 
     /// `open` returns the body of a 200 response, or throws the provider's failure.
-    static func stream(format: Format, open: @escaping @Sendable () async throws -> URLSession.AsyncBytes) -> AsyncThrowingStream<String, Error> {
+    static func stream(format: Format, service: Service, open: @escaping @Sendable () async throws -> URLSession.AsyncBytes) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -100,7 +99,7 @@ enum TextStreaming {
                         for try await byte in bytes {
                             try Task.checkCancellation()
                             for event in parser.append(Data([byte])) {
-                                switch try decode(event, format: format) {
+                                switch try decode(event, format: format, service: service) {
                                 case .done: continuation.finish(); return
                                 case .text(let text): if !text.isEmpty { continuation.yield(text) }
                                 }
@@ -127,7 +126,7 @@ extension GeminiLLM {
             ("systemInstruction", .dict([("parts", .list([.dict([("text", .text(system))])]))])),
             ("contents", .list([.dict([("role", .text("user")), ("parts", .list([.dict([("text", .text(input))])]))])])),
         ]).serialized().utf8)
-        return TextStreaming.stream(format: .gemini) { [session, request] in
+        return TextStreaming.stream(format: .gemini, service: .gemini) { [session, request] in
             let (bytes, status) = try await TextStreaming.connect(request, session: session, service: .gemini)
             guard status == 200 else {
                 throw ProviderError(.gemini, GeminiLLM.failure(HTTPResponse(status: status, body: await TextStreaming.errorBody(bytes))))
@@ -139,6 +138,6 @@ extension GeminiLLM {
 
 extension OpenAICompatibleLLM {
     public func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
-        TextStreaming.stream(format: .openAI) { [self] in try await openStream(system: system, input: input) }
+        TextStreaming.stream(format: .openAI, service: service) { [self] in try await openStream(system: system, input: input) }
     }
 }

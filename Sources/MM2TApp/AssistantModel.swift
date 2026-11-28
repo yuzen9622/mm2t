@@ -4,7 +4,7 @@ import MM2TProviders
 import Observation
 
 public struct AssistantStep: Identifiable, Codable, Sendable {
-    public enum Kind: String, Codable, Sendable { case plan, search, read, tasks, answer }
+    public enum Kind: String, Codable, Sendable { case plan, search, read, tasks, filing, answer }
     public enum State: Codable, Equatable, Sendable { case running, done, failed(String), stopped }
     public let id: UUID
     public let kind: Kind
@@ -20,6 +20,9 @@ public struct AssistantTurn: Identifiable, Codable, Sendable {
     public var id = UUID()
     public var createdAt = Date()
     public var memoryRevision: UUID?
+    public var scope: Set<MeetingID>?
+    public var folderBatch: UUID?
+    public var folderProposals: [FolderProposal]?
     public var memoryProposal: String?
     public var memoryManagement = false
     public let question: String
@@ -54,6 +57,7 @@ public final class AssistantModel {
     @ObservationIgnored private var lastCheckpoint = Date.distantPast
     @ObservationIgnored private var attached = true
     public var isActive = false
+    public var draftReferences: Set<MeetingID> = []
     public var draft = ""
     public var scroll = AssistantFollowScroll()
     public var shownContent = AssistantShownContent()
@@ -111,11 +115,41 @@ public final class AssistantModel {
     }
 
     private func restore(_ record: AssistantConversation) {
+        draftReferences = []
         conversationID = record.id; turns = record.turns; ledger = record.ledger
         storageError = conversations?.isUnsaved(record.id) == true ? "Unsaved conversation recovered in memory. Retry saving before closing." : nil
         isActive = !turns.isEmpty
         scroll = .opening(turns)
         shownContent.settleAnswers(turns)
+    }
+
+    public func undoFiling(_ turn: UUID) {
+        guard let i = turns.firstIndex(where: { $0.id == turn }), let batch = turns[i].folderBatch else { return }
+        engine.folders?.undo(batchID: batch); turns[i].folderBatch = nil; save()
+    }
+    public enum FilingApproval: Error { case changed, saveFailed }
+
+    public func filingPreview(_ name: String, turn: UUID) async throws -> [FolderProposal.Row] {
+        guard let proposal = turns.first(where: { $0.id == turn })?.folderProposals?.first(where: { $0.name == name }),
+              engine.folders?.canApply(proposal) == true else { throw FilingApproval.changed }
+        return try await engine.library.filingRows(for: proposal.meetings)
+    }
+
+    public func approveFiling(_ name: String, turn: UUID, preview: [FolderProposal.Row]) async throws {
+        let current = try await filingPreview(name, turn: turn)
+        guard preview == current, !Task.isCancelled, let folders = engine.folders,
+              let i = turns.firstIndex(where: { $0.id == turn }),
+              let proposal = turns[i].folderProposals?.first(where: { $0.name == name }),
+              proposal.meetings == current.map(\.id), folders.canApply(proposal) else { throw FilingApproval.changed }
+        guard let batch = folders.apply(proposal, joining: turns[i].folderBatch) else { throw FilingApproval.saveFailed }
+        turns[i].folderBatch = batch
+        dismissFiling(name, turn: turn)
+    }
+
+    public func dismissFiling(_ name: String, turn: UUID) {
+        guard let i = turns.firstIndex(where: { $0.id == turn }) else { return }
+        turns[i].folderProposals?.removeAll { $0.name == name }
+        save()
     }
 
     public func confirmPreference(turn id: UUID, text: String) {
@@ -153,6 +187,7 @@ public final class AssistantModel {
     public func send(_ question: String? = nil) {
         let question = (question ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isRunning, !question.isEmpty else { return }
+        let references = draftReferences
         draft = ""
         isActive = true
         if !attached {
@@ -161,8 +196,14 @@ public final class AssistantModel {
             guard attached else { return }
         }
         let revision = preferences?.revision
-        let history = record.history(memoryRevision: revision)
-        turns.append(AssistantTurn(memoryRevision: revision, question: question))
+        let previousScope = turns.last?.scope
+        let scope = references.isEmpty ? previousScope : references
+        draftReferences = []
+        var scopedRecord = record
+        scopedRecord.turns = scopedRecord.turns.filter { $0.scope == scope }
+        if scope != turns.last?.scope { ledger = .init() }
+        let history = scopedRecord.history(memoryRevision: revision)
+        turns.append(AssistantTurn(memoryRevision: revision, scope: scope, question: question))
         let position = turns.count - 1
         let turnID = turns[position].id
         scroll = position == 0 ? .top : .init(holding: turnID)
@@ -173,26 +214,37 @@ public final class AssistantModel {
             let preferenceContext = preferences?.context(for: question) ?? ""
             let currentLedger = ledger
             task = Task { [weak self] in
-                if shouldPropose {
-                    let proposal = try? await assistantTimeout(seconds: 30) {
-                        try await AssistantGeneration.memoryProposal(provider: provider, question: question)
+                await HostedRequestGroup.$current.withValue(UUID()) {
+                    if shouldPropose {
+                        let proposal = try? await assistantTimeout(seconds: 30) {
+                            try await AssistantGeneration.memoryProposal(provider: provider, question: question)
+                        }
+                        guard !Task.isCancelled, let self, self.preferences?.revision == revision,
+                              self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
+                        if let proposal {
+                            self.turns[position].memoryProposal = proposal
+                            self.turns[position].memoryManagement = true
+                            self.save()
+                        }
                     }
-                    guard !Task.isCancelled, let self, self.preferences?.revision == revision,
-                          self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
-                    if let proposal {
-                        self.turns[position].memoryProposal = proposal
-                        self.turns[position].memoryManagement = true
-                        self.save()
+                    guard !Task.isCancelled, let self else { return }
+                    var effectiveScope = scope
+                    let mergeRequested = question.range(of: #"(?:也算上|也包含|加上|合併|連同|一起比較|也納入).{0,12}(?:先前|之前|剛才|前面|上次|前.{0,2}場)|(?:include|combine|along with).{0,24}(?:previous|earlier|prior)"#, options: [.regularExpression, .caseInsensitive]) != nil
+                    let widerSearchRequested = question.range(of: #"(?:再找|搜[尋索]?|擴大|也查|找找|查一下).{0,16}(?:更早|其他|其它|全部|所有|範圍)|(?:search|look|find).{0,30}(?:other|earlier|all meetings|outside)"#, options: [.regularExpression, .caseInsensitive]) != nil
+                    if let previousScope, (mergeRequested || widerSearchRequested), let rule = try? await AssistantGeneration.userDirective(provider: provider, question: question, rule: "Scope of referenced meetings: keep unless the user explicitly asks to search outside, earlier or other meetings (expand); merge only when the user explicitly asks to include previously referenced meetings along with new references. A generic follow-up never expands scope.", choices: ["keep", "expand", "merge"]) {
+                        if widerSearchRequested && rule == "expand" { effectiveScope = nil }
+                        if mergeRequested && rule == "merge" { effectiveScope = previousScope.union(references) }
                     }
-                }
-                guard !Task.isCancelled, let self else { return }
-                let events = self.engine.events(question: question, provider: provider, history: history,
-                    preferences: preferenceContext, ledger: currentLedger)
-                for await event in events {
-                    guard !Task.isCancelled, self.turns.indices.contains(position),
-                          self.turns[position].id == turnID, self.preferences?.revision == revision,
-                          self.turns[position].state == .running else { break }
-                    self.receive(event, at: position)
+                    guard !Task.isCancelled, self.turns.indices.contains(position), self.turns[position].id == turnID else { return }
+                    self.turns[position].scope = effectiveScope
+                    let events = self.engine.events(question: question, provider: provider, history: history,
+                        preferences: preferenceContext, ledger: currentLedger, scope: effectiveScope, explicitReferences: references)
+                    for await event in events {
+                        guard !Task.isCancelled, self.turns.indices.contains(position),
+                              self.turns[position].id == turnID, self.preferences?.revision == revision,
+                              self.turns[position].state == .running else { break }
+                        self.receive(event, at: position)
+                    }
                 }
             }
         } catch { turns[position].state = .failed(String(describing: error)); save() }
@@ -235,6 +287,7 @@ public final class AssistantModel {
 
     public func retry() {
         guard !isRunning, let last = turns.popLast() else { return }
+        draftReferences = last.scope ?? []
         send(last.question)
     }
 
@@ -260,7 +313,7 @@ public final class AssistantModel {
             turns[index].steps[step].duration = duration
             turns[index].steps[step].state = .done
         case .toolStarted(let id, let kind, let arguments):
-            let stepKind: AssistantStep.Kind = switch kind { case .search: .search; case .read: .read; case .tasks: .tasks }
+            let stepKind: AssistantStep.Kind = switch kind { case .search: .search; case .read: .read; case .tasks: .tasks; case .filing: .filing }
             turns[index].steps.append(.init(id: id, kind: stepKind, arguments: arguments))
         case .toolFinished(let id, let result):
             guard let step = turns[index].steps.firstIndex(where: { $0.id == id }) else { return }
@@ -281,6 +334,7 @@ public final class AssistantModel {
                     self.flushTask = nil
                 }
             }
+        case .filed(let batch, let proposals): turns[index].folderBatch = batch; turns[index].folderProposals = proposals; save()
         case .ledger(let value): ledger = value
         case .finished(let sources):
             finish(at: index)

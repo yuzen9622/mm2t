@@ -84,6 +84,20 @@ private struct AssistantTurnView: View {
                     AssistantAnswer(turn: turn, openSource: openSource)
                         .padding(.top, 16)
                 }
+                if let checked = turn.folderProposals?.first?.checkedCount {
+                    Text("Checked \(checked) meetings").font(Typo.caption).foregroundStyle(Palette.secondary)
+                        .padding(.top, 16)
+                }
+                ForEach(turn.folderProposals ?? [], id: \.name) { proposal in
+                    AssistantFilingCard(model: model, turn: turn.id, proposal: proposal).padding(.top, 10)
+                }
+                if turn.folderBatch != nil {
+                    HStack {
+                        Label("Meetings moved", systemImage: "checkmark").font(Typo.captionStrong)
+                        Button("Undo move") { model.undoFiling(turn.id) }.buttonStyle(.link)
+                    }.padding(.top, 12)
+                }
+
                 if turn.memoryProposal != nil {
                     AssistantPreferenceProposal(model: model, turn: turn).padding(.top, 16)
                 }
@@ -105,6 +119,9 @@ private struct AssistantTurnView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            if turn.folderBatch != nil { Button("Undo move") { model.undoFiling(turn.id) } }
+        }
         .motion(Motion.reveal, value: turn.activityExpanded)
         .motion(Motion.reveal, value: turn.state)
         .alert("Source changed or removed", isPresented: $unavailableSource) { Button("OK", role: .cancel) {} }

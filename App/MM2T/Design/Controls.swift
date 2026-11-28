@@ -10,6 +10,17 @@ struct Pressable: ButtonStyle {
     }
 }
 
+/// A segment of a joined control: pressing darkens it in place, never scales or fades it,
+/// so the segments stay one shape.
+struct SegmentPress: ButtonStyle {
+    var hovering = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Color.black.opacity(configuration.isPressed ? 0.16 : hovering ? 0.08 : 0))
+            .motion(Motion.touch, value: configuration.isPressed)
+    }
+}
+
 /// The app's one button shape. `primary` is the single orange action of a screen.
 struct PillButton: View {
     enum Kind { case primary, ghost, danger }

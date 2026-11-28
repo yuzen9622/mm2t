@@ -46,6 +46,7 @@ public final class AppController {
     public let queue: ProcessingQueue
     public let capture: CaptureController
     public let setup: SetupModel
+    public let folders: MeetingFolders
     public let meetings: MeetingListModel
     public let people: VoiceprintsModel
     public let dashboard: DashboardModel
@@ -80,19 +81,27 @@ public final class AppController {
     @ObservationIgnored private var monitor: SystemSignalMonitor?
     @ObservationIgnored private var watchMeetings = false
     @ObservationIgnored private var hotkey: GlobalHotkeyMonitor?
+    @ObservationIgnored private var voiceHotkey: GlobalHotkeyMonitor?
     @ObservationIgnored private let recordingTitle: String
     /// Set while the shortcut field in Settings is listening, so pressing the current shortcut
     /// there to replace it does not also start or stop a recording.
     public var suspendsRecordShortcut: Bool {
         get { hotkey?.isSuspended ?? false }
-        set { hotkey?.isSuspended = newValue }
+        set {
+            hotkey?.isSuspended = newValue
+            voiceHotkey?.isSuspended = newValue
+        }
     }
 
+    public let collabAccount: CollabAccount?
+
     public func makeAssistant() -> AssistantModel {
-        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints,
+        AssistantModel(engine: AssistantEngine(library: library, index: searchIndex, voiceprints: voiceprints, folders: folders,
                                                todos: { [todoStatus] in await todoStatus.snapshot }),
                        conversations: assistantConversations, preferences: assistantPreferences,
-                       build: { [pipelineSetup, settings] in try pipelineSetup.buildLLM(settings.settings) })
+                       build: { [pipelineSetup, settings, url = collabAccount?.configuration.apiURL] in
+                           try pipelineSetup.buildLLM(settings.settings, accountURL: url)
+                       })
     }
 
     public init(
@@ -104,9 +113,9 @@ public final class AppController {
         permissions: any PermissionsProviding,
         installer: any ModelInstalling,
         offlineInstallers: [OfflineModel: any ModelInstalling],
-        translationInstaller: @escaping @MainActor (CaptionTarget) -> any ModelInstalling,
+        translationInstaller: @escaping @MainActor (CaptionEngine, CaptionTarget) -> (any ModelInstalling)?,
         machine: MachineProfile = .current,
-        validator: any KeyValidating,
+        validator: (any KeyValidating)? = nil,
         calendars: [any CalendarSource] = [],
         reminders: any ReminderStore = SystemReminders(),
         voiceRecorder: any VoiceSampleRecording = MicrophoneSampleRecorder(),
@@ -114,16 +123,26 @@ public final class AppController {
         widgetFile: URL? = nil,
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
-        recordingTitle: String = "Recording"
+        recordingTitle: String = "Recording", collabConfiguration: CollabConfiguration? = nil,
+        collabSession: URLSession = .shared
     ) throws {
+        let folders = try MeetingFolders(file: paths.root.appending(path: "folders.json"))
+        self.folders = folders
         self.paths = paths
         assistantConversations = AssistantConversations(directory: paths.assistantConversations)
         assistantPreferences = AssistantPreferences(file: paths.assistantPreferences)
         self.recordingTitle = recordingTitle
-        let settings = SettingsStore(defaults: defaults)
+        let settings = SettingsStore(defaults: defaults, machine: machine, installedMLX: offlineInstallers[.transcription]?.isDownloaded)
         let library = MeetingLibrary(root: paths.meetings)
         let voiceprints = try VoiceprintStore(fileURL: paths.voiceprints)
-        let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog)
+        let account = collabConfiguration.map {
+            CollabAccount(configuration: $0, credentials: credentials,
+                          pendingEndsFile: paths.root.appending(path: "collaboration-pending-ends.json"), session: collabSession)
+        }
+        collabAccount = account
+        let accountURL = collabConfiguration?.apiURL
+        let pipelineSetup = PipelineSetup(library: library, voiceprints: voiceprints, credentials: credentials, catalog: catalog,
+                                          account: account?.service)
         migrateVoiceprints = { progress in
             guard let models = catalog.localSpeakerModels() else { return }
             let migration = VoiceprintMigration(library: library, voiceprints: voiceprints, embedder: models.embedder)
@@ -138,8 +157,18 @@ public final class AppController {
             }
         }
         let queue = ProcessingQueue(
-            makePipeline: { try pipelineSetup.build(settings.settings) },
-            makeLLM: { try pipelineSetup.buildLLM(settings.settings) })
+            makePipeline: { try pipelineSetup.build(settings.settings, accountURL: accountURL) },
+            makeLLM: { try pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) })
+        if let account {
+            queue.onJobFinished = { Task { await account.refreshProfile(afterJob: true) } }
+        }
+        queue.onCompleted = { meeting in
+            guard folders.claimRecording(meeting.id), !folders.folders.isEmpty, folders.revision(of: meeting.id) == nil else { return }
+            Task {
+                guard case .ready(let provider) = try? pipelineSetup.buildLLM(settings.settings, accountURL: accountURL) else { return }
+                _ = try? await FolderOrganizer.run(folders, library: library, provider: provider, question: "", scope: [meeting.id], mode: .automatic)
+            }
+        }
         self.settings = settings
         self.library = library
         let searchIndex = MeetingIndex(fileURL: paths.searchIndex)
@@ -152,77 +181,111 @@ public final class AppController {
             recorder: recorder, permissions: permissions, library: library, recordingsDirectory: paths.recordings,
             now: now, endCountdown: endCountdown,
             rules: { settings.settings.detectionRules },
+            recordingMode: { settings.settings.recordingMode },
             saveRules: { settings.settings.detectionRules = $0 },
             makeLive: { directory in
-                // Only with hosted speech recognition and the on-device speaker model: an on-device
-                // speech model would compete with the meeting for the machine.
                 let current = settings.settings
-                guard case .ready(let configured)? = try? pipelineSetup.build(current), configured.diarizer != nil,
-                      let chain = LiveTranscriber.recordingChain(configured.transcription) else { return nil }
-                let pipeline: MeetingProcessingPipeline
-                if current.llmLocation == .cloud, let gemini = configured.llm as? GeminiLLM {
-                    pipeline = configured.withLLM(gemini.forRecording())
-                } else if current.llmLocation == .cloud, let compatible = configured.llm as? OpenAICompatibleLLM {
-                    pipeline = configured.withLLM(compatible.forRecording())
-                } else { pipeline = configured }
-                let speechCredentials: [Credential] = chain.routes.compactMap {
-                    switch $0.source { case .cloud: .elevenLabsAPIKey; case .selfHosted: .selfHostedToken; case .local: nil }
-                }
-                let credentialKinds = speechCredentials + (current.llmLocation == .cloud
-                    ? [current.cloudLLM == .gemini ? Credential.geminiAPIKey : .openAICompatibleAPIKey] : [])
-                guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
-                let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
-                    settings.settings.forProcessing == current.forProcessing && (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
-                }
                 let scratch = paths.recordings.appending(path: "live-\(UUID().uuidString)")
+                let mic = directory.appending(path: RecordingManifest.micFile)
+                let remote = directory.appending(path: RecordingManifest.remoteFile)
+                let pipeline: MeetingProcessingPipeline?
+                if case .ready(let configured)? = try? pipelineSetup.build(current, accountURL: accountURL) {
+                    if let gemini = configured.llm as? GeminiLLM {
+                        pipeline = configured.withLLM(gemini.forRecording())
+                    } else if current.summaryService == .openAICompatible, let compatible = configured.llm as? OpenAICompatibleLLM {
+                        pipeline = configured.withLLM(compatible.forRecording())
+                    } else { pipeline = configured }
+                } else { pipeline = nil }
+                let transcription: TranscriptionChain
+                if let pipeline {
+                    transcription = pipeline.transcription
+                } else {
+                    guard let route = try? pipelineSetup.transcriptionRoute(current, accountURL: accountURL) else { return nil }
+                    transcription = TranscriptionChain([route])
+                }
+                guard let chain = LiveTranscriber.recordingChain(transcription) else { return nil }
+                let transcriptionCredential: Credential? = switch current.transcriptionService {
+                case .elevenLabs: .elevenLabsAPIKey
+                case .server: .selfHostedToken
+                case .mm2t: nil // HostedAuthorization handles token rotation.
+                }
+                let summaryCredential: Credential? = switch current.summaryService {
+                case .gemini: .geminiAPIKey
+                case .openAICompatible: .openAICompatibleAPIKey
+                case .mm2t: nil // HostedAuthorization reads the current token for each request.
+                }
+                let credentialKinds = [transcriptionCredential, pipeline == nil ? nil : summaryCredential].compactMap { $0 }
+                guard let initialCredentials = try? credentialKinds.map({ try credentials.read($0) }) else { return nil }
+                let accountID = account?.user?.id
+                let configurationIsCurrent: @MainActor @Sendable () -> Bool = {
+                    (current.transcriptionService != .mm2t || account?.user?.id == accountID) &&
+                        settings.settings.forProcessing == current.forProcessing &&
+                        (try? credentialKinds.map { try credentials.read($0) }) == initialCredentials
+                }
                 let processing: LiveRecordingProcessor?
-                if current.llmLocation == .cloud, let factory = pipeline.diarizer as? any StreamingDiarizerFactory,
+                let diarizer = pipeline?.diarizer ?? catalog.localSpeakerModels()?.diarizer
+                if let factory = diarizer as? any StreamingDiarizerFactory,
                    let session = try? await factory.makeStreamingSession() {
                     processing = LiveRecordingProcessor(pipeline: pipeline, session: session,
-                        scratch: scratch.appending(path: "speakers"), configurationIsCurrent: configurationIsCurrent)
+                        scratch: scratch.appending(path: "speakers"), checkpointsEnabled: current.summaryService != .mm2t,
+                        configurationIsCurrent: configurationIsCurrent)
                 } else { processing = nil }
                 let names = await voiceprints.spokenNames()
                 guard configurationIsCurrent(), !Task.isCancelled else { await processing?.discard(); return nil }
                 return LiveTranscriber(
-                    mic: directory.appending(path: RecordingManifest.micFile),
-                    remote: directory.appending(path: RecordingManifest.remoteFile),
-                    chain: chain, hints: names + pipeline.vocabulary.filter { !names.contains($0) },
-                    scratch: scratch, processing: processing, configurationIsCurrent: configurationIsCurrent)
+                    mic: mic, remote: remote,
+                    chain: chain, hints: names + current.vocabulary.filter { !names.contains($0) },
+                    scratch: scratch, hostedMeeting: current.transcriptionService == .mm2t ? directory.lastPathComponent : nil,
+                    processing: processing, keepsPlayback: true, configurationIsCurrent: configurationIsCurrent)
             },
-            makeCaptions: { captions in
-                // Opt-in, from the transcription sources in their order; with none set up nothing runs.
+            makeCollaboration: { title in
+                account.map { CollabSession(account: $0, title: title, now: now, llmSnapshot: {
+                    let snapshot = settings.settings
+                    return (snapshot.summaryService == .mm2t ? .hosted : .own,
+                            { try pipelineSetup.buildLLM(snapshot, accountURL: accountURL) })
+                }) }
+            },
+            makeCaptions: { captions, meeting in
                 let current = settings.settings
-                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current) else { return nil }
-                // Translation on this Mac, only once its models are downloaded.
-                if let target = current.captionTranslation.target, let translator = catalog.captionTranslator(for: target) {
-                    captions.translate(with: translator, to: target)
-                }
+                guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current, accountURL: accountURL, hostedMeeting: current.transcriptionService == .mm2t ? meeting.description : nil) else { return nil }
+                captions.translationSession = meeting
+                await captions.configureTranslation(settings: current, catalog: catalog)
                 let names = await voiceprints.spokenNames()
                 return CaptionStream(
                     provider: provider,
                     languageCode: current.transcriptionLanguage.code,
-                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions)
+                    hints: names + current.vocabulary.filter { !names.contains($0) }, captions: captions,
+                    retainHostedLease: { settings.settings.transcriptionService == .mm2t })
             },
-            onRecorded: { id, live in
-                let prepared = live?.processing
-                if let live, let meeting = try? await library.meeting(id),
-                   let transcription = await live.finish(
-                       mic: await library.audioURL(meeting, track: .me), remote: await library.audioURL(meeting, track: .remote)) {
+            enqueueRecording: { id, live in
+                folders.recorded(id)
+                guard let live else { return queue.enqueue(.process, on: id) }
+                let prepared = live.processing
+                return queue.enqueue(.process, on: id, using: prepared?.checkpointPipeline, finalize: {
+                    guard let meeting = try? await library.meeting(id),
+                          let transcription = await live.finish(mic: library.audioURL(meeting, track: .me),
+                                                                remote: library.audioURL(meeting, track: .remote)),
+                          !Task.isCancelled else { return }
                     if (try? await prepared?.attach(transcription, to: id)) != true {
                         _ = try? await library.attach(transcription, to: id)
                     }
-                }
-                let reusable = await live?.isConfigurationCurrent() == true
-                await queue.run(.process, on: id, using: reusable ? prepared?.pipeline : nil,
-                                whileValid: { await live?.isConfigurationCurrent() == true })
+                }, whileValid: { await live.isConfigurationCurrent() })
             })
         setup = SetupModel(
             permissions: permissions, installer: installer, offlineInstallers: offlineInstallers,
             translationInstaller: translationInstaller,
-            suitability: OfflineSuitability(machine), credentials: credentials, validator: validator,
+            suitability: OfflineSuitability(machine), credentials: credentials,
+            validator: validator ?? LiveKeyValidator(account: account?.service),
             settings: settings, runningBrowsers: runningBrowsers,
+            prepareCoreML: {
+                guard let engine = catalog.localTranscription(model: .breezeCoreML, language: .auto) as? any ClipTranscriber else {
+                    throw ProviderError(.localTranscription, .modelUnavailable)
+                }
+                try await engine.prepare()
+            },
+            hostedChecks: { pipelineSetup.hostedChecks(settings.settings, accountURL: accountURL) },
             checkSetup: {
-                switch (try? pipelineSetup.build(settings.settings)) {
+                switch (try? pipelineSetup.build(settings.settings, accountURL: accountURL)) {
                 case .needsSetup(let issues): issues
                 case .ready, nil: []
                 }
@@ -244,7 +307,7 @@ public final class AppController {
             voiceprints: voiceprints, recorder: voiceRecorder, permissions: permissions,
             scratch: paths.recordings.appending(path: "enrollment.wav"),
             transcribe: { audio in
-                guard case .ready(let pipeline)? = try? pipelineSetup.build(settings.settings),
+                guard case .ready(let pipeline)? = try? pipelineSetup.build(settings.settings, accountURL: accountURL),
                       let heard = try? await pipeline.transcription.transcribe(audio: audio, hints: [], labelSpeakers: false) else { return nil }
                 return heard.words.map(\.text).joined()
             },
@@ -254,7 +317,15 @@ public final class AppController {
                 let segment = Diarization.Segment(cluster: voice, range: TimeRange(start: 0, end: duration))
                 return try await models.embedder.embeddings(track: audio, segments: [segment])[voice] ?? []
             })
-        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment)
+        onboarding = OnboardingFlow(setup: setup, settings: settings, enrollment: enrollment, account: account)
+        account?.onUserChanged = { [weak account, weak capture, weak queue, weak setup] in
+            setup?.recheck()
+            capture?.collaboration?.accountChanged()
+            if account?.user != nil {
+                Task { await queue?.resumeDeferredAI() }
+            }
+        }
+        account?.beforeSignOut = { [weak capture] in await capture?.signOutOfCollaboration() }
     }
 
     /// `signedInPage` is what the browser shows when a calendar sign-in hands back to the app;
@@ -264,23 +335,29 @@ public final class AppController {
         defaults: UserDefaults = .standard, credentials: any CredentialStoring = KeychainCredentialStore(),
         signedInPage: String = "mm2t", calendars: [any CalendarSource]? = nil, recordingTitle: String = "Recording",
         recorder: any Recorder = LiveRecorder(), permissions: any PermissionsProviding = LivePermissions(),
-        shareWidget: Bool = true
+        shareWidget: Bool = true, machine: MachineProfile = .current
     ) throws -> AppController {
         let paths = AppPaths.standard(defaults: defaults)
         let openBrowser: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
         let info = { (key: String) in OAuthClientID.resolve(Bundle.main.object(forInfoDictionaryKey: key)) }
         let models = DiarizationModels(directory: paths.models)
-        let transcription = LocalTranscriptionModel.breeze(in: paths.models)
-        let llm = LocalLLMModel.qwen35(in: paths.models)
+        let transcription = LocalTranscriptionModel.breezeMLX(in: paths.models)
         let translation = TranslationModels.mozilla(in: paths.models)
         return try AppController(
             paths: paths, defaults: defaults, credentials: credentials,
-            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription, llmModel: llm,
-                                         translationModels: translation),
+            catalog: LiveProviderCatalog(models: models, transcriptionModel: transcription,
+                                         translationModels: translation, machine: machine),
             recorder: recorder, permissions: permissions,
-            installer: models, offlineInstallers: [.transcription: transcription.snapshot, .llm: llm.snapshot],
-            translationInstaller: { translation.for($0) },
-            validator: LiveKeyValidator(),
+            installer: models, offlineInstallers: [.whisperCPU: LocalSpeechModel.whisperCPU.snapshot(in: paths.models), .transcription: transcription.snapshot, .breezeCoreML: LocalSpeechModel.breezeCoreML.snapshot(in: paths.models),
+                .parakeet: LocalSpeechModel.parakeet.snapshot(in: paths.models), .nemotron: LocalSpeechModel.nemotron.snapshot(in: paths.models)],
+            translationInstaller: { engine, target in
+                switch engine {
+                case .firefox: translation.for(target)
+                case .hyMT2: HyTranslationModels(in: paths.models)
+                case .apple: nil // System-owned; prepared with the system consent sheet.
+                }
+            },
+            machine: machine,
             calendars: calendars ?? [
                 SystemCalendar(defaults: defaults),
                 OnlineCalendar.google(clientID: info("MM2TGoogleClientID"), credentials: credentials),
@@ -292,11 +369,29 @@ public final class AppController {
                 return BrowserScripting.scriptableBrowsers.filter(running.contains).sorted()
             },
             widgetFile: shareWidget ? WidgetLink.snapshotFile() : nil,
-            recordingTitle: recordingTitle)
+            recordingTitle: recordingTitle, collabConfiguration: CollabConfiguration.live())
+    }
+
+    public var shouldPrepareBreeze: Bool {
+        let selected = settings.settings
+        return selected.liveCaptions && selected.effectiveCaptionModel == .breeze
+            && setup.offlineModels[.transcription] == .downloaded
+    }
+
+    public func preparePreferredBreeze() async {
+        guard shouldPrepareBreeze, let breeze = pipelineSetup.catalog.localTranscription(model: .breeze,
+            language: settings.settings.transcriptionLanguage) as? any ClipTranscriber else { return }
+        try? await breeze.prepare()
     }
 
     /// Imports recordings a crash left behind, then starts watching for meetings.
     public func launch(watchMeetings: Bool = true) async {
+        collabAccount?.observeSignIn()
+        Task(priority: .utility) {
+            if settings.settings.liveCaptions, settings.settings.effectiveCaptionModel == .breezeCoreML,
+               setup.offlineModels[.breezeCoreML] == .downloaded { await setup.prepareInstalledCoreML() }
+            await preparePreferredBreeze()
+        }
         // Indexing reads every meeting; the rest of launch does not wait for it.
         Task { [searchSync] in await searchSync.start() }
         let scanner = RecordingRecoveryScanner(recordingsDirectory: paths.recordings, library: library)
@@ -324,16 +419,76 @@ public final class AppController {
         startMonitorIfReady()
     }
 
-    /// Live caption translation: the models the chosen language needs download when it is first
-    /// chosen; other languages' models stay on disk. It applies from the next recording.
-    public func setCaptionTranslation(_ choice: CaptionTranslation) async {
+    /// Explicit changes in Settings also control this recording, including after a bar override.
+    public func setTranslationEnabled(_ enabled: Bool) async {
+        settings.settings.translationEnabled = enabled
+        setup.refreshTranslation()
+        capture.captions.translationOverride = nil
+        await refreshCaptionTranslation(preparingModels: enabled)
+    }
+
+    public func setCaptionEngine(_ engine: CaptionEngine) async {
+        if engine == .apple, #unavailable(macOS 26) { return }
+        var current = settings.settings
+        current.captionEngine = engine
+        if let target = current.captionTranslation.target,
+           (engine == .firefox && !CaptionTarget.all.contains(target)) || (engine == .hyMT2 && !CaptionTarget.hyTargets.contains(target)) {
+            current.captionTranslation = .off
+        }
+        settings.settings = current
+        setup.refreshTranslation()
+        await refreshCaptionTranslation(preparingModels: true)
+    }
+
+    public func setCaptionTranslation(_ choice: CaptionTranslation, forRecording meeting: MeetingID? = nil) async {
+        if let meeting {
+            guard capture.captions.translationSession == meeting else { return }
+            capture.captions.translationOverride = choice != .off
+        }
         settings.settings.captionTranslation = choice
         setup.refreshTranslation()
-        guard choice != .off else { return }
-        switch setup.translationModels {
-        case .notDownloaded, .failed: await setup.downloadTranslationModels()
-        case .downloading, .downloaded: break
+        await refreshCaptionTranslation(preparingModels: choice != .off)
+    }
+
+    public func appleCaptionModelReady(for target: CaptionTarget, meeting: MeetingID?) async {
+        let captions = capture.captions
+        guard settings.settings.captionEngine == .apple, settings.settings.captionTranslation.target == target,
+              let active = captions.translationSession, meeting == nil || meeting == active,
+              captions.translationOverride ?? settings.settings.translationEnabled else { return }
+        await refreshCaptionTranslation(preparingModels: false)
+    }
+
+    private func refreshCaptionTranslation(preparingModels: Bool) async {
+        let current = settings.settings
+        let captions = capture.captions
+        await captions.configureTranslation(settings: current, catalog: pipelineSetup.catalog) {
+            guard preparingModels else { return }
+            if captions.translationOverride == true, !current.translationEnabled, let target = current.captionTranslation.target {
+                await self.setup.prepareCaptionModel(engine: current.captionEngine, target: target)
+            } else {
+                await self.setup.downloadTranslationModels()
+            }
         }
+    }
+
+    /// Returns true when the bar needs to open translation settings.
+    public func toggleLiveTranslation() async -> Bool {
+        let captions = capture.captions
+        guard let meeting = captions.translationSession else { return false }
+        guard let target = settings.settings.captionTranslation.target else {
+            return true
+        }
+        let enable = captions.translationTarget == nil && !captions.preparingTranslation
+        captions.translationOverride = enable
+        let engine = settings.settings.captionEngine
+        await captions.configureTranslation(settings: settings.settings, catalog: pipelineSetup.catalog) {
+            if enable { await self.setup.prepareCaptionModel(engine: engine, target: target) }
+        }
+        let needsSetup = enable && captions.translationSession == meeting && captions.translationOverride == true
+            && !captions.preparingTranslation && captions.translationTarget == nil
+            && settings.settings.captionEngine == engine && settings.settings.captionTranslation.target == target
+        if needsSetup { captions.translationOverride = nil }
+        return needsSetup
     }
 
     /// Marks setup finished and leaves it; from here the app watches for meetings.
@@ -367,10 +522,12 @@ public final class AppController {
         recovered.removeAll { $0 == id }
     }
 
+    public var translationCatalog: any ProviderCatalog { pipelineSetup.catalog }
+
     public func detail(_ id: MeetingID, labels: PresentationLabels, playback: (any MeetingPlayback)?) -> MeetingDetailModel {
         MeetingDetailModel(
             id: id, library: library, voiceprints: voiceprints, queue: queue, labels: labels, playback: playback,
-            todos: todoStatus, reminders: reminders,
+            todos: todoStatus, reminders: reminders, account: collabAccount,
             learn: { [settings] term in settings.settings.addVocabulary(term, source: .learned) })
     }
 
@@ -389,6 +546,12 @@ public final class AppController {
         }
         hotkey.start()
         self.hotkey = hotkey
+        let voiceHotkey = GlobalHotkeyMonitor(hotkey: { [settings] in settings.settings.voiceCommandShortcut }) { [weak self] in
+            guard let self, settings.settings.voiceCommandShortcut != settings.settings.recordShortcut else { return }
+            capture.collaboration?.toggleVoiceCommand()
+        }
+        voiceHotkey.start()
+        self.voiceHotkey = voiceHotkey
     }
 }
 

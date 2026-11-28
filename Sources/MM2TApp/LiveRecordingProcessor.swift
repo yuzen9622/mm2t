@@ -28,15 +28,20 @@ public struct LiveProcessingProgress: Sendable {
 /// Failed speculation cannot mark a meeting complete: the ordinary pipeline remains the fallback.
 public actor LiveRecordingProcessor {
     private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Processing")
-    public let pipeline: MeetingProcessingPipeline
+    public let pipeline: MeetingProcessingPipeline?
+    nonisolated var checkpointPipeline: MeetingProcessingPipeline? { checkpointsEnabled ? pipeline : nil }
+    private let checkpointsEnabled: Bool
     private let session: any StreamingDiarizationSession
     private let scratch: URL
     private let configurationIsCurrent: @MainActor @Sendable () -> Bool
     private var writers: [Track: WAVWriter] = [:]
     private var frames = 0
     private var echo: EchoProfile?
+    private var micEnergy = SpeechEnergy.Builder()
     private var failed = false
     private var isFinishing = false
+    private var warmTask: Task<Void, Never>?
+    private var warmFrames = 0
     private var checkpointsStopped = false
     private var finalSnapshot: StreamingDiarizationSnapshot?
     private var checkpointTask: Task<Void, Never>?
@@ -52,56 +57,91 @@ public actor LiveRecordingProcessor {
     private var checkpointAudioSeconds: TimeInterval = 0
     private var diarizedSeconds: TimeInterval = 0
 
-    public init(pipeline: MeetingProcessingPipeline, session: any StreamingDiarizationSession, scratch: URL,
+    public init(pipeline: MeetingProcessingPipeline?, session: any StreamingDiarizationSession, scratch: URL,
+                checkpointsEnabled: Bool = true,
                 configurationIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) {
         self.pipeline = pipeline
+        self.checkpointsEnabled = checkpointsEnabled
         self.session = session
         self.scratch = scratch
         self.configurationIsCurrent = configurationIsCurrent
     }
 
-    /// Called exactly once for each successful, contiguous speech-recognition piece. Echo removal
-    /// uses the same piece boundaries as STT, so embeddings and words hear the same mic signal.
-    public func append(mic: URL, remote: URL, range: Range<Int>) async {
+    /// Appends contiguous audio once, using the same cleaned microphone samples as speech recognition.
+    public func append(mic: URL, remote: URL, range: Range<Int>, cleaned: EchoCanceller.Result? = nil) async {
         guard !failed, !isFinishing else { return }
         do {
-            guard range.lowerBound == frames else { throw LiveProcessingError.noncontiguousAudio }
             let mine = try WAVFormat.read(mic, frames: range)
             let theirs = try WAVFormat.read(remote, frames: range)
             guard mine.sampleRate == 16_000, theirs.sampleRate == 16_000,
-                  mine.samples.count == range.count, theirs.samples.count == range.count
+                  mine.samples.count == range.count
             else { throw LiveProcessingError.unsupportedAudio }
-            let cleaned = EchoCanceller.clean(mic: mine.samples, remote: theirs.samples, sampleRate: mine.sampleRate)
+            let cleaned = cleaned ?? EchoCanceller.clean(mic: mine.samples, remote: theirs.samples, sampleRate: mine.sampleRate)
             let profile = cleaned?.echo ?? EchoCanceller.unchangedProfile(mic: mine.samples, sampleRate: mine.sampleRate)
-            let base = echo ?? EchoProfile(frameDuration: profile.frameDuration, before: [], after: [])
-            echo = base.appending(profile, at: Double(frames) / 16_000)
-            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-            for (track, pcm) in [(Track.me, cleaned?.samples ?? mine.samples), (.remote, theirs.samples)] {
-                let writer: WAVWriter
-                if let existing = writers[track] { writer = existing }
-                else {
-                    writer = try WAVWriter(url: audioURL(track), sampleRate: 16_000)
-                    writers[track] = writer
-                }
-                let samples = pcm.map { Float($0) / Float(Int16.max) }
-                samples.withUnsafeBufferPointer { writer.append($0) }
-                try writer.flush()
-                try await session.append(samples: samples, track: track)
-            }
-            frames = range.upperBound
-            let processed = await session.processedSeconds()
-            if let mic = processed[.me], let remote = processed[.remote] {
-                diarizedSeconds = max(diarizedSeconds, min(mic, remote))
-            }
+            try await appendPCM(mic: cleaned?.samples ?? mine.samples, remote: theirs.samples, profile: profile, range: range)
         } catch {
-            failed = true
-            Self.logger.notice("event=recording_preparation_failed phase=audio")
+            audioFailed(error)
+        }
+    }
+
+    func append(cleaned: EchoCanceller.Result, remote: [Int16], rate: Int, range: Range<Int>) async {
+        guard !failed, !isFinishing else { return }
+        do {
+            guard rate == 16_000, cleaned.samples.count == range.count, remote.count <= range.count else {
+                throw LiveProcessingError.unsupportedAudio
+            }
+            try await appendPCM(mic: cleaned.samples, remote: remote, profile: cleaned.echo, range: range)
+        } catch {
+            audioFailed(error)
+        }
+    }
+
+    private func audioFailed(_ error: Error) {
+        failed = true
+        Self.logger.notice("event=recording_preparation_failed phase=audio reason=\(String(describing: type(of: error)), privacy: .public)")
+    }
+
+    private func appendPCM(mic samples: [Int16], remote: [Int16], profile: EchoProfile, range: Range<Int>) async throws {
+        guard range.lowerBound == frames else { throw LiveProcessingError.noncontiguousAudio }
+        let base = echo ?? EchoProfile(frameDuration: profile.frameDuration, before: [], after: [])
+        echo = base.appending(profile, at: Double(frames) / 16_000)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let render = remote.count == range.count ? remote : remote + Array(repeating: 0, count: range.count - remote.count)
+        for (track, pcm) in [(Track.me, samples), (.remote, render)] {
+            let writer: WAVWriter
+            if let existing = writers[track] { writer = existing }
+            else {
+                writer = try WAVWriter(url: audioURL(track), sampleRate: 16_000)
+                writers[track] = writer
+            }
+            let samples = pcm.map { Float($0) / 32_768 }
+            writer.appendPCM(pcm)
+            try writer.flush()
+            if track == .me { micEnergy.append(samples) }
+            try await session.append(samples: samples, track: track)
+        }
+        frames = range.upperBound
+        // A summary checkpoint already snapshots both tracks. Hosted summaries need only the speaker cache.
+        if !checkpointsEnabled, !checkpointsStopped, warmTask == nil, frames - warmFrames >= 30 * 16_000 {
+            warmFrames = frames
+            warmTask = Task {
+                defer { warmTask = nil }
+                do {
+                    _ = try await session.snapshot(tracks: audioURLs, final: false)
+                } catch {
+                    Self.logger.debug("event=voiceprint_warm_failed")
+                }
+            }
+        }
+        let processed = await session.processedSeconds()
+        if let mic = processed[.me], let remote = processed[.remote] {
+            diarizedSeconds = max(diarizedSeconds, min(mic, remote))
         }
     }
 
     public func checkpoint(_ transcription: Transcription, manifest: RecordingManifest) async {
         let seconds = Double(frames) / 16_000
-        guard !failed, !isFinishing, !checkpointsStopped, seconds - lastSuccessfulInputSeconds >= 30 else { return }
+        guard checkpointsEnabled, pipeline != nil, !failed, !isFinishing, !checkpointsStopped, seconds - lastSuccessfulInputSeconds >= 30 else { return }
         // A slow LLM must not lose the newest prefix when recording pauses or no further
         // piece arrives. Retain one latest request, rather than a queue of obsolete drafts.
         pendingCheckpoint = CheckpointRequest(transcription: transcription, manifest: manifest, seconds: seconds)
@@ -111,7 +151,7 @@ public actor LiveRecordingProcessor {
     }
 
     private func startNextCheckpoint() async {
-        guard !failed, !isFinishing, !checkpointsStopped, let request = pendingCheckpoint else {
+        guard let pipeline, !failed, !isFinishing, !checkpointsStopped, let request = pendingCheckpoint else {
             pendingCheckpoint = nil
             checkpointInProgress = false
             return
@@ -137,10 +177,9 @@ public actor LiveRecordingProcessor {
                                            duration: covered, platform: manifest.platform,
                                            timeZoneIdentifier: manifest.timeZoneIdentifier ?? TimeZone.current.identifier)
             let draft = await pipeline.recordingDraft(transcription: prefix, diarizations: snapshot.diarizations,
-                echo: echo, metadata: metadata, highlights: manifest.highlights.map(Highlight.init(time:)))
+                echo: echo, metadata: metadata, highlights: manifest.highlights.map(Highlight.init(time:)), audioURLs: audioURLs, micEnergy: micEnergy.energy)
             guard await canCheckpoint() else { checkpointInProgress = false; return }
             let preparedThrough = draft.utterances.map(\.range.end).max() ?? 0
-            let pipeline = self.pipeline
             checkpointTask = Task {
                 guard await self.canCheckpoint() else {
                     self.checkpointTask = nil
@@ -176,10 +215,12 @@ public actor LiveRecordingProcessor {
         guard !isFinishing else { return }
         isFinishing = true
         pendingCheckpoint = nil
+        await warmTask?.value
         defer { closeAudio() }
         guard !failed else { return }
         do {
             finalSnapshot = try await session.snapshot(tracks: audioURLs, final: true)
+            Self.logger.info("event=live_diarization_complete")
             diarizedSeconds = min(finalSnapshot?.processedSeconds[.me] ?? 0, finalSnapshot?.processedSeconds[.remote] ?? 0)
         } catch {
             failed = true
@@ -197,14 +238,16 @@ public actor LiveRecordingProcessor {
     private func canCheckpoint() async -> Bool {
         guard !isFinishing, !checkpointsStopped else { return false }
         let current = await configurationIsCurrent()
-        guard current, !failed else { discard(); return false }
+        guard current, !failed else { await discard(); return false }
         return !isFinishing && !checkpointsStopped
     }
 
-    public func discard() {
+    public func discard() async {
         failed = true
         isFinishing = true
         pendingCheckpoint = nil
+        warmTask?.cancel()
+        await warmTask?.value
         checkpointTask?.cancel()
         checkpointTask = nil
         closeAudio()
@@ -218,8 +261,8 @@ public actor LiveRecordingProcessor {
 
     /// Returns false when the ordinary full-audio separation must run instead.
     public func attach(_ transcription: Transcription, to id: MeetingID) async throws -> Bool {
-        guard !failed, let finalSnapshot else { return false }
-        try await pipeline.attachRecording(transcription, diarizations: finalSnapshot.diarizations, echo: echo, to: id)
+        guard let pipeline, !failed, let finalSnapshot else { return false }
+        try await pipeline.attachRecording(transcription, diarizations: finalSnapshot.diarizations, echo: echo, to: id, micEnergy: micEnergy.energy)
         return true
     }
 

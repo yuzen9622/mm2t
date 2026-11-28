@@ -72,7 +72,8 @@ private actor CheckpointSpeakerSession: StreamingDiarizationSession {
         var progress: LiveProcessingProgress { get async { await processor.progress(transcribedSeconds: 120) } }
     }
 
-    private func fixture(holdsFirst: Bool = true, holdsFirstSnapshot: Bool = false) throws -> Fixture {
+    private func fixture(holdsFirst: Bool = true, holdsFirstSnapshot: Bool = false,
+                         checkpointsEnabled: Bool = true) throws -> Fixture {
         let world = try World()
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
                                   credentials: world.credentials, catalog: world.catalog)
@@ -88,7 +89,8 @@ private actor CheckpointSpeakerSession: StreamingDiarizationSession {
         let session = CheckpointSpeakerSession(holdsFirstSnapshot: holdsFirstSnapshot)
         let current = Box(true)
         let processor = LiveRecordingProcessor(pipeline: pipeline.withLLM(llm), session: session,
-            scratch: directory.appending(path: "spans"), configurationIsCurrent: { current.get })
+            scratch: directory.appending(path: "spans"), checkpointsEnabled: checkpointsEnabled,
+            configurationIsCurrent: { current.get })
         return Fixture(processor: processor, session: session, llm: llm, mic: mic, remote: remote, current: current)
     }
 
@@ -98,6 +100,21 @@ private actor CheckpointSpeakerSession: StreamingDiarizationSession {
             try? await Task.sleep(for: .milliseconds(2))
         }
         return await condition()
+    }
+
+    @Test func hostedSummariesWarmSpeakerEmbeddingsWithoutCallingTheLLM() async throws {
+        let f = try fixture(holdsFirstSnapshot: true, checkpointsEnabled: false)
+        await f.append(from: 0, to: 30)
+        #expect(await waitUntil { await f.session.snapshots == [false] })
+        await f.append(from: 30, to: 60)
+        await f.checkpoint(through: 60)
+        await f.processor.stopCheckpoints()
+        await f.append(from: 60, to: 65)
+        await f.session.releaseFirstSnapshot.open(true)
+        await f.processor.finish()
+        #expect(await f.session.snapshots == [false, true])
+        #expect(f.llm.cleanEnds.get.isEmpty)
+        #expect(await f.progress.diarizedSeconds == 65)
     }
 
     @Test func aSlowCheckpointCoalescesToLatestPrefixWithoutAnotherAudioAppend() async throws {

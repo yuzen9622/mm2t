@@ -20,7 +20,7 @@ struct TrackAudio: AudioSampleSource {
     var duration: TimeInterval { Double(sampleCount) / Double(Self.sampleRate) }
 
     /// Accepts any PCM file AVFoundation reads; multichannel input is downmixed, not reduced to channel 0.
-    init(converting url: URL) throws {
+    init(converting url: URL, temporaryDirectory: URL = FileManager.default.temporaryDirectory) throws {
         let file = try AVAudioFile(forReading: url)
         let input = file.processingFormat
         let output = AVAudioFormat(
@@ -30,7 +30,7 @@ struct TrackAudio: AudioSampleSource {
         }
         converter.downmix = true
 
-        fileURL = FileManager.default.temporaryDirectory.appending(path: "mm2t-track-\(UUID().uuidString).f32")
+        fileURL = temporaryDirectory.appending(path: "mm2t-track-\(UUID().uuidString).f32")
         guard FileManager.default.createFile(atPath: fileURL.path, contents: nil) else {
             throw TrackAudioError.conversionFailed("cannot create \(fileURL.path)")
         }

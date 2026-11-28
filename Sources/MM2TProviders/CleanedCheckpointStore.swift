@@ -12,7 +12,6 @@ actor CleanedCheckpointStore {
                 && transcript.utterances.count <= current.utterances.count
                 && current.utterances.prefix(transcript.utterances.count).elementsEqual(transcript.utterances)
                 && transcript.glossary == current.glossary
-                && LLMPrompts.isEnglish(transcript.utterances) == LLMPrompts.isEnglish(current.utterances)
         }
     }
 

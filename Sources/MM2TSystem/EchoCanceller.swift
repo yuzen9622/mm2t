@@ -20,13 +20,20 @@ public enum EchoCanceller {
     public struct Result: Sendable {
         public let samples: [Int16]
         public let echo: EchoProfile
+        let renderCorrelation: Float
+
+        package init(samples: [Int16], echo: EchoProfile, renderCorrelation: Float = 0) {
+            self.samples = samples
+            self.echo = echo
+            self.renderCorrelation = renderCorrelation
+        }
     }
 
     /// An unfiltered piece still contributes its actual mic energy to whole-speaker echo
     /// decisions. Equal before/after energy is evidence that this speech was not removed.
     public static func unchangedProfile(mic: [Int16], sampleRate: Int) -> EchoProfile {
         let step = max(1, Int(profileFrame * Double(sampleRate)))
-        let energy = loudness(floats(mic, mic.count), step: step)
+        let energy = loudness(floats(mic, mic.count)[...], step: step)
         return EchoProfile(frameDuration: Double(step) / Double(sampleRate), before: energy, after: energy)
     }
 
@@ -39,7 +46,8 @@ public enum EchoCanceller {
 
         let y = floats(mic, count), x = floats(remote, count)
         // The fit only spans one frame, so the remote track is first moved to where its echo starts.
-        let lead = max(0, delay(of: y, behind: x, limit: Int(maxDelay * Double(sampleRate))) - frame / 128)
+        let (lag, correlation) = delay(of: y, behind: x, limit: Int(maxDelay * Double(sampleRate)))
+        let lead = max(0, lag - frame / 128)
         let hop = frame / 2, padded = count + 2 * frame
         var xp = [Float](repeating: 0, count: padded), yp = [Float](repeating: 0, count: padded)
         yp.replaceSubrange(frame..<frame + count, with: y)
@@ -90,9 +98,12 @@ public enum EchoCanceller {
         }
         if mic.count > count { samples.replaceSubrange(count..., with: mic[count...]) }
         let step = max(1, Int(profileFrame * Double(sampleRate)))
+        // The filter starts slightly before the echo; the profile uses the measured arrival instead.
+        let playbackStart = frame + lead - lag
         return Result(samples: samples, echo: EchoProfile(
             frameDuration: Double(step) / Double(sampleRate),
-            before: loudness(y, step: step), after: loudness(cleaned, step: step)))
+            before: loudness(y[...], step: step), after: loudness(cleaned[...], step: step),
+            remote: loudness(xp[playbackStart..<playbackStart + count], step: step)), renderCorrelation: correlation)
     }
 
     private static func floats(_ samples: [Int16], _ count: Int) -> [Float] {
@@ -102,25 +113,51 @@ public enum EchoCanceller {
     }
 
     /// Mean square of each `step` samples; a last partial stretch counts as one more.
-    private static func loudness(_ samples: [Float], step: Int) -> [Float] {
-        stride(from: 0, to: samples.count, by: step).map { start in
-            samples[start..<min(start + step, samples.count)].withUnsafeBufferPointer { vDSP.meanSquare($0) }
+    private static func loudness(_ samples: ArraySlice<Float>, step: Int) -> [Float] {
+        stride(from: samples.startIndex, to: samples.endIndex, by: step).map { start in
+            samples[start..<min(start + step, samples.endIndex)].withUnsafeBufferPointer { vDSP.meanSquare($0) }
         }
     }
 
-    /// How many samples `mic` trails `remote` by: the lag, up to `limit`, where the two correlate
-    /// most over the loudest four seconds or so of the remote track.
-    private static func delay(of mic: [Float], behind remote: [Float], limit: Int) -> Int {
+    // A coherent render/capture peak is required before enabling speaker cancellation.
+    static let minimumRenderCorrelation: Float = 0.2
+
+    private static func delay(of mic: [Float], behind remote: [Float], limit: Int) -> (lag: Int, correlation: Float) {
         let span = min(remote.count, 1 << 16)
         var start = 0, loudest: Float = -1
         for candidate in stride(from: 0, through: remote.count - span, by: max(1, span / 2)) {
             let energy = remote[candidate..<candidate + span].withUnsafeBufferPointer { vDSP.sumOfSquares($0) }
             if energy > loudest { (start, loudest) = (candidate, energy) }
         }
+        let primary = correlationPeak(mic, remote, start: start, span: span, limit: limit)
+        guard primary.correlation < minimumRenderCorrelation else { return primary }
+
+        // Double-talk can mask the loudest render interval. Look for the same acoustic
+        // delay in independent active windows before treating another peak as speaker feedback.
+        let probe = max(1, limit * 2)
+        let last = remote.count - probe - limit
+        guard last >= probe else { return primary }
+        var peaks: [(lag: Int, correlation: Float)] = []
+        for offset in stride(from: 0, through: last, by: max(probe, last / 16)) {
+            let power = remote[offset..<offset + probe].withUnsafeBufferPointer { vDSP.meanSquare($0) }
+            guard power >= EchoProfile.activePlayback else { continue }
+            let candidate = correlationPeak(mic, remote, start: offset, span: probe, limit: limit)
+            guard candidate.correlation >= minimumRenderCorrelation else { continue }
+            // Allow one AEC3 frame (10 ms) of timing variation between windows.
+            if let match = peaks.first(where: { abs($0.lag - candidate.lag) <= probe / 100 }) {
+                return candidate.correlation > match.correlation ? candidate : match
+            }
+            peaks.append(candidate)
+        }
+        return primary
+    }
+
+    private static func correlationPeak(_ mic: [Float], _ remote: [Float], start: Int,
+                                        span: Int, limit: Int) -> (lag: Int, correlation: Float) {
         let lags = min(limit, mic.count - start - 1)
-        guard lags > 0 else { return 0 }
+        guard lags > 0 else { return (0, 0) }
         let length = min(span, mic.count - start - lags)
-        guard length > 0 else { return 0 }
+        guard length > 0 else { return (0, 0) }
         var correlation = [Float](repeating: 0, count: lags)
         // vDSP_conv with a positive stride correlates: result[n] = sum(signal[n + p] * filter[p]).
         mic.withUnsafeBufferPointer { signal in
@@ -129,7 +166,16 @@ public enum EchoCanceller {
                           &correlation, 1, vDSP_Length(lags), vDSP_Length(length))
             }
         }
-        return Int(vDSP.indexOfMaximum(vDSP.absolute(correlation)).0)
+        let lag = Int(vDSP.indexOfMaximum(vDSP.absolute(correlation)).0)
+        let capture = mic[start + lag..<start + lag + length], render = remote[start..<start + length]
+        let count = Float(length)
+        let captureMean = capture.withUnsafeBufferPointer { vDSP.mean($0) }
+        let renderMean = render.withUnsafeBufferPointer { vDSP.mean($0) }
+        let capturePower = capture.withUnsafeBufferPointer { vDSP.sumOfSquares($0) } - count * captureMean * captureMean
+        let renderPower = render.withUnsafeBufferPointer { vDSP.sumOfSquares($0) } - count * renderMean * renderMean
+        let norm = (max(0, capturePower) * max(0, renderPower)).squareRoot()
+        let peak = abs(correlation[lag] - count * captureMean * renderMean)
+        return (lag, norm > 0 ? peak / norm : 0)
     }
 }
 
@@ -188,7 +234,6 @@ private final class Transform {
 /// held as floats at once.
 public struct EchoRemover: MicCleaner {
     static let chunkSeconds = 180
-
     public init() {}
 
     public func clean(mic: URL, remote: URL) throws -> CleanedMic? {
@@ -198,8 +243,11 @@ public struct EchoRemover: MicCleaner {
         // Tracks at different rates do not line up sample for sample; the recorder never writes them so.
         guard rate > 0, try WAVFormat.read(remote, frames: 0..<1).sampleRate == rate else { return nil }
         let chunk = Self.chunkSeconds * rate
-        var samples: [Int16] = []
-        samples.reserveCapacity(total)
+        let aec = rate == AEC3.sampleRate ? AEC3() : nil
+        let url = FileManager.default.temporaryDirectory.appending(path: "mm2t-mic-\(UUID().uuidString).wav")
+        let writer = try WAVWriter(url: url, sampleRate: rate)
+        var keepFile = false
+        defer { if !keepFile { try? FileManager.default.removeItem(at: url) } }
         var profile = EchoProfile(
             frameDuration: Double(max(1, Int(EchoCanceller.profileFrame * Double(rate)))) / Double(rate), before: [], after: [])
         var removedAny = false
@@ -208,17 +256,17 @@ public struct EchoRemover: MicCleaner {
             let heard = try WAVFormat.read(mic, frames: range).samples
             let played = range.lowerBound < shared
                 ? try WAVFormat.read(remote, frames: range.lowerBound..<min(range.upperBound, shared)).samples : []
-            if let cleaned = EchoCanceller.clean(mic: heard, remote: played, sampleRate: rate) {
-                samples += cleaned.samples
-                profile = profile.appending(cleaned.echo, at: Double(start) / Double(rate))
-                removedAny = true
-            } else {
-                samples += heard
-            }
+            let cleaned = aec?.clean(mic: heard, remote: played)
+                ?? EchoCanceller.clean(mic: heard, remote: played, sampleRate: rate)
+            writer.appendPCM(cleaned?.samples ?? heard)
+            try writer.flush()
+            let piece = cleaned?.echo ?? EchoCanceller.unchangedProfile(mic: heard, sampleRate: rate)
+            profile = profile.appending(piece, at: Double(start) / Double(rate))
+            removedAny = removedAny || piece.remote.contains { ($0 ?? 0) > 0 }
         }
+        try writer.close()
         guard removedAny else { return nil }
-        let url = FileManager.default.temporaryDirectory.appending(path: "mm2t-mic-\(UUID().uuidString).wav")
-        try WAVFormat.write(WAVAudio(sampleRate: rate, samples: samples), to: url)
+        keepFile = true
         return CleanedMic(audio: url, echo: profile)
     }
 }

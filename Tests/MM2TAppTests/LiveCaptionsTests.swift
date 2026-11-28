@@ -1,5 +1,6 @@
 import Foundation
 import MM2TCore
+import MM2TProviders
 import MM2TSystem
 import Testing
 @testable import MM2TApp
@@ -215,10 +216,27 @@ import Testing
         await world.capture.stop()
     }
 
+    @Test func signedOutMM2TCaptionsUseLocalWithoutOpeningHostedCaptions() async throws {
+        let api = URL(string: "https://captions.invalid")!
+        let world = try World(collabConfiguration: .init(apiURL: api, webURL: api))
+        var settings = world.app.settings.settings
+        settings.transcriptionService = .mm2t
+        settings.initializeCaptionSources(for: .mm2t)
+        settings.localCaptionModel = .breeze
+        settings.liveCaptions = true
+        world.app.settings.settings = settings
+        world.catalog.offlineDownloaded[.transcription]!.set(true)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.localStreaming.sessions.get.count == 1)
+        #expect(world.catalog.hostedStreaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
     @Test func withNoTranscriptionSourceSetUpCaptionsOpenNothing() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
+        world.app.settings.settings.localCaptionModel = .breeze
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         try await Task.sleep(for: .milliseconds(20))
         #expect(world.catalog.streaming.requests.get.isEmpty)
@@ -228,10 +246,68 @@ import Testing
         await world.capture.stop()
     }
 
+    private func worldWithHostedCaptions(storedSettings: Data? = nil) throws -> World {
+        let api = URL(string: "https://captions.invalid")!
+        let world = try World(storedSettings: storedSettings, collabConfiguration: .init(apiURL: api, webURL: api))
+        try world.credentials.save(Secret(#"{"apiURL":"\#(api.absoluteString)","tokens":{"accessToken":"fixture","refreshToken":"fixture"}}"#),
+                                   for: .collabAccount)
+        return world
+    }
+
+    @Test func savedCloudRouteUsesHostedCaptionsWithAnElevenLabsKey() async throws {
+        let json = #"{"transcriptionService":"mm2t","captionSourceOrder":["cloud"]}"#
+        let world = try worldWithHostedCaptions(storedSettings: Data(json.utf8))
+        #expect(try world.credentials.read(.elevenLabsAPIKey) != nil)
+        world.app.settings.settings.liveCaptions = true
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.catalog.hostedStreaming.sessions.get.count == 1 && world.capture.captions.status == .live })
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
+    @Test(arguments: [false, true]) func switchingToMM2TUsesHostedCaptions(migrated: Bool) async throws {
+        let world = try worldWithHostedCaptions()
+        if migrated {
+            world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from:
+                Data(#"{"transcriptionOrder":["cloud"]}"#.utf8))
+        }
+        world.app.settings.settings.liveCaptions = true
+        #expect(world.app.settings.settings.effectiveCaptionModel == nil)
+        let expected = migrated ? [TranscriptionSource.cloud] : [.local, .cloud]
+        #expect(world.app.settings.settings.captionSources == expected)
+        world.app.settings.settings.transcriptionService = .mm2t
+        let switched: [TranscriptionSource] = migrated ? [.mm2t] : [.local, .mm2t]
+        #expect(world.app.settings.settings.captionSources == switched)
+        let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(world.app.settings.settings))
+        #expect(saved.captionSources == switched)
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.hostedStreaming.sessions.get.count == 1)
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
+    @Test func switchingFromASavedServerSelectionUsesHostedCaptionsAfterReload() async throws {
+        let world = try worldWithHostedCaptions()
+        world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from: Data(
+            #"{"transcriptionService":"server","selfHostedURL":"https://speech.example","liveCaptions":true}"#.utf8))
+        world.app.settings.settings.transcriptionService = .mm2t
+        let saved = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(world.app.settings.settings))
+        world.app.settings.settings = saved
+        #expect(saved.captionSources == [.local, .mm2t])
+        await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
+        #expect(await eventually { world.capture.captions.status == .live })
+        #expect(world.catalog.hostedStreaming.sessions.get.count == 1)
+        #expect(world.catalog.selfHostedStreaming.requests.get.isEmpty)
+        #expect(world.catalog.streaming.requests.get.isEmpty)
+        await world.capture.stop()
+    }
+
     @Test func captionsFollowTheTranscriptionOrderStartingWithTheServer() async throws {
         let world = try World()
-        world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
+        world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from:
+            Data(#"{"transcriptionOrder":["selfHosted","cloud","local"],"liveCaptions":true}"#.utf8))
+        world.app.settings.settings.localCaptionModel = .breeze
         world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
@@ -242,24 +318,25 @@ import Testing
         await world.capture.stop()
     }
 
-    @Test func anOfflineServerFallsToElevenLabsThenThisMac() async throws {
+    @Test func anOfflineServerFallsToThisMacWithoutTryingElevenLabs() async throws {
         let world = try World()
-        world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.transcriptionOrder = [.selfHosted, .cloud, .local]
+        world.app.settings.settings = try JSONDecoder().decode(AppSettings.self, from:
+            Data(#"{"transcriptionOrder":["selfHosted","cloud","local"],"liveCaptions":true}"#.utf8))
+        world.app.settings.settings.localCaptionModel = .breeze
         world.app.settings.settings.selfHostedURL = URL(string: "http://gpu.tailnet:8123")
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.catalog.selfHostedStreaming.openFailures.set([.unreachable("offline")])
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         #expect(await eventually { world.capture.captions.status == .live })
-        #expect(world.catalog.streaming.sessions.get.count == 1)
-        #expect(world.catalog.localStreaming.requests.get.isEmpty)
+        #expect(world.catalog.localStreaming.sessions.get.count == 1)
+        #expect(world.catalog.streaming.requests.get.isEmpty)
         await world.capture.stop()
     }
 
     @Test func withoutAnElevenLabsKeyCaptionsRunOnThisMac() async throws {
         let world = try World(keys: false)
         world.app.settings.settings.liveCaptions = true
-        world.app.settings.settings.transcriptionOrder = [.cloud, .local]
+        world.app.settings.settings.localSpeechModel = .breeze
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         await world.capture.startManually(RecordingTarget(bundleID: "us.zoom.xos", name: "週會", platform: .zoom))
         #expect(await eventually { world.capture.captions.status == .live })
@@ -304,8 +381,14 @@ import Testing
         session.say(.partial("今天"))
         #expect(await eventually { world.capture.captions.partial == "今天" })
 
-        await world.capture.stop()
-        #expect(session.closed.get)
+        let gate = Gate<Bool>()
+        session.discardGate.set(gate)
+        let stopping = Task { await world.capture.stop() }
+        #expect(await eventually { world.capture.lastSavedMeeting != nil && world.capture.state == .idle })
+        #expect(!session.closed.get)
+        await gate.open(true)
+        await stopping.value
+        #expect(await eventually { session.closed.get })
         #expect(world.capture.captions.segments.isEmpty)
         #expect(world.capture.captions.partial.isEmpty)
         #expect(world.capture.captions.status == .off)

@@ -31,6 +31,9 @@ jobs:
           # The full history lets the next step check the tag against the release branch.
           fetch-depth: 0
 
+      - name: Install the MLX helper build tool
+        run: command -v uv >/dev/null || brew install uv
+
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable

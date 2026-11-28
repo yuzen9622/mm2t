@@ -14,6 +14,8 @@
 
 ## 開發環境
 
+在 Apple Silicon Mac 安裝 `uv` 後再建置 App。首次建置會在專案的 `.build` 中準備獨立的 Python 與 MLX 執行元件，並把它簽署、打包進 mm2t。使用者從 App 選擇下載 Breeze FP16 權重即可離線使用。
+
 建置與測試方式見 [README.md 的「從原始碼建置」](README.md#從原始碼建置)。送 pull request 前，請確認：
 
 1. `swift test` 全部通過。需要說話者分群模型或 `Evaluation/` 錄音的測試，在缺少這些檔案時會自動略過。

@@ -1,5 +1,5 @@
-import Foundation
-import MM2TCore
+import AppKit
+@testable import MM2TCore
 import MM2TProviders
 import MM2TSystem
 import Testing
@@ -45,6 +45,117 @@ import Testing
 }
 
 @MainActor @Suite struct MeetingDetailTests {
+    @Test func speakerEditingIsDisabledWhileTheDocumentEditSuspends() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let speaker = try #require(meeting.speakers.first)
+        let duringEdit = Box<Bool?>(nil)
+        // This child cannot enter the main actor until the edit first suspends.
+        let edit = Task {
+            let competing = Task {
+                let canEdit = detail.canEditSpeakers
+                duringEdit.update { $0 = canEdit }
+                await detail.rename(speaker.id, to: .newPerson(name: "Competing name"))
+            }
+            await detail.delete(speaker.id)
+            await competing.value
+        }
+        await edit.value
+        #expect(duringEdit.get == false)
+        #expect(detail.canEditSpeakers)
+        #expect(try await world.library.meeting(meeting.id).speaker(speaker.id) == nil)
+    }
+
+    @Test func independentPassagesPairWithTheirOwnUtterancesEvenInOneCleanedRow() async throws {
+        let world = try World()
+        var meeting = try await world.recordedMeeting()
+        let ids = meeting.utterances.map(\.id)
+        let originals = ["第一個問題。", "另一個例子。", "最後一個想法。"]
+        let translations = ["First question.", "Another example.", "Last thought."]
+        let paragraph = CleanedTranscript.Paragraph(speaker: .me, text: originals.joined(separator: "\n\n"), sources: Array(ids.prefix(3)))
+        let cleaned = CleanedTranscript(paragraphs: [paragraph])
+        meeting.outputs.cleaned = cleaned
+        try await world.library.save(meeting)
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        world.catalog.translationDownloaded.update { $0 = true }
+        world.catalog.translator.answers.update { $0 = Dictionary(uniqueKeysWithValues: zip(originals, translations)) }
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
+        let presentation = try #require(detail.presentation)
+        #expect(presentation.translationHeadings(.raw).isEmpty)
+        let exported = presentation.export(.cleaned, as: .plainText, includeTranslation: true)
+        #expect(exported.contains(zip(translations, originals).map { $0 + "\n" + $1 }.joined(separator: "\n")))
+
+        meeting.outputs.cleaned = CleanedTranscript(paragraphs: [.init(speaker: .me, text: originals[0], sources: Array(ids.prefix(2)))])
+        try await world.library.save(meeting)
+        await detail.load()
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
+        #expect(detail.presentation?.translationHeadings(.cleaned)["cleaned-0"] == translations[0])
+    }
+
+    @Test func postMeetingTranslationUsesAllCleanedRowsAndReplacesOnlyOnSuccess() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let rows = try #require(detail.presentation?.cleaned)
+        let first = rows[0].text, second = rows[1].text
+        world.catalog.translationDownloaded.update { $0 = true }
+        world.catalog.translator.holds.update { $0 = true }
+        let task = Task { await detail.translate(target: .english, engine: .firefox, catalog: world.catalog) }
+        #expect(await eventually { world.catalog.translator.held == [first] })
+        #expect(detail.translationProgress == 0 && detail.translationTotal == rows.count)
+        await world.catalog.translator.release(first)
+        #expect(await eventually { world.catalog.translator.held == [second] })
+        #expect(detail.translationProgress == 1)
+        world.catalog.translator.holds.update { $0 = false }
+        await world.catalog.translator.release(second)
+        await task.value
+        let saved = try #require(try await world.library.meeting(meeting.id).translation)
+        #expect(saved.paragraphs == Dictionary(uniqueKeysWithValues: rows.indices.map { ($0, "⟨\(rows[$0].text)⟩") }))
+        for view in [TranscriptView.raw, .cleaned] {
+            for format in [ExportFormat.markdown, .plainText] {
+                #expect(detail.export(view, as: format)?.contains("⟨") == false)
+                #expect(detail.export(view, as: format, includeTranslation: true)?.contains("⟨\(first)⟩") == (view == .cleaned))
+            }
+            #expect(detail.subtitles(view, includeTranslation: true)?.contains("⟨\(second)⟩") == (view == .cleaned))
+            #expect(detail.subtitles(view)?.contains("⟨") == false)
+        }
+        world.catalog.translator.failing.update { $0.insert(second) }
+        await detail.translate(target: .english, engine: .firefox, catalog: world.catalog)
+        #expect(detail.translationError != nil && detail.translationProgress == nil)
+        #expect(try await world.library.meeting(meeting.id).translation == saved)
+        await detail.translate(target: .simplifiedChinese, engine: .firefox, catalog: world.catalog)
+        let reopened = world.detail(meeting.id)
+        await reopened.load()
+        #expect(reopened.meeting?.translation?.paragraphs == Dictionary(uniqueKeysWithValues: rows.indices.map { ($0, TraditionalChinese.simplified(rows[$0].text)) }))
+        await reopened.editCleaned(rows[0], to: "Updated sentence")
+        #expect(reopened.presentation?.translationHeadings(.cleaned).isEmpty == true)
+        await #expect(throws: LibraryError.transcriptChanged) { try await world.library.saveTranslation(saved, for: meeting.id) }
+    }
+
+    @Test func transcriptCanBeReadBeforeSpeakerSeparation() async throws {
+        let world = try World(keys: false)
+        let meeting = try await world.recordedMeeting()
+        let mic = TrackTranscript(source: .local, content: .unlabeled([TimedWord("好", 1, 2)]))
+        let remote = TrackTranscript(source: .local, content: .unlabeled([TimedWord("Hello", 0, 1)]))
+        try await world.library.attach(.init(me: mic, remote: remote), to: meeting.id)
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        #expect(detail.trackPreview.map(\.text) == ["Hello", "好"])
+        for format in [ExportFormat.plainText, .markdown] {
+            let exported = try #require(detail.export(.raw, as: format))
+            #expect(exported.contains("Hello") && exported.contains("好"))
+        }
+        let subtitles = try #require(detail.subtitles(.raw))
+        #expect(subtitles.contains("00:00:00,000 --> 00:00:01,000"))
+        #expect(subtitles.contains("Hello") && subtitles.contains("好"))
+        #expect(detail.trackPreview.last?.speaker == .me)
+        #expect(detail.meeting?.utterances.isEmpty == true)
+    }
+
     @Test func listRowsPreviewTheSummaryAndWhoSpoke() async throws {
         let world = try World()
         let meeting = try await world.recordedMeeting()
@@ -120,7 +231,15 @@ import Testing
         #expect(detail.isStale, "story 42: the banner shows after a merge")
         #expect(detail.presentation?.raw.filter { $0.speakerName == "小明" }.count == 3)
 
+        let llm = world.catalog.llm
+        let recordingGroups = Set(llm.requestGroups.get)
+        llm.requestGroups.set([])
         await detail.regenerate()
+        let requests = llm.requestGroups.get
+        #expect(requests.count >= 3)
+        let group = try #require(requests.compactMap { $0 }.first)
+        #expect(!recordingGroups.contains(group))
+        #expect(requests.allSatisfy { $0 == group })
         #expect(!detail.isStale)
         #expect(detail.presentation?.digests?.map(\.speakerName) == ["小明", "我"])
     }
@@ -156,6 +275,41 @@ import Testing
         await detail.forgetVoice(of: id)
         #expect(try row().canLearnVoice && !row().canForgetVoice)
         #expect(detail.errorMessage == nil)
+    }
+
+    @Test func regenerationAndSpeakerEditingReserveTheDocumentBeforeSuspension() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting()
+        let detail = world.detail(meeting.id)
+        await detail.load()
+        let speaker = try #require(meeting.speakers.first)
+        world.catalog.llm.calls.set([])
+        let revision = world.queue.revision
+        let edit = Task {
+            let competing = Task { await detail.regenerate() }
+            await detail.rename(speaker.id, to: .newPerson(name: "First"), learn: false)
+            await competing.value
+        }
+        await edit.value
+        #expect(world.catalog.llm.calls.get.isEmpty)
+        #expect(world.queue.revision == revision)
+
+        let duringStartup = Box<Bool?>(nil)
+        let regenerate = Task {
+            detail.updateDocument("Queued notes", kind: .summary)
+            let competing = Task {
+                let editable = detail.canEditSpeakers
+                duringStartup.update { $0 = editable }
+                await detail.rename(speaker.id, to: .newPerson(name: "Must not write"), learn: false)
+            }
+            await detail.regenerate()
+            await competing.value
+        }
+        await regenerate.value
+        #expect(duringStartup.get == false)
+        #expect(await world.app.voiceprints.person(named: "Must not write") == nil)
+        #expect(!world.catalog.llm.calls.get.isEmpty)
+        #expect(detail.canEditSpeakers)
     }
 
     @Test func editsAreRefusedWhileTheMeetingIsRegenerating() async throws {
@@ -204,6 +358,101 @@ import Testing
         #expect(detail.speakers.filter { !$0.isMe }.map(\.label) == ["A", "B"])
         #expect(detail.separationFailure == nil && !detail.canReseparate)
         #expect(detail.isStale)
+    }
+
+    @Test func inlineMarkdownEditsMapToTheirActualSourceRanges() throws {
+        let text = "# 開場😀\r\n\r\n題獻\r\n---\r\n\r\n同名 **同名** [參考][a]\r\n\r\n[a]: https://example.org\r\n\r\n---\r\n\r\n| A | B |\r\n|---|---|\r\n|一|二|"
+        let layout = MeetingMarkdown.layout(text)
+        let blocks = layout.blocks.map { (text as NSString).substring(with: $0.source) }
+        #expect(blocks == ["# 開場😀", "題獻\r\n---", "同名 **同名** [參考][a]", "---", "| A | B |\r\n|---|---|\r\n|一|二|"])
+        let block = layout.blocks[2]
+        let repeated = (layout.preview.string as NSString).range(of: "同名", options: .backwards, range: block.display)
+        #expect(layout.caret(at: repeated.location, in: block) == ("同名 **" as NSString).length)
+        #expect((text as NSString).replacingCharacters(in: block.source, with: "修改").contains("修改\r\n\r\n[a]: https://example.org"))
+        let adjacent = "# 題獻\n---\n\n| A | B |\n|---|---|"
+        #expect(MeetingMarkdown.layout(adjacent).blocks.map { (adjacent as NSString).substring(with: $0.source) }
+            == ["# 題獻", "---", "| A | B |\n|---|---|"])
+        #expect(MeetingMarkdown.layout("").blocks.first?.source == NSRange(location: 0, length: 0))
+    }
+
+    @Test func inlineDocumentExportsLatestTypingAndPersistsAcrossTabs() async throws {
+        let world = try World()
+        let original = try await world.recordedMeeting()
+        let detail = world.detail(original.id)
+        await detail.load()
+        for i in 0..<8 {
+            detail.updateDocument("## 題獻 \(i)", kind: .summary)
+            await Task.yield()
+        }
+        detail.selectedView = .perPerson
+        detail.updateDocument("## 小明", kind: .perPerson)
+        #expect(detail.export(.summary, as: .markdown) == "## 題獻 7")
+        #expect(detail.export(.perPerson, as: .markdown) == "## 小明")
+        #expect(await eventually {
+            detail.meeting?.summaryMarkdown == "## 題獻 7" && detail.meeting?.perPersonMarkdown == "## 小明"
+        })
+        let saved = try await world.library.meeting(original.id)
+        #expect(saved.summaryMarkdown == "## 題獻 7" && saved.perPersonMarkdown == "## 小明")
+    }
+
+    @Test func markdownTableKeepsItsColumnsAndInlineFormatting() throws {
+        let source = """
+            | 左 | 中 | 右 |
+            | :--- | :---: | ---: |
+            | | **置中** | [網站](https://example.org "說明") |
+            """
+        let text = MeetingMarkdown.attributed(source)
+        func cell(_ word: String) throws -> (NSTextTableBlock, NSParagraphStyle, Int) {
+            let offset = (text.string as NSString).range(of: word).location
+            try #require(offset != NSNotFound)
+            let paragraph = try #require(text.attribute(.paragraphStyle, at: offset, effectiveRange: nil) as? NSParagraphStyle)
+            return (try #require(paragraph.textBlocks.first as? NSTextTableBlock), paragraph, offset)
+        }
+        let (header, _, _) = try cell("左")
+        let (center, layout, offset) = try cell("置中")
+        #expect(header.table === center.table && header.table.numberOfColumns == 3)
+        #expect(center.startingRow == 1 && center.startingColumn == 1 && layout.alignment == .center)
+        let font = try #require(text.attribute(.font, at: offset, effectiveRange: nil) as? NSFont)
+        #expect(font.fontDescriptor.symbolicTraits.contains(.bold))
+        let (_, right, link) = try cell("網站")
+        #expect(right.alignment == .right)
+        #expect(text.attribute(.toolTip, at: link, effectiveRange: nil) as? String == "說明")
+    }
+
+    @Test func editedDocumentsSurviveReloadAndExportWithoutChangingTasks() async throws {
+        let world = try World()
+        let original = try await world.recordedMeeting()
+        let detail = world.detail(original.id)
+        await detail.load()
+        let task = try #require(detail.presentation?.summary?.actionItems.first)
+        detail.toggleDone(task)
+        #expect(detail.export(.summary, as: .markdown)?.contains("✓ ~~" + task.text + "~~") == true)
+        let key = try #require(detail.markKey(task))
+        detail.todos?.set(.deleted, for: key, enabled: true)
+        #expect(detail.export(.summary, as: .markdown)?.contains(task.text) == false)
+        let summary = "# 自訂摘要\n\n## 決議\n\n- **決定**使用 A & B"
+        let notes = "# 依人彙整\n\n## 小明\n\n1. 保留 [m1] 原文"
+        try await detail.saveDocument(summary, kind: .summary, editing: original)
+        try await detail.saveDocument(notes, kind: .perPerson, editing: original)
+        let reopened = world.detail(original.id)
+        await reopened.load()
+        #expect(reopened.export(.summary, as: .markdown) == summary)
+        #expect(reopened.export(.perPerson, as: .markdown) == notes)
+        #expect(reopened.meeting?.outputs.summary?.actionItems == original.outputs.summary?.actionItems)
+        await #expect(throws: LibraryError.transcriptChanged) {
+            try await reopened.saveDocument("obsolete", kind: .summary, editing: original)
+        }
+        for (view, content) in [(TranscriptView.summary, "決定使用 A & B"), (.perPerson, "保留 [m1] 原文")] {
+            let markdown = try #require(reopened.export(view, as: .markdown))
+            let data = try MeetingMarkdown.wordData(markdown)
+            #expect(data.starts(with: [0x50, 0x4b]))
+            let word = try NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.officeOpenXML], documentAttributes: nil)
+            #expect(word.string.contains(content))
+            #expect(!word.string.contains("[00:"))
+        }
+        await reopened.regenerate()
+        #expect(reopened.meeting?.summaryMarkdown == nil && reopened.meeting?.perPersonMarkdown == nil)
+        #expect(reopened.export(.summary, as: .markdown)?.contains("## 決議") == true)
     }
 
     @Test func exportsEachViewAsMarkdownAndPlainTextWithLocalizedLabels() async throws {
@@ -333,7 +582,7 @@ import Testing
     @Test func settingsSurviveARelaunchAndOldBlobsStillLoad() throws {
         let defaults = UserDefaults(suiteName: "mm2t-settings-\(UUID().uuidString)")!
         let first = SettingsStore(defaults: defaults)
-        first.settings.transcriptionOrder = [.selfHosted, .cloud]
+        first.settings.transcriptionService = .server
         first.settings.addVocabulary("mm2t", source: .manual)
         first.settings.hasCompletedOnboarding = true
         #expect(SettingsStore(defaults: defaults).settings == first.settings)
@@ -341,7 +590,7 @@ import Testing
         defaults.set(Data(#"{"vocabulary":["舊"]}"#.utf8), forKey: SettingsStore.key)
         let migrated = SettingsStore(defaults: defaults).settings
         #expect(migrated.vocabulary == ["舊"])
-        #expect(migrated.transcriptionOrder == [.cloud])
+        #expect(migrated.transcriptionService == .elevenLabs)
         #expect(AppSettings.diarizationOrder == [.local])
         #expect(migrated.hidesFromScreenCapture)
 

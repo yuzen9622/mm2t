@@ -1,0 +1,350 @@
+import Foundation
+import MM2TCore
+import MM2TProviders
+import Observation
+import OSLog
+
+public struct CollabConfiguration: Sendable {
+    let apiURL: URL
+    let webURL: URL
+    let accountURL: URL
+
+    init(apiURL: URL, webURL: URL, accountURL: URL? = nil) {
+        self.apiURL = apiURL
+        self.webURL = webURL
+        self.accountURL = accountURL ?? webURL
+    }
+
+    static func live(bundle: Bundle = .main, environment: [String: String] = ProcessInfo.processInfo.environment) -> Self? {
+        func read(_ key: String, override: String) -> URL? {
+            var value = bundle.object(forInfoDictionaryKey: key) as? String ?? ""
+            #if DEBUG
+            if let override = environment[override] { value = override }
+            #endif
+            guard let url = URL(string: value), url.host != nil, url.user == nil, url.password == nil,
+                  url.query == nil, url.fragment == nil else { return nil }
+            if url.scheme == "https" { return url }
+            #if DEBUG
+            if url.scheme == "http" { return url }
+            #endif
+            return nil
+        }
+        guard let api = read("MM2TCollabAPIURL", override: "MM2T_COLLAB_API_URL"),
+              let web = read("MM2TCollabWebURL", override: "MM2T_COLLAB_WEB_URL") else { return nil }
+        let account = read("MM2TAccountWebURL", override: "MM2T_ACCOUNT_WEB_URL")
+        return Self(apiURL: api, webURL: web, accountURL: account)
+    }
+
+    func accepts(_ url: URL) -> Bool {
+        url.scheme == webURL.scheme && url.host == webURL.host && url.port == webURL.port && url.user == nil && url.password == nil
+    }
+
+    func acceptsAccountPage(_ url: URL) -> Bool {
+        url.scheme == accountURL.scheme && url.host == accountURL.host && url.port == accountURL.port && url.user == nil && url.password == nil
+    }
+}
+
+public extension CollabPlan {
+    static func displayName(for name: String) -> String? {
+        switch name {
+        case "free": "Free"
+        case "standard": "Standard"
+        case "pro": "Pro"
+        default: nil
+        }
+    }
+
+    var usedMinutes: Int { max(0, usedSeconds / 60) }
+}
+
+@MainActor @Observable
+public final class CollabAccount {
+    private static let logger = Logger(subsystem: "dev.mm2t.app", category: "Collaboration")
+    public private(set) var user: CollabUser? {
+        didSet {
+            if user == nil { quota = nil; plan = nil }
+            if user != oldValue { onUserChanged?() }
+        }
+    }
+    public private(set) var quota: CollabProfile.Quota?
+    public private(set) var plan: CollabPlan?
+    public var planName: String? { plan.flatMap { CollabPlan.displayName(for: $0.name) } }
+    public var planAndQuotaLabel: String? {
+        if let plan {
+            if let planName {
+                return String(localized: "\(planName) · \(plan.usedMinutes) / \(plan.minutesLimit) min", bundle: .main)
+            }
+            return String(localized: "\(plan.usedMinutes) / \(plan.minutesLimit) min", bundle: .main)
+        }
+        guard let quota else { return nil }
+        return String(localized: "\(quota.used) / \(quota.limit) shared meetings", bundle: .main)
+    }
+    public private(set) var busy = false
+    public private(set) var error: CollabError?
+    private(set) var signingOut = false
+    let service: CollabService
+    private let pendingEnds: CollabPendingEnds
+    let configuration: CollabConfiguration
+    @ObservationIgnored var onUserChanged: (() -> Void)?
+    @ObservationIgnored var beforeSignOut: (() async -> Void)?
+    @ObservationIgnored private var profileSession = UUID()
+    @ObservationIgnored private var profileRefresh: (session: UUID, task: Task<Void, Error>)?
+    @ObservationIgnored private var monitoring: Task<Void, Never>?
+    @ObservationIgnored private var replaying: Task<Void, Never>?
+    @ObservationIgnored private var roomEndPreparations: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var roomEndWrites: [CollabPendingEnds.Room: Task<Void, Never>] = [:]
+
+    init(configuration: CollabConfiguration, credentials: any CredentialStoring, pendingEndsFile: URL,
+         session: URLSession = .shared, endRetrySleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         pendingEndsWrite: @escaping @Sendable (Data, URL) throws -> Void = CollabPendingEnds.writeAtomically) {
+        self.configuration = configuration
+        self.pendingEnds = CollabPendingEnds(file: pendingEndsFile, sleep: endRetrySleep, write: pendingEndsWrite)
+        self.service = CollabService(baseURL: configuration.apiURL, session: session,
+            load: { try credentials.read(.collabAccount) }, save: { try credentials.save($0, for: .collabAccount) })
+    }
+
+    deinit { monitoring?.cancel(); replaying?.cancel() }
+
+    func observeSignIn() {
+        guard monitoring == nil else { return }
+        monitoring = Task { [weak self, service] in
+            for await signedIn in await service.signInChanges() {
+                guard let self else { return }
+                let session = profileSession
+                if !signedIn, !(await service.isAuthenticated), session == profileSession {
+                    profileSession = UUID()
+                    replaying?.cancel()
+                    user = nil
+                } else if user == nil, !busy {
+                    await restore()
+                } else if !signingOut, let current = await service.signedInUser, current.id == user?.id {
+                    user = current
+                }
+            }
+        }
+    }
+
+    private func restore() async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let profile = try await service.me()
+            applyPlan(profile)
+            didSignIn(profile.user)
+        }
+        catch CollabError.notSignedIn { user = nil }
+        catch { self.error = error as? CollabError ?? .unreachable }
+    }
+
+    public func signIn(_ provider: CollabLoginProvider) async {
+        await signIn(provider) { try await WebAuthentication.authorize($0, callbackScheme: "mm2t") }
+    }
+
+    func signIn(_ provider: CollabLoginProvider, authorize: (URL) async throws -> URL) async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let verifier = try CollabPKCE.generateVerifier()
+            let url = service.authStartURL(provider, codeChallenge: CollabPKCE.challenge(for: verifier))
+            let callback = try await authorize(url)
+            try Task.checkCancellation()
+            let codes = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?.filter { $0.name == "code" }
+            guard callback.scheme == "mm2t", callback.host == "auth", codes?.count == 1, let code = codes?.first?.value, !code.isEmpty else {
+                throw CollabError.notSignedIn
+            }
+            try await completeSignIn(code: code, verifier: verifier)
+        } catch CalendarError.cancelled {
+        } catch is CancellationError {
+        } catch {
+            self.error = error as? CollabError ?? .unreachable
+        }
+    }
+
+    func completeSignIn(code: String, verifier: String) async throws {
+        let verified = try await service.exchange(code: code, codeVerifier: verifier)
+        quota = nil
+        plan = nil
+        didSignIn(verified)
+        try? await loadProfile(for: profileSession)
+    }
+
+    public func openAccountPage(open: (URL) -> Void) async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let url = try await service.billingHandoff()
+            guard configuration.acceptsAccountPage(url) else { throw CollabError.server(status: 0) }
+            open(url)
+        } catch CollabError.notSignedIn {
+            user = nil
+        } catch {
+            self.error = error as? CollabError ?? .unreachable
+        }
+    }
+
+    func owns(_ room: MeetingRoom) -> Bool { user?.id == room.owner && !signingOut }
+
+    func openHostBrowser(for room: MeetingRoom, using open: (URL) -> Bool) async throws {
+        guard owns(room) else { throw CollabError.notSignedIn }
+        guard configuration.accepts(room.shareUrl), room.shareUrl.fragment == nil,
+              var destination = URLComponents(url: room.shareUrl, resolvingAgainstBaseURL: false) else {
+            throw CollabError.unreachable
+        }
+        let session = profileSession
+        let code = try await service.hostCode(for: room.roomId, owner: room.owner)
+        guard session == profileSession, owns(room) else { throw CollabError.notSignedIn }
+        try Task.checkCancellation()
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let encoded = code.addingPercentEncoding(withAllowedCharacters: unreserved) else { throw CollabError.server(status: 200) }
+        destination.percentEncodedFragment = "host=" + encoded
+        guard let url = destination.url, open(url) else { throw CollabError.unreachable }
+    }
+
+    public func refreshProfile(afterJob: Bool = false) async {
+        // A finished job only updates usage; signing in goes through restore so deferred work resumes.
+        guard !signingOut, !afterJob || user != nil else { return }
+        let session = profileSession
+        if afterJob, let pending = profileRefresh, pending.session == session {
+            // A request started before the job finished may contain the previous usage.
+            _ = await pending.task.result
+            guard session == profileSession, !signingOut else { return }
+        }
+        do {
+            try await loadProfile(for: session)
+        } catch CollabError.notSignedIn where session == profileSession && !Task.isCancelled {
+            user = nil
+        } catch {}
+    }
+
+    private func loadProfile(for session: UUID) async throws {
+        if let refresh = profileRefresh, refresh.session == session {
+            return try await refresh.task.value
+        }
+        let task = Task {
+            defer { if profileRefresh?.session == session { profileRefresh = nil } }
+            let profile = try await service.me()
+            guard session == profileSession, !Task.isCancelled else { return }
+            applyPlan(profile)
+            user = profile.user
+        }
+        profileRefresh = (session, task)
+        try await task.value
+    }
+
+    private func applyPlan(_ profile: CollabProfile) {
+        quota = profile.quota
+        plan = profile.plan
+    }
+
+    private func didSignIn(_ verified: CollabUser) {
+        profileSession = UUID()
+        user = verified
+        let previous = replaying
+        previous?.cancel()
+        replaying = Task { [pendingEnds, configuration, service] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await pendingEnds.replay(apiURL: configuration.apiURL, owner: verified.id, service: service)
+        }
+    }
+
+    func waitForPendingEnds() async { await replaying?.value }
+
+    private var roomEndWrite: Task<Void, Never>? { roomEndPreparations.values.first ?? roomEndWrites.values.first }
+
+    public var hasPendingRoomEndWrites: Bool { roomEndWrite != nil || pendingEnds.hasUnpersistedClosures }
+
+    public func prepareToQuit(closing session: CollabSession?) -> Task<Void, Never>? {
+        let deadline = ContinuousClock.now + .seconds(2)
+        _ = session?.end()
+        guard hasPendingRoomEndWrites else { return nil }
+        return Task { await waitForRoomEndWrites(until: deadline) }
+    }
+
+    func waitForRoomEndWrites(until deadline: ContinuousClock.Instant = .now + .seconds(2)) async {
+        let clock = ContinuousClock()
+        let (completion, signal) = AsyncStream<Void>.makeStream()
+        let preparation = Task { [weak self] in
+            defer { signal.finish() }
+            while !Task.isCancelled, clock.now < deadline, let write = self?.roomEndWrite { await write.value }
+            await self?.retryRoomEndWrites(until: deadline, clock: clock)
+            while !Task.isCancelled, clock.now < deadline, let write = self?.roomEndWrite { await write.value }
+        }
+        let timeout = Task {
+            try? await clock.sleep(until: deadline)
+            signal.finish()
+        }
+        defer { preparation.cancel(); timeout.cancel() }
+        for await _ in completion {}
+
+        let ids = pendingEnds.unpersistedRoomIDs.union(roomEndWrites.keys.map(\.id)).sorted()
+        if !ids.isEmpty || !roomEndPreparations.isEmpty {
+            error = .pendingEndPersistence
+            Self.logger.error("Quitting with unsaved collaboration room closures: \(ids.joined(separator: ", "), privacy: .private); pending preparations: \(self.roomEndPreparations.count)")
+        }
+    }
+
+    private func retryRoomEndWrites(until deadline: ContinuousClock.Instant, clock: ContinuousClock) async {
+        guard pendingEnds.hasUnpersistedClosures else { return }
+        for delay in [Duration.zero, .milliseconds(100), .milliseconds(250)] {
+            do {
+                try await Task.sleep(for: delay)
+                guard clock.now < deadline else { return }
+                try await pendingEnds.retryUnpersistedClosures()
+                return
+            } catch where Task.isCancelled { return }
+            catch { continue }
+        }
+    }
+
+    func prepareRoomEnd(_ prepare: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let id = UUID()
+        let task = Task {
+            defer { roomEndPreparations.removeValue(forKey: id) }
+            await prepare()
+        }
+        roomEndPreparations[id] = task
+        return task
+    }
+
+    func recordRoomEnd(_ room: CollabRoom, owner: String) -> Task<Void, Never> {
+        let ending = CollabPendingEnds.Room(apiURL: configuration.apiURL, owner: owner, id: room.roomId)
+        if let write = roomEndWrites[ending] { return write }
+        pendingEnds.reserve(ending)
+        let write = Task {
+            defer { roomEndWrites.removeValue(forKey: ending) }
+            do { try await pendingEnds.record(ending) }
+            catch { self.error = .pendingEndPersistence }
+        }
+        roomEndWrites[ending] = write
+        return write
+    }
+
+    func closeRoom(_ room: CollabRoom, owner: String) async {
+        do {
+            try await pendingEnds.close(.init(apiURL: configuration.apiURL, owner: owner, id: room.roomId), service: service)
+        } catch CollabError.notSignedIn {
+        } catch {
+            if self.error != .pendingEndPersistence { self.error = error as? CollabError ?? .unreachable }
+        }
+    }
+
+    public func signOut() async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        signingOut = true
+        profileSession = UUID()
+        replaying?.cancel()
+        defer { user = nil; signingOut = false; busy = false }
+        await beforeSignOut?()
+        do { try await service.logout() }
+        catch CollabError.notSignedIn {}
+        catch { self.error = error as? CollabError ?? .unreachable }
+    }
+}

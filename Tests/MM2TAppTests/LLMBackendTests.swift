@@ -8,7 +8,7 @@ import Testing
     func build(_ world: World, _ change: (inout AppSettings) -> Void) throws -> PipelineBuild {
         let setup = PipelineSetup(library: world.library, voiceprints: world.app.voiceprints,
                                   credentials: world.credentials, catalog: world.catalog)
-        var settings = AppSettings()
+        var settings = world.app.settings.settings
         change(&settings)
         return try setup.build(settings)
     }
@@ -25,23 +25,23 @@ import Testing
         world.credentials.values.update { $0[.elevenLabsAPIKey] = "eleven" }
         let url = try #require(AppSettings.openAIBaseURL(from: "http://gpu:8000/v1"))
 
-        guard case .needsSetup(let issues) = try build(world, { $0.cloudLLM = .openAICompatible }) else {
+        guard case .needsSetup(let issues) = try build(world, { $0.summaryService = .openAICompatible }) else {
             Issue.record("expected setup issues"); return
         }
-        #expect(issues == [.missingLLMEndpoint])
+        #expect(issues == [.summaryServiceNotConfigured(.openAICompatible)])
 
-        guard case .needsSetup(let noModel) = try build(world, { $0.cloudLLM = .openAICompatible; $0.openAIBaseURL = url }) else {
+        guard case .needsSetup(let noModel) = try build(world, { $0.summaryService = .openAICompatible; $0.openAIBaseURL = url }) else {
             Issue.record("expected setup issues"); return
         }
-        #expect(noModel == [.missingLLMEndpoint])
+        #expect(noModel == [.summaryServiceNotConfigured(.openAICompatible)])
 
-        guard case .ready = try build(world, { $0.cloudLLM = .openAICompatible; $0.openAIBaseURL = url; $0.openAIModel = " qwen3 " }) else {
+        guard case .ready = try build(world, { $0.summaryService = .openAICompatible; $0.openAIBaseURL = url; $0.openAIModel = " qwen3 " }) else {
             Issue.record("expected a pipeline"); return
         }
         #expect(world.catalog.openAIEndpoints.get == ["http://gpu:8000/v1|-|qwen3"])
 
         world.credentials.values.update { $0[.openAICompatibleAPIKey] = "sk-local" }
-        _ = try build(world, { $0.cloudLLM = .openAICompatible; $0.openAIBaseURL = url; $0.openAIModel = "qwen3" })
+        _ = try build(world, { $0.summaryService = .openAICompatible; $0.openAIBaseURL = url; $0.openAIModel = "qwen3" })
         #expect(world.catalog.openAIEndpoints.get.last == "http://gpu:8000/v1|sk-local|qwen3")
         #expect(!world.catalog.keysUsed.get.contains { $0.hasPrefix("llm:") }, "Gemini is not used")
     }
@@ -65,24 +65,28 @@ import Testing
         let world = try World()
         world.catalog.offlineDownloaded[.transcription]!.set(true)
         world.catalog.languagesUsed.set([])
-        _ = try build(world) { $0.transcriptionOrder = [.cloud, .local] }
-        #expect(world.catalog.languagesUsed.get == [.auto, .auto])
+        _ = try build(world) {
+            $0.transcriptionService = .mm2t
+            $0.localSpeechModel = .breeze
+        }
+        #expect(world.catalog.languagesUsed.get == [.auto])
 
         world.catalog.languagesUsed.set([])
         let url = try #require(AppSettings.selfHostedURL(from: "http://gpu:8080"))
         _ = try build(world) {
-            $0.transcriptionOrder = [.selfHosted, .cloud, .local]
+            $0.localSpeechModel = .breeze
+            $0.transcriptionService = .server
             $0.selfHostedURL = url
             $0.transcriptionLanguage = .english
         }
-        #expect(world.catalog.languagesUsed.get == [.english, .english, .english])
+        #expect(world.catalog.languagesUsed.get == [.english])
     }
 
     @Test func settingsFromAnOlderBuildDefaultToAutoDetectAndGemini() throws {
         let old = #"{"transcriptionOrder":["cloud"],"llmLocation":"cloud"}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
         #expect(settings.transcriptionLanguage == .auto)
-        #expect(settings.cloudLLM == .gemini)
+        #expect(settings.summaryService == .gemini)
         #expect(settings.openAIBaseURL == nil && settings.openAIModel.isEmpty)
         #expect(TranscriptionLanguage.auto.code == nil && TranscriptionLanguage.chinese.code == "zh" && TranscriptionLanguage.english.code == "en")
     }

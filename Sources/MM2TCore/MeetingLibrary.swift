@@ -16,6 +16,7 @@ public struct Recording: Sendable {
 }
 
 public enum LibraryError: Error, Equatable {
+    case transcriptChanged
     case unknownMeeting(MeetingID)
 }
 
@@ -53,8 +54,7 @@ public actor MeetingLibrary {
     }
 
     /// Moves the track files into the meeting's directory, so the library owns them from here on.
-    public func create(_ recording: Recording) throws -> Meeting {
-        let id = MeetingID()
+    public func create(_ recording: Recording, room: MeetingRoom? = nil, id: MeetingID = MeetingID()) throws -> Meeting {
         let directory = self.directory(id)
         try files.createDirectory(at: directory, withIntermediateDirectories: true)
         let audio = RecordingAudio(
@@ -62,7 +62,7 @@ public actor MeetingLibrary {
             remoteFile: "remote." + recording.remoteTrack.pathExtension)
         try files.moveItem(at: recording.micTrack, to: directory.appending(path: audio.micFile))
         try files.moveItem(at: recording.remoteTrack, to: directory.appending(path: audio.remoteFile))
-        let meeting = Meeting(id: id, metadata: recording.metadata, audio: audio, highlights: recording.highlights)
+        let meeting = Meeting(id: id, metadata: recording.metadata, audio: audio, highlights: recording.highlights, room: room)
         try save(meeting)
         return meeting
     }
@@ -88,6 +88,30 @@ public actor MeetingLibrary {
     public func save(_ meeting: Meeting) throws {
         try JSONFile.write(meeting, to: documentURL(meeting.id))
         observer?(meeting.id)
+    }
+
+    public func saveMarkdown(_ text: String, kind: MeetingDocumentKind, editing original: Meeting) throws -> Meeting {
+        var current = try meeting(original.id)
+        if case .pending = current.status { throw TranscriptEditError.meetingIsProcessing }
+        guard current.editedMarkdown(kind) == original.editedMarkdown(kind) else { throw LibraryError.transcriptChanged }
+        switch kind {
+        case .summary:
+            guard current.outputs.summary == original.outputs.summary else { throw LibraryError.transcriptChanged }
+            current.summaryMarkdown = text
+        case .perPerson:
+            guard current.outputs.digests == original.outputs.digests else { throw LibraryError.transcriptChanged }
+            current.perPersonMarkdown = text
+        }
+        try save(current)
+        return current
+    }
+
+    public func saveTranslation(_ translation: TranscriptTranslation, for id: MeetingID) throws -> Meeting {
+        var current = try meeting(id)
+        guard current.outputs.cleaned == translation.source else { throw LibraryError.transcriptChanged }
+        current.translation = translation
+        try save(current)
+        return current
     }
 
     public func audioURL(_ meeting: Meeting, track: Track) -> URL {

@@ -2,7 +2,57 @@ import MM2TApp
 import MM2TCore
 import SwiftUI
 
+struct MeetingDrag { let id: MeetingID; let title: String }
+enum FilingTarget: Hashable { case folder(UUID?), composer }
+struct FilingBounds: PreferenceKey {
+    static var defaultValue: [FilingTarget: CGRect] { [:] }
+    static func reduce(value: inout [FilingTarget: CGRect], nextValue: () -> [FilingTarget: CGRect]) { value.merge(nextValue()) { _, new in new } }
+}
+extension View {
+    func filingTarget(_ target: FilingTarget) -> some View {
+        background(GeometryReader { proxy in Color.clear.preference(key: FilingBounds.self, value: [target: proxy.frame(in: .named("meeting-filing"))]) })
+    }
+}
+@MainActor @Observable final class FilingDragState {
+    var item: MeetingDrag?
+    var hovered: FilingTarget?
+    var received: FilingTarget?
+    private var receipt: Task<Void, Never>?
+    func acknowledge(_ target: FilingTarget) {
+        receipt?.cancel(); received = target
+        receipt = Task { try? await Task.sleep(for: .milliseconds(480)); if !Task.isCancelled { received = nil } }
+    }
+    var location = CGPoint.zero
+    var bounds: [FilingTarget: CGRect] = [:]
+    var insertReference: ((MeetingDrag) -> Void)?
+
+    func gesture(for row: MeetingRow, folders: MeetingFolders) -> some Gesture {
+        func destination(at point: CGPoint) -> FilingTarget? {
+            let target = bounds.first { $0.value.contains(point) }?.key
+            return target == .folder(folders.folder(of: row.id)) ? nil : target
+        }
+
+        return DragGesture(minimumDistance: 6, coordinateSpace: .named("meeting-filing"))
+            .onChanged { [self] value in
+                item = MeetingDrag(id: row.id, title: row.title)
+                location = value.location
+                hovered = destination(at: value.location)
+            }
+            .onEnded { [self] value in
+                defer { item = nil; hovered = nil }
+                guard let item, let target = destination(at: value.location) else { return }
+                switch target {
+                case .composer:
+                    insertReference?(item)
+                case .folder(let folder):
+                    if folders.move([item.id: folder], origin: .manual) { acknowledge(target) }
+                }
+            }
+    }
+}
+
 struct MeetingListView: View {
+    @Environment(FilingDragState.self) private var drag
     let app: AppController
     let open: (MeetingID) -> Void
     @State private var pendingDelete: MeetingRow?
@@ -18,6 +68,8 @@ struct MeetingListView: View {
     }
 
     private var model: MeetingListModel { app.meetings }
+
+    private var visibleRows: [MeetingRow] { model.rows.filter { app.folders.folder(of: $0.id) == app.folders.selected } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +96,7 @@ struct MeetingListView: View {
                             .motion(Motion.page, value: layout.canvasShown)
                     }
                     meetingList(compact: layout.active)
+                        .id(app.folders.selected).entrance(from: .bottom, distance: 8)
                         .frame(width: layout.active ? 280 : geometry.size.width)
                         .opacity(layout.active && !rail ? 0 : 1)
                         .allowsHitTesting(!layout.active || rail)
@@ -56,6 +109,7 @@ struct MeetingListView: View {
                         .frame(width: layout.active ? canvasWidth : geometry.size.width)
                         .padding(.bottom, 20)
                 }
+                .motion(Motion.page, value: app.folders.selected)
                 .motion(Motion.page, value: layout.active)
                 .motion(Motion.page, value: rail)
                 .transaction { if reduce { $0.animation = nil } }
@@ -83,15 +137,16 @@ struct MeetingListView: View {
                 if compact {
                     Text("Meetings").font(Typo.captionStrong).foregroundStyle(Palette.muted).padding(.bottom, 12)
                 }
-                if model.rows.isEmpty { EmptyState(icon: "messages", title: "No meetings yet") }
-                ForEach(compact ? AssistantRail.ordered(model.rows, cited: assistant.citedMeetings) : model.rows) { row in
-                    if compact && assistant.citedMeetings.contains(row.id) && row.id == AssistantRail.ordered(model.rows, cited: assistant.citedMeetings).first?.id {
+                if visibleRows.isEmpty { EmptyState(icon: "messages", title: "No meetings yet") }
+                ForEach(compact ? AssistantRail.ordered(visibleRows, cited: assistant.citedMeetings) : visibleRows) { row in
+                    if compact && assistant.citedMeetings.contains(row.id) && row.id == AssistantRail.ordered(visibleRows, cited: assistant.citedMeetings).first?.id {
                         Text("Cited").font(Typo.captionStrong).foregroundStyle(Palette.muted).padding(.bottom, 4)
                     }
                     MeetingCard(row: row, isRecovered: app.recovered.contains(row.id), compact: compact,
                                 cited: assistant.citedMeetings.contains(row.id),
                                 process: { Task { await process(row) } }, setUp: { MainNavigation.shared.openSetup() })
                         .contentShape(Rectangle())
+                        .simultaneousGesture(drag.gesture(for: row, folders: app.folders))
                         .onTapGesture { if compact || row.status == .completed { open(row.id) } }
                         .accessibilityAction { open(row.id) }
                         .focusable().focusEffectDisabled()
@@ -103,7 +158,7 @@ struct MeetingListView: View {
             }
             .padding(.horizontal, compact ? 0 : 24).padding(.bottom, 180)
             .motion(Motion.select, value: assistant.citedMeetings)
-            .motion(Motion.page, value: model.rows.map(\.id))
+            .motion(Motion.page, value: visibleRows.map(\.id))
         }
     }
 

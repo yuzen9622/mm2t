@@ -6,6 +6,8 @@ import MM2TCore
 public struct PresentationLabels: Sendable {
     public var me: String
     public var viewTitle: @Sendable (TranscriptView) -> String
+    public var microphone = "Microphone"
+    public var remoteAudio = "Remote audio"
     public var overlapping: String
     public var notGenerated: String
     public var stale: String
@@ -17,9 +19,12 @@ public struct PresentationLabels: Sendable {
     public init(
         me: String, viewTitle: @escaping @Sendable (TranscriptView) -> String, overlapping: String,
         notGenerated: String, stale: String, decisions: String, discussionPoints: String,
-        actionItems: String, owner: @escaping @Sendable (String) -> String
+        actionItems: String, owner: @escaping @Sendable (String) -> String,
+        microphone: String = "Microphone", remoteAudio: String = "Remote audio"
     ) {
         self.me = me
+        self.microphone = microphone
+        self.remoteAudio = remoteAudio
         self.viewTitle = viewTitle
         self.overlapping = overlapping
         self.notGenerated = notGenerated
@@ -83,7 +88,10 @@ public struct MeetingPresentation: Sendable {
     public let names: [PersonID: String]
     public let labels: PresentationLabels
 
-    public init(meeting: Meeting, names: [PersonID: String], labels: PresentationLabels) {
+    private let trackPreview: [Utterance]
+
+    public init(meeting: Meeting, names: [PersonID: String], labels: PresentationLabels, trackPreview: [Utterance]? = nil) {
+        self.trackPreview = trackPreview ?? meeting.rawTrackPreview
         self.meeting = meeting
         self.names = names
         self.labels = labels
@@ -96,11 +104,22 @@ public struct MeetingPresentation: Sendable {
     }
 
     public var raw: [UtteranceRow] {
-        meeting.utterances.map {
+        if !trackPreview.isEmpty {
+            return trackPreview.map {
+                UtteranceRow(id: UtteranceID("track-" + $0.id.rawValue), start: $0.range.start, end: $0.range.end,
+                             speaker: $0.speaker, speakerName: $0.speaker == .me ? labels.microphone : labels.remoteAudio,
+                             text: $0.text, isOverlapping: false, isHighlighted: false, words: $0.words)
+            }
+        }
+        return meeting.utterances.map {
             UtteranceRow(id: $0.id, start: $0.range.start, end: $0.range.end, speaker: meeting.resolve($0.speaker),
                          speakerName: speakerName($0.speaker), text: $0.text,
                          isOverlapping: $0.isOverlapping, isHighlighted: meeting.isHighlighted($0), words: $0.words)
         }
+    }
+
+    public func cleanedRowID(containing source: UtteranceID) -> String? {
+        meeting.outputs.cleaned?.paragraphs.firstIndex { $0.sources.contains(source) }.map { "cleaned-\($0)" }
     }
 
     public var cleaned: [SourcedRow]? {
@@ -112,6 +131,11 @@ public struct MeetingPresentation: Sendable {
                            spans: paragraph.sources.compactMap { meeting.utterance($0)?.range }.sorted { $0.start < $1.start })
             }
         }
+    }
+
+    public func translationHeadings(_ view: TranscriptView) -> [String: String] {
+        guard view == .cleaned, let translation = meeting.currentTranslation else { return [:] }
+        return Dictionary(uniqueKeysWithValues: translation.paragraphs.map { ("cleaned-\($0.key)", $0.value) })
     }
 
     public var digests: [DigestSection]? {
@@ -161,7 +185,49 @@ public struct MeetingPresentation: Sendable {
 
     // MARK: Export
 
-    public func export(_ view: TranscriptView, as format: ExportFormat) -> String {
+    /// The same editable source feeds the document page, Markdown download and Word layout.
+    public func documentMarkdown(_ kind: MeetingDocumentKind, actionItems: [SourcedRow]? = nil, completed: Set<String> = []) -> String {
+        if let edited = meeting.editedMarkdown(kind) { return edited }
+        var out = ExportText(format: .markdown)
+        out.heading(1, labels.viewTitle(kind.view))
+        out.line(meeting.metadata.title)
+        func section(_ title: String, _ rows: [SourcedRow]) {
+            guard !rows.isEmpty else { return }
+            out.heading(2, title)
+            for row in rows {
+                var details = row.speakerName.map { [labels.owner($0)] } ?? []
+                if let due = row.due {
+                    details.append(due.date.formatted(Date.FormatStyle(date: .abbreviated,
+                        time: due.hasTime ? .shortened : .omitted, timeZone: TimeZone(identifier: due.timeZoneIdentifier) ?? .current)))
+                }
+                let text = completed.contains(row.id) ? "✓ ~~" + row.text + "~~" : row.text
+                out.bullet(text + (details.isEmpty ? "" : " (" + details.joined(separator: " · ") + ")"))
+            }
+        }
+        switch kind {
+        case .summary:
+            if let summary {
+                section(labels.decisions, summary.decisions)
+                section(labels.discussionPoints, summary.discussionPoints)
+                section(labels.actionItems, actionItems ?? summary.actionItems)
+            }
+        case .perPerson:
+            for digest in digests ?? [] { section(digest.speakerName, digest.points) }
+        }
+        return out.text
+    }
+
+    public func export(_ view: TranscriptView, as format: ExportFormat, includeTranslation: Bool = false) -> String {
+        if let kind = view.document, format == .markdown { return documentMarkdown(kind) }
+        if let kind = view.document, let edited = meeting.editedMarkdown(kind) {
+            return MeetingMarkdown.attributed(edited).string
+        }
+        let headings = includeTranslation ? translationHeadings(view) : [:]
+        func bilingual(_ id: String, _ original: String) -> String {
+            guard let text = headings[id], !text.isEmpty else { return original }
+            return TranscriptTranslation.pairs(original: original, translated: text)
+                .map { $0.translated + "\n" + $0.original }.joined(separator: "\n")
+        }
         var out = ExportText(format: format)
         out.heading(1, "\(meeting.metadata.title): \(labels.viewTitle(view))")
         switch view {
@@ -173,7 +239,7 @@ public struct MeetingPresentation: Sendable {
         case .cleaned:
             guard let cleaned else { return out.finished(labels.notGenerated) }
             if meeting.outputs.isStale { out.line(labels.stale) }
-            for row in cleaned { out.entry(time: row.jump?.time, speaker: row.speakerName ?? "", text: row.text) }
+            for row in cleaned { out.entry(time: row.jump?.time, speaker: row.speakerName ?? "", text: bilingual(row.id, row.text)) }
         case .perPerson:
             guard let digests else { return out.finished(labels.notGenerated) }
             if meeting.outputs.isStale { out.line(labels.stale) }

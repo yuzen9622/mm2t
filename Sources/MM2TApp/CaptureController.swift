@@ -6,17 +6,19 @@ import OSLog
 
 /// The app whose audio becomes the remote track.
 public struct RecordingTarget: Hashable, Sendable {
-    /// nil records everything the Mac plays, for a recording started with no meeting detected.
+    /// nil leaves app selection automatic for online recordings.
     public let bundleID: String?
     public let name: String
     public let platform: MeetingPlatform?
+    public let mode: RecordingMode
     /// Browsers are captured as a whole process, so other tabs' sound is recorded too (story 11).
     public var isBrowser: Bool { bundleID.map(MeetingDetector.browsers.contains) ?? false }
 
-    public init(bundleID: String?, name: String, platform: MeetingPlatform?) {
+    public init(bundleID: String?, name: String, platform: MeetingPlatform?, mode: RecordingMode = .online) {
         self.bundleID = bundleID
         self.name = name
         self.platform = platform
+        self.mode = mode
     }
 }
 
@@ -108,34 +110,37 @@ public final class CaptureController {
     public static let dismissalCooldown: TimeInterval = 120
     /// How long the capsule counts down after a meeting ends before the recording stops; zero stops at once.
     public static let endCountdown = Duration.seconds(5)
-    /// How often a recording in progress is checked for a new piece to transcribe.
-    static let liveInterval = Duration.seconds(2)
 
     public private(set) var state: CaptureState = .idle
     public let meters = RecordingMeters()
     /// Live captions for the recording in progress; `.off` unless the user turned them on.
     public let captions = LiveCaptions()
+    public private(set) var collaboration: CollabSession?
 
     @ObservationIgnored private let recorder: any Recorder
     @ObservationIgnored private let permissions: any PermissionsProviding
     @ObservationIgnored private let library: MeetingLibrary
     @ObservationIgnored private let recordingsDirectory: URL
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let onRecorded: @MainActor (MeetingID, LiveTranscriber?) async -> Void
+    @ObservationIgnored private let enqueueRecording: @MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?
     @ObservationIgnored private let makeLive: @MainActor (URL) async -> LiveTranscriber?
     @ObservationIgnored private var live: LiveTranscriber?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
-    @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions) async -> CaptionStream?
+    @ObservationIgnored private let makeCollaboration: @MainActor (String) -> CollabSession?
+    @ObservationIgnored private let makeCaptions: @MainActor (LiveCaptions, MeetingID) async -> CaptionStream?
+    @ObservationIgnored private var closingCollaboration: Task<Void, Never>?
     @ObservationIgnored private var captionStream: CaptionStream?
     @ObservationIgnored private var captionTask: Task<Void, Never>?
     @ObservationIgnored private var detected: DetectedMeeting?
     /// Declined calls by bundle ID, kept out of detection so they neither prompt again nor hide
     /// another meeting. `releasedAt` is when the app last let go of the mic; nil while it holds it.
     @ObservationIgnored private var declined: [String: (meeting: DetectedMeeting, releasedAt: Date?)] = [:]
+    @ObservationIgnored private var recordingID: MeetingID?
     @ObservationIgnored private var session: (any RecordingSession)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private let endCountdown: Duration
     @ObservationIgnored private var countdown: (task: Task<Void, Never>, resumeTo: CaptureState)?
+    @ObservationIgnored private let recordingMode: @MainActor () -> RecordingMode
     @ObservationIgnored private let rules: @MainActor () -> DetectionRules
     @ObservationIgnored private let saveRules: @MainActor (DetectionRules) -> Void
     @ObservationIgnored private let appName: @MainActor (String) -> String?
@@ -148,24 +153,29 @@ public final class CaptureController {
         now: @escaping () -> Date = Date.init,
         endCountdown: Duration = CaptureController.endCountdown,
         rules: @escaping @MainActor () -> DetectionRules = { DetectionRules() },
+        recordingMode: @escaping @MainActor () -> RecordingMode = { .online },
         saveRules: @escaping @MainActor (DetectionRules) -> Void = { _ in },
         appName: @escaping @MainActor (String) -> String? = { SystemSignalReader.appName(bundleID: $0) },
         makeLive: @escaping @MainActor (URL) async -> LiveTranscriber? = { _ in nil },
-        makeCaptions: @escaping @MainActor (LiveCaptions) async -> CaptionStream? = { _ in nil },
-        onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void
+        makeCollaboration: @escaping @MainActor (String) -> CollabSession? = { _ in nil },
+        makeCaptions: @escaping @MainActor (LiveCaptions, MeetingID) async -> CaptionStream? = { _, _ in nil },
+        enqueueRecording: (@MainActor (MeetingID, LiveTranscriber?) -> Task<Void, Never>?)? = nil,
+        onRecorded: @escaping @MainActor (MeetingID, LiveTranscriber?) async -> Void = { _, _ in }
     ) {
         self.rules = rules
+        self.recordingMode = recordingMode
         self.saveRules = saveRules
         self.appName = appName
         self.makeLive = makeLive
         self.makeCaptions = makeCaptions
+        self.makeCollaboration = makeCollaboration
         self.endCountdown = endCountdown
         self.recorder = recorder
         self.permissions = permissions
         self.library = library
         self.recordingsDirectory = recordingsDirectory
         self.now = now
-        self.onRecorded = onRecorded
+        self.enqueueRecording = enqueueRecording ?? { id, live in Task { await onRecorded(id, live) } }
     }
 
     // MARK: Detection
@@ -202,8 +212,7 @@ public final class CaptureController {
         case .prompting(let prompted) where prompted == meeting:
             state = .idle
         case .recording(let target), .paused(let target):
-            // A recording of the whole Mac's sound was most likely started for this meeting.
-            guard target.bundleID == meeting.bundleID || target.bundleID == nil else { break }
+            guard target.mode == .online, target.bundleID == meeting.bundleID || target.bundleID == nil else { break }
             if endCountdown == .zero { await stop() } else { beginCountdown(target) }
         default:
             break
@@ -256,12 +265,15 @@ public final class CaptureController {
     /// Answers the prompt with "record".
     public func startPrompted() async {
         guard case .prompting(let meeting) = state else { return }
-        await begin(RecordingTarget(bundleID: meeting.bundleID, name: displayName(of: meeting), platform: meeting.platform))
+        await begin(RecordingTarget(bundleID: meeting.bundleID, name: displayName(of: meeting), platform: meeting.platform, mode: .online))
     }
 
-    /// The record button: the meeting in progress if the detector sees one, otherwise the Mac's
-    /// whole sound output. `title` names a recording that has no meeting to name it.
+    /// Manual recording uses the saved meeting type. `title` names a recording with no detected call.
     public func startNow(title: String) async {
+        if recordingMode() == .inPerson {
+            await startManually(RecordingTarget(bundleID: nil, name: title, platform: nil, mode: .inPerson))
+            return
+        }
         // A declined call still on the mic is the meeting the user changed their mind about; it is
         // tracked again so its end stops the recording.
         if detected == nil, state.target == nil,
@@ -309,25 +321,38 @@ public final class CaptureController {
             break
         }
         state = .starting(target)
+        let systemAudio: SystemAudioCapture
+        if target.mode == .inPerson { systemAudio = .off }
+        else if let id = target.bundleID { systemAudio = .app(id) }
+        else { systemAudio = .automatic(ignoring: Set(rules().apps.filter { !$0.prompts }.map(\.key))) }
+        let recordingID = MeetingID()
         let configuration = RecorderConfiguration(
-            targetBundleID: target.bundleID,
-            directory: recordingsDirectory.appending(path: UUID().uuidString),
+            systemAudio: systemAudio,
+            directory: recordingsDirectory.appending(path: recordingID.description),
             title: target.name,
             platform: target.platform)
         do {
             let session = try await recorder.start(configuration)
             self.session = session
+            self.recordingID = recordingID
             meters.reset()
+            collaboration = makeCollaboration(target.name)
+            if let collaboration {
+                collaboration.captionsActive = { [weak captions] in captions?.isActive == true }
+                collaboration.captionsPartial = { [weak captions] in captions?.partial ?? "" }
+                captions.onFinalized = { [weak collaboration] segment in collaboration?.finalized(segment) }
+            }
             state = .recording(target)
             liveTask = Task { [weak self] in
                 guard let live = await self?.makeLive(configuration.directory), !Task.isCancelled else { return }
                 self?.live = live
+                let interval = await live.pollingInterval
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: Self.liveInterval)
+                    try? await Task.sleep(for: interval)
                     if !Task.isCancelled { await live.advance() }
                 }
             }
-            startCaptions(session, sampleRate: configuration.sampleRate)
+            startCaptions(session, sampleRate: configuration.sampleRate, meeting: recordingID)
             eventTask = Task { [weak self] in
                 for await event in session.events {
                     await self?.apply(event, from: session)
@@ -342,22 +367,22 @@ public final class CaptureController {
 
     /// Captions run beside the recording and the batch pieces and never feed either; a caption
     /// failure only shows in `captions.status`.
-    private func startCaptions(_ session: any RecordingSession, sampleRate: Int) {
+    private func startCaptions(_ session: any RecordingSession, sampleRate: Int, meeting: MeetingID) {
         captions.clear()
         captionTask = Task { [weak self] in
-            guard let self, let stream = await self.makeCaptions(self.captions), !Task.isCancelled else { return }
+            guard let self, let stream = await self.makeCaptions(self.captions, meeting), !Task.isCancelled else { return }
             self.captionStream = stream
             await stream.start(audio: await session.audioStream(), sampleRate: sampleRate)
             if case .paused = self.state { await stream.pause() }
         }
     }
 
-    private func stopCaptions() async {
+    private func stopCaptions(savedMeeting: MeetingID? = nil) async {
         captionTask?.cancel()
         captionTask = nil
         let stream = captionStream
         captionStream = nil
-        await stream?.stop()
+        await stream?.stop(retainingLeaseFor: savedMeeting)
         captions.clear()
     }
 
@@ -370,7 +395,7 @@ public final class CaptureController {
             meters.elapsed = await session.elapsed
         case .remoteSilentWhileTargetPlaying:
             meters.remoteSilentWhilePlaying = true
-        case .microphoneSwitched, .captureRestarted, .audioDropped, .writeFailed, .targetProcessesChanged:
+        case .microphoneSwitched, .captureRestarted, .audioDropped, .writeFailed, .targetProcessesChanged, .systemAudioLocked:
             break
         }
     }
@@ -415,33 +440,59 @@ public final class CaptureController {
         meters.highlightCount += 1
     }
 
+    public private(set) var lastSavedMeeting: MeetingID?
+
+    func signOutOfCollaboration() async {
+        await collaboration?.signOut()
+        await closingCollaboration?.value
+    }
+
+    func endCollaboration() -> Task<Void, Never>? {
+        captions.onFinalized = nil
+        if let ending = collaboration?.end() {
+            let previous = closingCollaboration
+            closingCollaboration = Task { await previous?.value; await ending.value }
+        }
+        collaboration = nil
+        return closingCollaboration
+    }
+
     /// Finishes both tracks, moves them into the library and hands the meeting to processing.
     public func stop() async {
-        guard state.isCapturing, let target = state.target, let session else { return }
+        guard state.isCapturing, let target = state.target, let session, let recordingID else { return }
         let started = ContinuousClock.now
         countdown?.task.cancel()
         countdown = nil
         state = .stopping(target)
+        let room = collaboration?.meetingRoom
+        let closingCollaboration = endCollaboration()
         eventTask?.cancel()
         eventTask = nil
         liveTask?.cancel()
         liveTask = nil
-        await stopCaptions()
         let live = self.live
         self.live = nil
         self.session = nil
+        self.recordingID = nil
+        await live?.prepareForMove()
+        captionTask?.cancel()
         let id: MeetingID
         do {
             let recording = try await session.stop()
-            await live?.prepareForMove()
-            id = try await library.create(recording).id
+            id = try await library.create(recording, room: room, id: recordingID).id
             try? FileManager.default.removeItem(at: recording.micTrack.deletingLastPathComponent())
         } catch {
+            await stopCaptions()
+            await live?.discard()
             state = .failed(.saveFailed(String(describing: error)))
             return
         }
+        await stopCaptions(savedMeeting: id)
+        let job = enqueueRecording(id, live)
+        lastSavedMeeting = id
         state = .idle
-        await onRecorded(id, live)
+        await closingCollaboration?.value
+        await job?.value
         let elapsed = started.duration(to: .now).components
         let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         Self.logger.info("event=stop_to_processing_return elapsed_seconds=\(seconds, privacy: .public) live_enabled=\(live != nil, privacy: .public)")

@@ -16,6 +16,19 @@ public struct AssistantTaskRef: Codable, Sendable, Equatable {
         return digest(Data(canonical.utf8))
     }
 
+    static func markKey(in meeting: Meeting, at index: Int, fingerprint: String) -> String {
+        let items = meeting.outputs.summary?.actionItems ?? []
+        let duplicates = items.prefix(index).count { $0 == items[index] }
+        let base = "\(meeting.id)#\(fingerprint)"
+        return duplicates == 0 ? base : "\(base):\(duplicates)"
+    }
+
+    static func isPersonal(owner: SpeakerID?, in meeting: Meeting, user: PersonID?) -> Bool {
+        let speaker = owner.map(meeting.resolve)
+        let person = speaker.flatMap { meeting.speaker($0)?.person }
+        return (speaker == .me && (person == nil || user == nil || person == user)) || (user != nil && person == user)
+    }
+
     static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -33,8 +46,10 @@ public struct TodoSnapshot: Sendable {
     public var done: Set<String> = []
     public var anchors: [String: String] = [:]
     public var anchorMarks: [String: Bool] = [:]
+    public var deleted: Set<String>
     public var storageError: String?
-    public init(done: Set<String> = [], anchors: [String: String] = [:], anchorMarks: [String: Bool]? = nil, storageError: String? = nil) {
+    public init(done: Set<String> = [], anchors: [String: String] = [:], anchorMarks: [String: Bool]? = nil, storageError: String? = nil, deleted: Set<String> = []) {
+        self.deleted = deleted
         self.done = done
         self.anchors = anchors
         self.anchorMarks = anchorMarks ?? anchors.mapValues { _ in true }
@@ -113,7 +128,7 @@ enum AssistantTasks {
             for (index, item) in summary.actionItems.enumerated() {
                 let speaker = item.owner.map(meeting.resolve)
                 let person = speaker.flatMap { meeting.speaker($0)?.person }
-                let isMe = (speaker == .me && (person == nil || user == nil || person == user)) || (user != nil && person == user)
+                let isMe = AssistantTaskRef.isPersonal(owner: item.owner, in: meeting, user: user)
                 let owner = isMe ? "current_user" : person.flatMap { names[$0] } ?? speaker.flatMap { meeting.speaker($0)?.label } ?? "unassigned"
                 switch query.owner {
                 case .me: if !isMe { continue }
@@ -124,6 +139,7 @@ enum AssistantTasks {
                 if let dueRange, !(item.due.map { dueRange.contains($0.date) } ?? false) { continue }
                 let id = "\(meeting.id)#\(index)"
                 let fingerprint = AssistantTaskRef.fingerprint(item)
+                guard !status.deleted.contains(AssistantTaskRef.markKey(in: meeting, at: index, fingerprint: fingerprint)) else { continue }
                 let state: AssistantTaskRow.Status
                 if status.storageError != nil || status.anchors[id].map({ $0 != fingerprint }) == true
                     || status.anchorMarks[id].map({ $0 != status.done.contains(id) }) == true {

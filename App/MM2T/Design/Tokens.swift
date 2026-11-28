@@ -1,12 +1,15 @@
 import AppKit
+import MM2TApp
 import SwiftUI
 
 /// Every color the app draws with. Two values each: light, dark.
 enum Palette {
-    static let window = dynamic(0xF6F5F1, 0x1B1B1D)
+    static let windowHex: (light: UInt32, dark: UInt32) = (0xF6F5F1, 0x1B1B1D)
+    static let cardHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x262628)
+    static let window = dynamic(windowHex.light, windowHex.dark)
     static let backdrop = Color.black.opacity(0.28)
     static let sidebar = dynamic(0xEEEDE8, 0x151516)
-    static let card = dynamic(0xFFFFFF, 0x262628)
+    static let card = dynamic(cardHex.light, cardHex.dark)
     static let field = dynamic(0xEDECE7, 0x303033)
     /// Surfaces are told apart by tone, never by an outline: a raised panel, a selected row, a quiet button.
     static let panel = dynamic(0xFFFFFF, 0x222224)
@@ -52,15 +55,27 @@ enum Radius {
 
 /// One type scale for the whole app, all in the rounded design.
 enum Typo {
-    static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
+    static let titleSize: CGFloat = 20
+    static let readingSize: CGFloat = 16
+    static let title = Font.system(size: titleSize, weight: .semibold, design: .rounded)
     static let heading = Font.system(size: 15, weight: .semibold, design: .rounded)
     static let body = Font.system(size: 14, weight: .regular, design: .rounded)
     static let bodyStrong = Font.system(size: 14, weight: .medium, design: .rounded)
     static let caption = Font.system(size: 12, weight: .regular, design: .rounded)
-    static let captionStrong = Font.system(size: 12, weight: .medium, design: .rounded)
+    static let captionStrong = captionStrong(size: 12)
+    static func captionStrong(size: CGFloat) -> Font { .system(size: size, weight: .medium, design: .rounded) }
     /// Transcript text, set for reading at length rather than scanning.
-    static let reading = Font.system(size: 16, weight: .regular)
+    static let reading = Font.system(size: readingSize, weight: .regular)
     static let readingLineSpacing: CGFloat = 6
+}
+
+extension MeetingMarkdown.Style {
+    static var meetingDocument: Self {
+        Self(text: NSColor(Palette.text), secondary: NSColor(Palette.secondary),
+             accent: NSColor(Palette.orange), surface: NSColor(Palette.field),
+             separator: NSColor(Palette.tonal), bodySize: Typo.readingSize,
+             titleSize: Typo.titleSize, lineSpacing: Typo.readingLineSpacing)
+    }
 }
 
 /// The app's motion vocabulary. Each case is one kind of change, so the same change always moves

@@ -6,37 +6,26 @@ import SwiftUI
 /// What the processing queue most recently finished, shown in the capsule after a recording ends.
 @MainActor @Observable
 final class JobBanner {
-    enum Outcome: Equatable {
-        case done(MeetingID)
-        case failed(MeetingID, reason: String)
-    }
-
-    private(set) var outcome: Outcome?
-    @ObservationIgnored private var watched: MeetingID?
+    private(set) var outcome: ProcessingQueue.Outcome?
+    @ObservationIgnored private var presentedRevision: Int?
     @ObservationIgnored private var clearing: Task<Void, Never>?
 
     /// Call whenever the queue changes.
     func update(from queue: ProcessingQueue) {
-        if let active = queue.activeJob {
-            watched = active.id
-            outcome = nil
+        if queue.activeJob != nil {
             clearing?.cancel()
+            outcome = nil
             return
         }
-        guard let id = watched else { return }
-        watched = nil
-        switch queue.jobs[id] {
-        case .completed:
-            outcome = .done(id)
-            clearing?.cancel()
+        guard let result = queue.lastResult, result.revision != presentedRevision else { return }
+        presentedRevision = result.revision
+        outcome = result.outcome
+        clearing?.cancel()
+        if case .completed = result.outcome {
             clearing = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(4))
                 if !Task.isCancelled { self?.outcome = nil }
             }
-        case .failed(_, let reason):
-            outcome = .failed(id, reason: reason)
-        default:
-            break
         }
     }
 
@@ -58,7 +47,7 @@ struct FloatingContent: View {
     }
 
     var body: some View {
-        NotchIsland(metrics: notch.metrics, stays: staysOpen) {
+        NotchIsland(metrics: notch.metrics, stays: staysOpen, recording: app.capture.state.isCapturing) {
             expanded
         } leading: {
             leadingWing
@@ -67,12 +56,16 @@ struct FloatingContent: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .tipLayer(prefersBelow: true)
+        .liveLanguage()
     }
 
     /// States that ask for an answer or report something open by themselves; the rest wait for
     /// the pointer.
     private var staysOpen: Bool {
-        switch app.capture.state {
+        if let session = app.capture.collaboration,
+           (session.allowsRoomCommands && (session.suggestion != nil || session.state == .confirmingStart))
+            || session.commandStatus != .hidden || session.state == .needsSignIn { return true }
+        return switch app.capture.state {
         case .prompting, .awaitingMicrophone, .endingSoon, .failed: true
         case .idle: app.queue.activeJob == nil && banner.outcome != nil
         case .starting, .recording, .paused, .stopping: false
@@ -147,8 +140,17 @@ struct FloatingContent: View {
             Working(text: LocalizedStringKey(Copy.job(job.state)))
         } else {
             switch banner.outcome {
-            case .done(let id):
-                Status(icon: "circle-check", tint: Palette.success, text: LocalizedStringKey(title(id)))
+            case .completed(_, let title):
+                HStack(spacing: 7) {
+                    Icon("circle-check", size: 16).foregroundStyle(Palette.success)
+                    Group {
+                        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("Transcription complete") }
+                        else { Text(verbatim: title) }
+                    }
+                    .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: 480, minHeight: 30)
             case .failed(let id, _):
                 HStack(spacing: 10) {
                     Status(icon: "alert-triangle", tint: Palette.danger, text: "Processing failed")
@@ -163,10 +165,6 @@ struct FloatingContent: View {
             }
         }
     }
-
-    private func title(_ id: MeetingID) -> String {
-        app.meetings.rows.first { $0.id == id }?.title ?? ""
-    }
 }
 
 /// A black shape that hangs from the screen's top edge and merges with the notch. At rest it is
@@ -176,16 +174,17 @@ struct FloatingContent: View {
 struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
     let metrics: NotchMetrics
     let stays: Bool
+    let recording: Bool
     @ViewBuilder let expanded: Expanded
     @ViewBuilder let leading: Leading
     @ViewBuilder let trailing: Trailing
-    @State private var hovering = false
+    @State private var hover = NotchHover.outside
     @State private var openSize = CGSize.zero
 
     /// The width of each wing beside the notch.
     static var wing: CGFloat { 34 }
 
-    private var isOpen: Bool { stays || hovering }
+    private var isOpen: Bool { stays || hover == .inside }
     private var shape: NotchShape { NotchShape(ear: isOpen ? 12 : 6, radius: isOpen ? 22 : min(10, metrics.height / 2)) }
     private var restWidth: CGFloat { metrics.width + Self.wing * 2 }
 
@@ -201,6 +200,7 @@ struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
                 .opacity(isOpen ? 1 : 0)
                 .scaleEffect(isOpen ? 1 : 0.9, anchor: .top)
                 .allowsHitTesting(isOpen)
+                .accessibilityHidden(!isOpen)
             HStack(spacing: 0) {
                 // EmptyView takes no space, even with a frame. Keep both wings present so
                 // a lone spinner stays beside the physical notch instead of shifting under it.
@@ -209,7 +209,11 @@ struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
                 Color.clear.frame(width: Self.wing).overlay { trailing }
             }
             .frame(height: metrics.height)
+            .contentShape(Rectangle())
+            .onTapGesture { hover = .inside }
             .opacity(isOpen ? 0 : 1)
+            .allowsHitTesting(!isOpen)
+            .accessibilityHidden(isOpen)
         }
         .frame(width: isOpen ? max(openSize.width, restWidth) : restWidth,
                height: isOpen ? max(openSize.height, metrics.height) : metrics.height, alignment: .top)
@@ -217,7 +221,10 @@ struct NotchIsland<Expanded: View, Leading: View, Trailing: View>: View {
         .clipShape(shape)
         .background(.black, in: shape)
         .contentShape(shape)
-        .onHover { hovering = $0 }
+        .onHover { hover.pointerChanged(inside: $0) }
+        .onChange(of: recording) { _, began in
+            if began { hover.recordingBegan() }
+        }
         .font(Typo.bodyStrong)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
@@ -510,19 +517,25 @@ private struct PromptLearnButton: View {
 
 struct RecordingCapsule: View {
     let capture: CaptureController
-    @State private var hovering = false
 
     var body: some View {
+        VStack(spacing: 10) {
+            recordingBar
+            if let session = capture.collaboration {
+                CollabCapsuleRows(session: session)
+            }
+        }
+    }
+
+    private var recordingBar: some View {
         CapsuleBar(
             isPaused: isPaused, level: level, elapsed: capture.meters.elapsed,
-            remoteSilent: capture.meters.remoteSilentWhilePlaying, showsHighlight: hovering || isPaused,
-            hasHighlights: capture.meters.highlightCount > 0,
+            remoteSilent: capture.meters.remoteSilentWhilePlaying,
             captionsShown: capture.captions.isActive ? !capture.captions.isBarHidden : nil,
             toggleCaptions: { capture.captions.isBarHidden.toggle() },
+            collaboration: capture.collaboration,
             toggle: { Task { if isPaused { await capture.resume() } else { await capture.pause() } } },
-            highlight: { Task { await capture.markHighlight() } },
             finish: { Task { await capture.stop() } })
-            .onHover { hovering = $0 }
     }
 
     private var isPaused: Bool {
@@ -541,13 +554,11 @@ struct CapsuleBar: View {
     let level: Double
     let elapsed: TimeInterval
     let remoteSilent: Bool
-    let showsHighlight: Bool
-    let hasHighlights: Bool
     /// Whether the caption bar shows; nil when captions are off, which hides its button.
     var captionsShown: Bool?
     var toggleCaptions: () -> Void = {}
+    var collaboration: CollabSession?
     let toggle: () -> Void
-    let highlight: () -> Void
     let finish: () -> Void
 
     var body: some View {
@@ -574,18 +585,27 @@ struct CapsuleBar: View {
                     .opacity(isPaused ? 0.55 : 1)
                     .transition(.opacity)
             }
-            if showsHighlight {
-                CircleButton("Highlight", icon: hasHighlights ? "star-filled" : "star", action: highlight)
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
-            }
             if let captionsShown {
                 CircleButton(captionsShown ? "Hide Captions" : "Show Captions", icon: "badge-cc", action: toggleCaptions)
                     .transition(.opacity)
             }
+            if let collaboration {
+                if let room = collaboration.room {
+                    CircleButton("Open Collaboration", icon: "maximize", action: MainNavigation.shared.openCollaboration)
+                    CircleButton("Open in Browser as Host", icon: "external-link") {
+                        Task { await collaboration.openHostBrowser { NSWorkspace.shared.open($0) } }
+                    }
+                    .disabled(collaboration.openingHostBrowser)
+                    CollabCopyLink(url: room.shareUrl)
+                }
+                if collaboration.showsCommandButton {
+                    CircleButton("Voice Command", icon: "microphone", action: collaboration.toggleVoiceCommand)
+                    CircleButton("Command", icon: "sparkles", action: collaboration.toggleCommand)
+                }
+            }
             CircleButton("Finish", icon: "check", kind: .primary, action: finish)
         }
         .motion(Motion.reveal, value: captionsShown == nil)
-        .motion(Motion.select, value: showsHighlight)
         .motion(Motion.reveal, value: isPaused)
         .motion(Motion.reveal, value: remoteSilent)
     }

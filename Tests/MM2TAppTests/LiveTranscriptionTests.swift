@@ -20,11 +20,12 @@ struct PieceSTT: TranscriptionProvider {
 private struct HeldPieceSTT: TranscriptionProvider {
     let started = Gate<Bool>()
     let release = Gate<Bool>()
+    let cancelled = Box(false)
     let pieces = PieceSTT()
 
     func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords {
         await started.open(true)
-        _ = await release.wait()
+        _ = await withTaskCancellationHandler { await release.wait() } onCancel: { cancelled.set(true) }
         return try await pieces.transcribe(audio: audio, hints: hints, labelSpeakers: labelSpeakers)
     }
 }
@@ -44,11 +45,12 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
         self.holdsSnapshot = holdsSnapshot
     }
 
-    func append(samples: [Float], track: Track) async {
+    func append(samples: [Float], track: Track) async throws {
         if holdsAppend {
             await appendStarted.open(true)
             _ = await releaseAppend.wait()
         }
+        try Task.checkCancellation()
         frames[track, default: 0] += samples.count
     }
 
@@ -65,6 +67,13 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
 
 @Suite struct LiveTranscriptionTests {
     static let rate = 1000
+
+    @Test func breezeKeepsTheTailShortAndUsesAFullWindowForCatchUpOrStop() {
+        #expect(LiveTranscriber.breezeWindow(remaining: 10, finishing: false) == 4)
+        #expect(LiveTranscriber.breezeWindow(remaining: 12, finishing: false) == 10)
+        #expect(LiveTranscriber.breezeWindow(remaining: 31, finishing: false) == 30)
+        #expect(LiveTranscriber.breezeWindow(remaining: 13, finishing: true) == 30)
+    }
 
     @Test func recordingUsesHostedRoutesWithoutSkippingOverALocalPreference() async throws {
         let hosted = FakeSTT(.unreachable), cloud = FakeSTT(.unreachable), local = FakeSTT()
@@ -203,14 +212,13 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
         #expect(await live.finish(mic: files.mic, remote: files.remote) != nil, "stop bypasses the remaining backoff")
     }
 
-    @Test func movingTheRecordingWaitsForTheActivePieceAndKeepsItsWords() async throws {
+    @Test func movingTheRecordingCancelsTheActivePieceWithoutWaitingForItsProvider() async throws {
         let files = try recording(mic: Self.tone(50, quietEnds: [17, 33]), remote: [Int16](repeating: 0, count: 50 * Self.rate))
         let stt = HeldPieceSTT()
         let live = LiveTranscriber(mic: files.mic, remote: files.remote, chain: TranscriptionChain([.init(.cloud, stt)]),
                                    hints: [], scratch: files.directory.appending(path: "scratch"), pieceSeconds: 20)
         let advancing = Task { await live.advance() }
         _ = await stt.started.wait()
-        advancing.cancel() // Stopping cancels the polling task, but must keep its active upload.
         let library = MeetingLibrary(root: files.directory.appending(path: "library"))
         let moved = Box(false)
         let moving = Task {
@@ -220,15 +228,34 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
             moved.set(true)
             return await live.finish(mic: library.audioURL(meeting, track: .me), remote: library.audioURL(meeting, track: .remote))
         }
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(!moved.get)
-        #expect(FileManager.default.fileExists(atPath: files.mic.path))
+        #expect(await eventually { moved.get && stt.cancelled.get })
+        #expect(!FileManager.default.fileExists(atPath: files.mic.path))
         await stt.release.open(true)
         await advancing.value
         let result = try #require(try await moving.value)
         #expect(result.me.words.count == 3)
-        #expect(stt.pieces.files.get.filter { $0 == "me-0.wav" }.count == 1)
+        #expect(stt.pieces.files.get.filter { $0 == "me-0.wav" }.count == 2)
         #expect(await live.transcribedSeconds == 50)
+    }
+
+    @MainActor @Test func finalSpeakerSnapshotCompletesWhileTailRecognitionIsPending() async throws {
+        let files = try configurationRecording()
+        let session = ConfigurationSpeakerSession()
+        let processor = try configurationProcessor(World(), session: session, directory: files.directory)
+        let stt = HeldPieceSTT()
+        let live = LiveTranscriber(mic: files.mic, remote: files.remote, chain: TranscriptionChain([.init(.cloud, stt)]),
+                                   hints: [], scratch: files.directory.appending(path: "scratch"), pieceSeconds: 90,
+                                   processing: processor)
+        let finishing = Task { await live.finish(mic: files.mic, remote: files.remote) }
+        _ = await stt.started.wait()
+        for _ in 0..<1_000 {
+            if await session.snapshots == [true] { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await session.snapshots == [true])
+        await stt.release.open(true)
+        #expect(await finishing.value?.me.words.count == 1)
+        #expect(await session.frames == [.me: 80 * 16_000, .remote: 80 * 16_000])
     }
 
     @MainActor @Test(arguments: [false, true])
@@ -247,8 +274,7 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
         else { _ = await stt.started.wait() }
         let returned = Box(false)
         let preparing = Task { await live.prepareForMove(); returned.set(true) }
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(!returned.get, "the active piece must finish before its files can move")
+        #expect(await eventually { returned.get })
         await stt.release.open(true)
         await session.releaseAppend.open(true)
         await advancing.value
@@ -260,7 +286,7 @@ private actor ConfigurationSpeakerSession: StreamingDiarizationSession {
 
         let transcription = try #require(await live.finish(mic: files.mic, remote: files.remote))
         #expect(transcription.me.words.count == 3 && transcription.remote.words.isEmpty)
-        #expect(stt.pieces.files.get.count == 3 && Set(stt.pieces.files.get).count == 3)
+        #expect(stt.pieces.files.get.count == (holdAppend ? 3 : 4) && Set(stt.pieces.files.get).count == 3)
         #expect(await session.frames == [.me: 80 * 16_000, .remote: 80 * 16_000])
         #expect(await session.snapshots == [true], "only the complete final audio should be snapshotted")
         #expect(await live.transcribedSeconds == 80)

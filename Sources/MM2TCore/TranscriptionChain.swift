@@ -21,6 +21,7 @@ public struct TranscriptionChain: Sendable {
     public func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TrackTranscript {
         var lastError = TranscriptionError.unreachable("no transcription source configured")
         for route in routes {
+            try Task.checkCancellation()
             do {
                 let content = try await route.provider.transcribe(audio: audio, hints: hints, labelSpeakers: labelSpeakers)
                 return TrackTranscript(source: route.source, content: content)
@@ -30,5 +31,9 @@ public struct TranscriptionChain: Sendable {
             }
         }
         throw lastError
+    }
+
+    public func finishSession(meeting: String) async {
+        for route in routes { await route.provider.finishSession(meeting: meeting) }
     }
 }

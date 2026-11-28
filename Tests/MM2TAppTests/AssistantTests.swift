@@ -38,6 +38,7 @@ import Testing
             case .answerDelta: order.append("delta")
             case .finished(let found): sources = found; order.append("finished")
             case .ledger: break
+            case .filed: Issue.record("Unexpected filing action in retrieval-only scenario")
             case .failed(let reason): Issue.record("\(reason)")
             }
         }
@@ -88,9 +89,9 @@ import Testing
         let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
         var readCount = 0
         for await event in engine.events(question: "Budget", previous: [], provider: llm) {
-            if case .toolStarted(_, .read, let args) = event { readCount = args.meetings.count }
+            if case .toolFinished(_, let result) = event, result.coverage.hasPrefix("READ:") { readCount = result.meetings.count }
         }
-        #expect(readCount == 8)
+        #expect(readCount == 10)
         let tiny = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints, contextBudget: 1)
         for await _ in tiny.events(question: "Budget", previous: [], provider: llm) {}
         #expect(llm.answerInputs.get.last?.components(separatedBy: "material):\n").last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
@@ -101,6 +102,30 @@ import Testing
         }
         #expect(tools == 0)
         #expect(llm.answerInputs.get.count == 3)
+    }
+
+    @Test func oneQuestionSharesItsGroupAcrossRetrievalAndAnswer() async throws {
+        let world = try World()
+        let meeting = try await world.recordedMeeting(title: "預算")
+        try await world.app.searchIndex.rebuild(from: [meeting])
+        let llm = FakeLLM()
+        llm.decisions.set(plan(queries: ["大家好"]))
+        let engine = AssistantEngine(library: world.library, index: world.app.searchIndex, voiceprints: world.app.voiceprints)
+        let model = AssistantModel(engine: engine, build: { .ready(llm) })
+        model.send("What happened?")
+        #expect(await eventually { model.turns.last?.state == .finished })
+        let requests = llm.requestGroups.get
+        #expect(requests.count == 4)
+        let group = try #require(requests.compactMap { $0 }.first)
+        #expect(requests.allSatisfy { $0 == group })
+        llm.requestGroups.set([])
+        llm.decisions.set(plan(queries: [], lookup: false))
+        model.send("What else?")
+        #expect(await eventually { model.turns.count == 2 && model.turns.last?.state == .finished })
+        let next = llm.requestGroups.get
+        let nextGroup = try #require(next.compactMap { $0 }.first)
+        #expect(nextGroup != group)
+        #expect(next.allSatisfy { $0 == nextGroup })
     }
 
     @Test func stopSetupAndRetry() async throws {

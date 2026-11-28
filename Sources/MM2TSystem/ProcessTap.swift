@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import MM2TCore
 
 /// What a tap listens to.
 enum TapScope: Equatable {
@@ -25,6 +26,32 @@ enum TapScope: Equatable {
             (ownBundleID != nil && process.ownerBundleID == ownBundleID)
                 || isAudioRelay(process.ownerBundleID) || isAudioRelay(process.identity.bundleID)
         }.map(\.objectID).sorted())
+    }
+
+    // Known media-player bundle IDs (from memory; not verified against installed apps).
+    static let mediaPlayers: Set<String> = [
+        "com.spotify.client", "com.apple.Music", "com.apple.TV", "com.apple.podcasts",
+        "com.apple.QuickTimePlayerX", "org.videolan.vlc", "com.colliderli.iina", "com.tidal.desktop",
+        "com.deezer.deezer-desktop", "com.amazon.music", "com.netease.163music", "com.kkbox.KKBOX",
+    ]
+
+    static func automatic(ownBundleID: String?, ignoring: Set<String>, locked: Set<String>,
+                          processes: [AudioProcess]) -> (scope: TapScope, locked: Set<String>) {
+        let candidates = processes.compactMap { process -> String? in
+            guard process.isRunningInput, let owner = process.ownerBundleID, owner != ownBundleID,
+                  !isAudioRelay(owner), !isAudioRelay(process.identity.bundleID),
+                  !ignoring.contains(owner), !DetectionPolicy.isExcluded(owner) else { return nil }
+            return owner
+        }
+        let newLocked = locked.union(candidates)
+        if !newLocked.isEmpty {
+            return (.only(processes.filter { $0.ownerBundleID.map(newLocked.contains) == true }.map(\.objectID).sorted()), newLocked)
+        }
+        let excluded = processes.filter { process in
+            let ids = [process.ownerBundleID, process.identity.bundleID].compactMap { $0 }
+            return ids.contains { $0 == ownBundleID || isAudioRelay($0) || mediaPlayers.contains($0) }
+        }
+        return (.allExcept(excluded.map(\.objectID).sorted()), newLocked)
     }
 
     static func isAudioRelay(_ bundleID: String?) -> Bool {

@@ -1,0 +1,76 @@
+import Foundation
+import Testing
+@testable import MM2TApp
+import MM2TCore
+
+@MainActor @Suite struct CaptionEngineTests {
+    @Test func legacySettingsKeepFirefoxAndEveryChoiceSurvivesRestart() throws {
+        let legacy = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"captionTranslation":"japanese"}"#.utf8))
+        #expect(!AppSettings().translationEnabled)
+        #expect(legacy.translationEnabled)
+        #expect(legacy.captionEngine == .firefox)
+        #expect(legacy.captionTranslation.target == .japanese)
+        #expect(AppSettings().captionEngine == CaptionEngine.initial)
+        let defaults = try #require(UserDefaults(suiteName: "mm2t-tests-\(UUID())"))
+        let store = SettingsStore(defaults: defaults)
+        let processing = store.settings.forProcessing
+        for engine in CaptionEngine.allCases {
+            store.settings.captionEngine = engine
+            store.settings.captionTranslation = CaptionTranslation(engine == .firefox ? .japanese : CaptionTarget(languageCode: "vi"))
+            let reloaded = SettingsStore(defaults: defaults).settings
+            #expect(!reloaded.translationEnabled)
+            #expect(reloaded.captionEngine == engine)
+            #expect(reloaded.captionTranslation == store.settings.captionTranslation)
+            #expect(reloaded.forProcessing == processing)
+        }
+    }
+
+    @Test func selectingSharedModelDownloadsOnceAndUnsupportedChoiceIsCleared() async throws {
+        let world = try World()
+        let app = world.app
+        #expect(app.setup.missingTranslationBytes(for: .hyMT2) == world.translationInstaller.downloadBytes)
+        await app.setCaptionEngine(.hyMT2)
+        #expect(world.translationInstaller.downloads.get == 1)
+        #expect(app.setup.translationModels == .downloaded)
+        #expect(app.setup.missingTranslationBytes(for: .hyMT2) == nil)
+        await app.setCaptionEngine(.hyMT2)
+        await app.setCaptionTranslation(CaptionTranslation(try #require(CaptionTarget(languageCode: "vi"))))
+        #expect(world.translationInstaller.downloads.get == 1)
+        await app.setCaptionEngine(.firefox)
+        #expect(app.settings.settings.captionTranslation == .off)
+        #expect(world.translationInstaller.downloads.get == 1)
+        if #available(macOS 26, *) {
+            await app.setCaptionEngine(.apple)
+            await app.setCaptionTranslation(CaptionTranslation(.english))
+            await app.setup.downloadTranslationModels()
+            #expect(app.setup.translationTarget == nil)
+            #expect(world.translationInstaller.downloads.get == 1)
+        }
+    }
+
+    @Test func disabledTranscriptTranslationDoesNotInstallOrForgetTheModel() async throws {
+        let world = try World()
+        let app = world.app
+        await app.setTranslationEnabled(false)
+        #expect(await !app.setup.prepareTranscriptModel(engine: .firefox, target: .japanese))
+        #expect(world.translationInstaller.downloads.get == 0)
+        await app.setTranslationEnabled(true)
+        #expect(await app.setup.prepareTranscriptModel(engine: .firefox, target: .japanese))
+        #expect(app.settings.settings.captionTranslation == .off)
+        #expect(world.translationInstaller.downloads.get == 1)
+    }
+
+    @Test func languageListsAndRoutesFollowTheSelectedModel() throws {
+        #expect(CaptionTarget.hyTargets.count == 38)
+        #expect(CaptionTarget.hyTargets.allSatisfy { $0.flag.unicodeScalars.count == 2 })
+        #expect(CaptionTarget(languageCode: "fr")?.flag == "🇫🇷")
+        #expect(CaptionTarget(languageCode: "vi")?.flag == "🇻🇳")
+        #expect(Set(CaptionTarget.hyTargets.map(\.id)).count == CaptionTarget.hyTargets.count)
+        #expect(CaptionTarget(languageCode: "zh-Hant-TW") == .traditionalChinese)
+        #expect(CaptionTarget(languageCode: "en-US") == .english)
+        #expect(CaptionTarget.japanese.route(from: .traditionalChinese, engine: .firefox) == .models(["zh_hant", "en", "ja"]))
+        for engine in [CaptionEngine.apple, .hyMT2] {
+            #expect(CaptionTarget.japanese.route(from: .traditionalChinese, engine: engine) == .models(["zh_hant", "ja"]))
+        }
+    }
+}

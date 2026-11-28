@@ -7,6 +7,8 @@ import SwiftUI
 struct LivePage: View {
     let app: AppController
     let collapse: () -> Void
+    @State private var selected = Tab.shared
+    private enum Tab: CaseIterable { case shared, captions }
     @State private var follow = AssistantFollowScroll()
     @Environment(\.controlActiveState) private var activeState
 
@@ -16,19 +18,56 @@ struct LivePage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if app.settings.settings.liveCaptions || captions.isActive {
-                if captions.segments.isEmpty && captions.partial.isEmpty {
-                    placeholder(title: "Listening…", detail: "Captions appear here as people speak.")
+            if let collaboration = capture.collaboration, let room = collaboration.room {
+                Segmented(options: Tab.allCases, selection: $selected) { tab in
+                    switch tab {
+                    case .captions: String(localized: "Captions")
+                    case .shared: String(localized: "Shared")
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+                if selected == .shared {
+                    HStack {
+                        if collaboration.hostBrowserFailed { Text("Couldn’t open the host page.") }
+                        Spacer()
+                        PillButton("Open in Browser as Host", icon: "external-link") {
+                            Task { await collaboration.openHostBrowser { NSWorkspace.shared.open($0) } }
+                        }
+                        .disabled(collaboration.openingHostBrowser)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 10)
+                    CollabHostView(page: .shared, url: room.hostUrl).id(room.roomId)
                 } else {
-                    transcript
+                    captionBody
                 }
             } else {
-                placeholder(title: "Live captions are off", detail: nil)
+                captionBody
             }
         }
         .background(Palette.window)
-        .onChange(of: activeState, initial: true) { MainNavigation.shared.liveFrontmost = activeState == .key }
+        .onChange(of: MainNavigation.shared.collaborationRequest) { selected = .shared }
+        .onChange(of: showingCaptionsInKeyWindow, initial: true) {
+            MainNavigation.shared.liveFrontmost = showingCaptionsInKeyWindow
+        }
         .onDisappear { MainNavigation.shared.liveFrontmost = false }
+    }
+
+    private var showingCaptionsInKeyWindow: Bool {
+        activeState == .key && (capture.collaboration?.room == nil || selected == .captions)
+    }
+
+    @ViewBuilder private var captionBody: some View {
+        if app.settings.settings.liveCaptions || captions.isActive {
+            if captions.segments.isEmpty && captions.partial.isEmpty {
+                placeholder(title: "Listening…", detail: "Captions appear here as people speak.")
+            } else {
+                transcript
+            }
+        } else {
+            placeholder(title: "Live captions are off", detail: nil)
+        }
     }
 
     private var header: some View {

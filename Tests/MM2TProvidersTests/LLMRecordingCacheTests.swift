@@ -60,7 +60,7 @@ import Testing
             utterance("u\($0)", "r1", Double($0) * 3, String(repeating: "字", count: characters))
         }
         let server = StubServer { request in
-            let allIDs = request.geminiInput.split(separator: "\n").compactMap { line -> String? in
+            let allIDs = (request.geminiInput.components(separatedBy: "</data>").first ?? "").split(separator: "\n").compactMap { line -> String? in
                 guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { return nil }
                 return String(line[line.index(after: line.startIndex)..<close])
             }

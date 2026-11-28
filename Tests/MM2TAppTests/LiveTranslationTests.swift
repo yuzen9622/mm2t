@@ -322,6 +322,113 @@ import Testing
         #expect(world.capture.captions.segments.isEmpty)
     }
 
+    @Test func barRequestsSetupThenTogglesTranslationOnlyForThisRecording() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        await world.capture.startManually(RecordingTarget(bundleID: nil, name: "Meeting", platform: nil))
+        #expect(await eventually { world.capture.captions.status == .live })
+        let session = try #require(world.catalog.streaming.last)
+        #expect(await world.app.toggleLiveTranslation(), "No target opens setup and leaves the bar untranslated")
+        #expect(world.capture.captions.translationTarget == nil)
+        await world.app.setCaptionTranslation(CaptionTranslation(.german))
+        #expect(world.capture.captions.translationTarget == .german)
+        #expect(await world.app.toggleLiveTranslation() == false)
+        #expect(world.capture.captions.translationTarget == nil)
+        #expect(world.app.settings.settings.translationEnabled)
+        #expect(world.app.settings.settings.captionTranslation.target == .german)
+        #expect(await world.app.toggleLiveTranslation() == false)
+        #expect(world.capture.captions.translationTarget == .german)
+        #expect(world.catalog.streaming.last === session)
+        await world.capture.stop()
+    }
+
+    @Test func firstUseFromBarConfiguresThisMeetingWhileGlobalTranslationIsOff() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        await world.app.setTranslationEnabled(false)
+        await world.capture.startManually(RecordingTarget(bundleID: nil, name: "Meeting", platform: nil))
+        #expect(await eventually { world.capture.captions.status == .live })
+        let captions = world.capture.captions
+        let meeting = try #require(captions.translationSession)
+        #expect(await world.app.toggleLiveTranslation())
+        // Closing setup and later changing a preference must not turn on the bar.
+        await world.app.setCaptionTranslation(CaptionTranslation(.korean))
+        #expect(captions.translationTarget == nil)
+        await world.app.setCaptionTranslation(.off)
+        #expect(await world.app.toggleLiveTranslation())
+        await world.app.setCaptionTranslation(CaptionTranslation(.german), forRecording: meeting)
+        #expect(captions.translationTarget == .german)
+        #expect(!world.app.settings.settings.translationEnabled)
+        await world.capture.stop()
+        await world.app.setCaptionTranslation(CaptionTranslation(.english), forRecording: meeting)
+        #expect(world.app.settings.settings.captionTranslation.target == .german)
+    }
+
+    @Test func switchingTargetAndEngineInPlaceRetiresLateResults() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        await world.app.setCaptionTranslation(CaptionTranslation(.english))
+        await world.capture.startManually(RecordingTarget(bundleID: nil, name: "Meeting", platform: nil))
+        #expect(await eventually { world.capture.captions.status == .live })
+        let session = try #require(world.catalog.streaming.last)
+        world.catalog.translator.holds.set(true)
+        session.say(.final("第一句"))
+        #expect(await eventually { world.catalog.translator.held == ["第一句"] })
+        await world.app.setCaptionTranslation(CaptionTranslation(.japanese))
+        await world.app.setCaptionEngine(.hyMT2)
+        world.catalog.translator.holds.set(false)
+        await world.catalog.translator.release("第一句")
+        session.say(.final("第二句"))
+        #expect(await eventually { world.capture.captions.segments.last?.translation == "⟨第二句⟩" })
+        #expect(world.capture.captions.segments.first?.translation == nil)
+        #expect(world.capture.captions.segments.first?.text == "第一句")
+        #expect(world.catalog.translator.calls.get.last?.languages == ["zh_hant", "ja"])
+        #expect(world.catalog.streaming.last === session)
+        await world.capture.stop()
+    }
+
+    @Test func failedModelPreparationKeepsOriginalsAndCanBeRetriedFromTheBar() async throws {
+        let world = try World()
+        world.app.settings.settings.liveCaptions = true
+        world.app.settings.settings.captionTranslation = CaptionTranslation(.german)
+        await world.capture.startManually(RecordingTarget(bundleID: nil, name: "Meeting", platform: nil))
+        #expect(await eventually { world.capture.captions.status == .live })
+        let stream = try #require(world.catalog.streaming.last)
+        let gate = Gate<Bool>()
+        world.translationInstaller.hold.set(gate)
+        let first = Task { await world.app.toggleLiveTranslation() }
+        #expect(await eventually { world.capture.captions.preparingTranslation })
+        stream.say(.final("While the model is downloading."))
+        #expect(await eventually { world.capture.captions.displaySegments.first?.text == "While the model is downloading." })
+        await gate.open(false)
+        #expect(await first.value)
+        #expect(world.capture.captions.translationTarget == nil)
+        world.translationInstaller.hold.set(nil)
+        #expect(await world.app.toggleLiveTranslation() == false)
+        #expect(world.capture.captions.translationTarget == .german)
+        #expect(world.catalog.streaming.last === stream)
+        await world.capture.stop()
+    }
+
+    @Test func finishingPreparationAfterRecordingStopsCannotReactivateTranslation() async throws {
+        let world = try World()
+        let captions = world.capture.captions
+        var settings = world.app.settings.settings
+        settings.captionTranslation = CaptionTranslation(.german)
+        captions.translationSession = MeetingID()
+        let gate = Gate<Bool>()
+        let pending = Task {
+            await captions.configureTranslation(settings: settings, catalog: world.catalog) { _ = await gate.wait() }
+        }
+        #expect(await eventually { captions.preparingTranslation })
+        captions.clear()
+        await gate.open(true)
+        await pending.value
+        #expect(captions.translationTarget == nil)
+        #expect(!captions.preparingTranslation)
+        #expect(world.catalog.translatorTargets.get.isEmpty)
+    }
+
     @Test func withoutTheModelsCaptionsRunUntranslated() async throws {
         let world = try World()
         world.app.settings.settings.liveCaptions = true

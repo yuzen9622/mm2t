@@ -40,6 +40,8 @@ public struct Hotkey: Codable, Hashable, Sendable {
 
     /// The default: Command with Fn (Globe), pressed together and let go.
     public static let commandFn = Hotkey(modifiers: [.command, .function])
+    /// The voice command default: Option with Fn (Globe), pressed together and let go.
+    public static let optionFn = Hotkey(modifiers: [.option, .function])
 
     public var usesFunctionKey: Bool { modifiers.contains(.function) }
 

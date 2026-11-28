@@ -120,6 +120,7 @@ private struct KaraokeRenderer: TextRenderer {
 
 struct LyricRow: View {
     let line: LyricLine
+    var translation: String? = nil
     let showsSpeaker: Bool
     let state: LyricState
     let playhead: Playhead
@@ -151,15 +152,29 @@ struct LyricRow: View {
                     TextCorrection(text: line.text, save: { save($0); editing = false }, cancel: { editing = false },
                                    rewrite: rewrite)
                 } else {
-                    content
-                        .foregroundStyle(Palette.text)
+                    if let translation {
+                        let pairs = TranscriptTranslation.pairs(original: line.text, translated: translation)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(pairs.indices, id: \.self) { index in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if !pairs[index].translated.isEmpty {
+                                        Text(verbatim: pairs[index].translated).font(Typo.reading).foregroundStyle(Palette.text)
+                                    }
+                                    Text(verbatim: pairs[index].original).font(Typo.caption).foregroundStyle(Palette.secondary)
+                                }
+                            }
+                        }.textSelection(.enabled).padding(.trailing, 100)
+                    } else { content.foregroundStyle(Palette.text) }
                     Spacer(minLength: 8)
-                    trailing
+                    if translation == nil { trailing }
                 }
+            }
+            .overlay(alignment: .topTrailing) {
+                if translation != nil && !editing { trailing }
             }
             .padding(.leading, 14)
             .padding(.trailing, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, translation?.isEmpty == true ? 0 : 8)
             .background {
                 RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(state == .current || isFocused ? Palette.orangeSoft : hovering ? Palette.hover : .clear)
@@ -203,8 +218,12 @@ struct LyricRow: View {
         HStack(spacing: 6) {
             if line.isHighlighted { Icon("star-filled", size: 12).foregroundStyle(Palette.orange) }
             if canEdit {
-                IconButton("Edit", icon: "pencil") { editing = true }
-                    .opacity(hovering ? 1 : 0)
+                if translation == nil {
+                    IconButton("Edit", icon: "pencil") { editing = true }.opacity(hovering ? 1 : 0)
+                } else {
+                    Button { editing = true } label: { Icon("pencil", size: 12) }
+                        .buttonStyle(.plain).accessibilityLabel(Text("Edit")).opacity(hovering ? 1 : 0)
+                }
             }
             Text(MeetingPresentation.timestamp(line.start))
                 .font(Typo.caption).monospacedDigit()

@@ -17,7 +17,30 @@ import Testing
         let target = try #require(world.capture.state.target)
         #expect(world.capture.state == .recording(target))
         #expect(target.bundleID == "us.zoom.xos" && target.platform == .zoom)
-        #expect(world.recorder.last?.configuration.targetBundleID == "us.zoom.xos")
+        #expect(world.recorder.last?.configuration.systemAudio == .app("us.zoom.xos"))
+    }
+
+    @Test func acceptingGoogleMeetConsumesHoverUntilThePointerEntersAgain() async throws {
+        let world = try World()
+        let signals = SystemSignals(micBundleIDs: ["com.google.Chrome"], frontmostBundleID: "com.google.Chrome",
+                                    browserURL: URL(string: "https://meet.google.com/abc-defg-hij"))
+        await world.capture.handle(signals)
+        guard case .prompting(let meeting) = world.capture.state else { Issue.record("Expected Meet prompt"); return }
+        #expect(meeting.platform == .googleMeet)
+
+        var hover = NotchHover.outside
+        hover.pointerChanged(inside: true)
+        #expect(hover == .inside)
+        await world.capture.startPrompted()
+        #expect(world.capture.state.isCapturing)
+        hover.recordingBegan()
+        hover.pointerChanged(inside: true)
+        #expect(hover == .waitingForExit)
+        await world.capture.handle(signals)
+        #expect(world.capture.state.isCapturing)
+        hover.pointerChanged(inside: false)
+        hover.pointerChanged(inside: true)
+        #expect(hover == .inside)
     }
 
     @Test func aDismissedMeetingDoesNotPromptAgainUntilItHasReallyEnded() async throws {
@@ -121,7 +144,7 @@ import Testing
         #expect(try await world.library.list().count == 1)
     }
 
-    @Test func aWholeMacRecordingCountsDownWhenTheMeetingItWasStartedForEnds() async throws {
+    @Test func anAutomaticOnlineRecordingCountsDownWhenTheMeetingEnds() async throws {
         let world = try World(endCountdown: .seconds(30))
         await world.capture.startNow(title: "錄音")
         await world.capture.handle(Signals.zoom())
@@ -149,19 +172,51 @@ import Testing
         world.capture.dismiss()
 
         await world.capture.startNow(title: "錄音")
-        #expect(world.recorder.last?.configuration.targetBundleID == "us.zoom.xos")
+        #expect(world.recorder.last?.configuration.systemAudio == .app("us.zoom.xos"))
         #expect(world.capture.state.target?.platform == .zoom)
     }
 
-    @Test func theRecordButtonRecordsTheWholeMacWhenNoMeetingIsDetected() async throws {
+    @Test func theRecordButtonUsesAutomaticAudioAndIgnoresSilencedApps() async throws {
         let world = try World()
+        world.app.settings.settings.detectionRules.apps = [
+            DetectionRule(key: "us.zoom.xos", name: "Zoom", prompts: false),
+            DetectionRule(key: "com.apple.Safari", name: "Safari", prompts: true),
+        ]
         await world.capture.startNow(title: "錄音")
 
         let target = try #require(world.capture.state.target)
         #expect(world.capture.state == .recording(target))
         #expect(target.bundleID == nil && !target.isBrowser)
         let configuration = try #require(world.recorder.last?.configuration)
-        #expect(configuration.targetBundleID == nil && configuration.title == "錄音")
+        #expect(configuration.systemAudio == .automatic(ignoring: ["us.zoom.xos"]) && configuration.title == "錄音")
+    }
+
+    @Test func inPersonRecordingIgnoresADetectedCallAndKeepsRecordingWhenItEnds() async throws {
+        let world = try World()
+        world.app.settings.settings.recordingMode = .inPerson
+        await world.capture.handle(Signals.zoom())
+        #expect(world.capture.state == .prompting(zoom))
+
+        await world.capture.startNow(title: "實體週會")
+        let target = RecordingTarget(bundleID: nil, name: "實體週會", platform: nil, mode: .inPerson)
+        #expect(world.capture.state == .recording(target))
+        let configuration = try #require(world.recorder.last?.configuration)
+        #expect(configuration.systemAudio == .off)
+        #expect(configuration.captureMicrophone)
+
+        await world.capture.handle(Signals.quiet)
+        #expect(world.capture.state == .recording(target))
+        #expect(try await world.library.list().isEmpty)
+    }
+
+    @Test func acceptingADetectedCallIsOnlineEvenWithInPersonSaved() async throws {
+        let world = try World()
+        world.app.settings.settings.recordingMode = .inPerson
+        await world.capture.handle(Signals.zoom())
+        await world.capture.startPrompted()
+        #expect(world.capture.state.target?.mode == .online)
+        #expect(world.recorder.last?.configuration.systemAudio == .app("us.zoom.xos"))
+        #expect(world.app.settings.settings.recordingMode == .inPerson)
     }
 
     @Test func manualStartRecordsTheChosenApp() async throws {
@@ -169,7 +224,7 @@ import Testing
         let target = RecordingTarget(bundleID: "com.apple.Safari", name: "週會", platform: nil)
         await world.capture.startManually(target)
         #expect(world.capture.state == .recording(target))
-        #expect(world.recorder.last?.configuration.targetBundleID == "com.apple.Safari")
+        #expect(world.recorder.last?.configuration.systemAudio == .app("com.apple.Safari"))
         #expect(world.recorder.last?.configuration.title == "週會")
     }
 
@@ -283,7 +338,7 @@ import Testing
 
         await world.capture.toggle(title: "錄音")
         #expect(world.capture.state.isCapturing)
-        #expect(world.recorder.last?.configuration.targetBundleID == "us.zoom.xos", "the meeting app's sound, as accepting would")
+        #expect(world.recorder.last?.configuration.systemAudio == .app("us.zoom.xos"), "the meeting app's sound, as accepting would")
 
         await world.capture.toggle(title: "錄音")
         #expect(world.capture.state == .idle)
@@ -295,7 +350,7 @@ import Testing
         let world = try World()
         await world.capture.toggle(title: "錄音")
         let configuration = try #require(world.recorder.last?.configuration)
-        #expect(configuration.targetBundleID == nil && configuration.title == "錄音")
+        #expect(configuration.systemAudio == .automatic(ignoring: []) && configuration.title == "錄音")
         #expect(configuration.captureMicrophone)
     }
 

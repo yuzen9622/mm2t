@@ -46,16 +46,46 @@ public struct EchoProfile: Hashable, Sendable {
     /// Words are short, so the stretch judged reaches this far past each end.
     static let margin: TimeInterval = 0.15
 
+    /// A 0.5 s gap split a real sentence at 224.69 s after a 0.93 s pause, dropping its quiet tail.
+    /// At 1 s the tail shares the loud word's decision, both offline and in the live replay.
+    static let runGap: TimeInterval = 1
+    /// A 50 ms playback frame is active at −45 dBFS or louder.
+    package static let activePlayback: Float = 3.16e-5
+    /// Echo hallucinations can trail playback by up to one second (265.8 s after silence at 265.5 s).
+    static let playbackLookback: TimeInterval = 1
+    /// Check speaker evidence in the 10 seconds on either side of the run start.
+    static let speakerContext: TimeInterval = 10
+    /// Headphones lost at most 1 dB, while speakers lost 3 to 17 dB. Require a 2× energy ratio.
+    static let speakerRatio: Float = 2
+    /// Take the loudest 300 ms (six 50 ms frames), or the entire run if shorter.
+    static let loudnessFrames = 6
+    /// Residual echo measured −39 to −56 dBFS and real speech −14 to −31 dBFS. Split at −36 dBFS.
+    static let quietRun: Float = 2.51e-4
+
     public let frameDuration: TimeInterval
     /// Mean square per frame.
     public let before: [Float]
     public let after: [Float]
+    /// Playback mean square at the mic's timing; nil where echo was not profiled.
+    public let remote: [Float?]
+    package let linearAfter: [Float]
 
-    public init(frameDuration: TimeInterval, before: [Float], after: [Float]) {
-        precondition(before.count == after.count, "EchoProfile needs both loudness tracks the same length")
+
+    public init(frameDuration: TimeInterval, before: [Float], after: [Float], remote: [Float]? = nil,
+                linearAfter: [Float]? = nil) {
+        self.init(frameDuration: frameDuration, before: before, after: after,
+                  remoteFrames: remote?.map(Optional.some) ?? .init(repeating: 0, count: before.count),
+                  linearAfter: linearAfter ?? after)
+    }
+
+    private init(frameDuration: TimeInterval, before: [Float], after: [Float], remoteFrames: [Float?], linearAfter: [Float]) {
+        precondition(before.count == after.count && before.count == remoteFrames.count && before.count == linearAfter.count,
+                     "EchoProfile needs all loudness tracks the same length")
         self.frameDuration = frameDuration
         self.before = before
         self.after = after
+        self.remote = remoteFrames
+        self.linearAfter = linearAfter
     }
 
     /// Whether what the mic heard over `range` was mostly the remote track played back.
@@ -64,29 +94,161 @@ public struct EchoProfile: Hashable, Sendable {
         let first = max(0, Int((range.start - Self.margin) / frameDuration))
         let last = min(before.count - 1, Int((range.end + Self.margin) / frameDuration))
         guard first <= last else { return false }
-        let heard = before[first...last].reduce(0, +), left = after[first...last].reduce(0, +)
-        return heard > 0 && heard >= Self.echoRatio * left
+        let heard = before[first...last].reduce(0, +)
+        let left = after[first...last].reduce(0, +)
+        let linearLeft = linearAfter[first...last].reduce(0, +)
+        return Self.isPlayback(heard: heard, left: left, linearLeft: linearLeft)
+    }
+
+    private static func isPlayback(heard: Float, left: Float, linearLeft: Float) -> Bool {
+        // AEC3's suppressor can attenuate near-end speech in double-talk. Only
+        // attribute that loss to playback if the render-aligned subtraction agrees.
+        heard > 0 && heard >= echoRatio * max(left, linearLeft)
     }
 
     /// Whether a voice heard over all of `ranges` was the remote track played back: a person next
     /// to the mic lost 1 to 2 dB of their speech to the removal there, the speakers 8 to 17 dB.
     public func isEcho(_ ranges: [TimeRange]) -> Bool {
         guard frameDuration > 0 else { return false }
-        var heard: Float = 0, left: Float = 0
+        var heard: Float = 0, left: Float = 0, linearLeft: Float = 0
         for range in ranges {
             let first = max(0, Int(range.start / frameDuration)), last = min(before.count, Int((range.end / frameDuration).rounded(.up)))
             guard first < last else { continue }
             heard += before[first..<last].reduce(0, +)
             left += after[first..<last].reduce(0, +)
+            linearLeft += linearAfter[first..<last].reduce(0, +)
         }
-        return heard > 0 && heard >= Self.echoRatio * left
+        return Self.isPlayback(heard: heard, left: left, linearLeft: linearLeft)
+    }
+
+    /// Keep mic words that pass both the run loudness gate and the original per-word echo check.
+    public func droppingEcho(from words: [TimedWord]) -> [TimedWord] {
+        droppingEcho(from: words, word: \.self)
+    }
+
+    func droppingEcho<Word>(from entries: [Word], word: KeyPath<Word, TimedWord>) -> [Word] {
+        let words = entries.map { $0[keyPath: word] }
+        return wordRuns(words).flatMap { run in
+            guard !run.isEcho else { return [Word]() }
+            return run.indices.compactMap { index in
+                let range = words[index].range
+                if !isEcho(range) { return entries[index] }
+                // A quiet final word may trail clear local speech. Keep it when its
+                // evidence window overlaps the preceding retained word's window.
+                guard index == run.indices.upperBound - 1, index > run.indices.lowerBound,
+                      let peak = run.peak, peak >= Self.quietRun else { return nil }
+                let preceding = words[index - 1].range
+                guard range.start <= preceding.end + 2 * Self.margin,
+                      range.duration <= Self.runGap, !isEcho(preceding) else { return nil }
+                return entries[index]
+            }
+        }
+    }
+
+    package struct WordRun {
+        package let indices: Range<Int>
+        package let range: TimeRange
+        package let playbackNearby: Bool
+        package let speakerRatio: Float?
+        package let peak: Float?
+
+        package var isEcho: Bool {
+            playbackNearby && (speakerRatio ?? 0) >= EchoProfile.speakerRatio && (peak ?? .infinity) < EchoProfile.quietRun
+        }
+    }
+
+    package func wordRuns(_ words: [TimedWord], gap: TimeInterval = EchoProfile.runGap) -> [WordRun] {
+        var runs: [WordRun] = []
+        var first = 0
+        while first < words.count {
+            let start = words[first].range.start
+            var end = words[first].range.end
+            var next = first + 1
+            while next < words.count, words[next].range.start <= end + gap {
+                end = max(end, words[next].range.end)
+                next += 1
+            }
+            runs.append(measureRun(first..<next, range: TimeRange(start: start, end: end)))
+            first = next
+        }
+        return runs
+    }
+
+    private func active(_ frame: Int) -> Bool { (remote[frame] ?? 0) >= Self.activePlayback }
+
+    private func speakerRatio(heard: Double, left: Double) -> Float? {
+        left > 0 ? Float(heard / left) : (heard > 0 ? .infinity : nil)
+    }
+
+    /// One decision per profile frame, using only the linear fit on remote-active frames.
+    package func speakerFrames() -> [Bool] {
+        let reach = Int((Self.speakerContext / frameDuration).rounded())
+        var heard: Double = 0, left: Double = 0
+        var first = 0, last = 0
+        return before.indices.map { frame in
+            while last < min(before.count, frame + reach) {
+                if active(last) { heard += Double(before[last]); left += Double(linearAfter[last]) }
+                last += 1
+            }
+            while first < max(0, frame - reach) {
+                if active(first) { heard -= Double(before[first]); left -= Double(linearAfter[first]) }
+                first += 1
+            }
+            return (speakerRatio(heard: heard, left: left) ?? 0) >= Self.speakerRatio
+        }
+    }
+
+    package func replacingCleanedEnergy(with cleaned: [Float]) -> EchoProfile {
+        EchoProfile(frameDuration: frameDuration, before: before, after: cleaned,
+                    remoteFrames: remote, linearAfter: linearAfter)
+    }
+
+    private func measureRun(_ indices: Range<Int>, range: TimeRange) -> WordRun {
+        let nearby = frames(from: range.start - Self.playbackLookback, to: range.end + Self.margin, inclusiveEnd: true)
+        var heard: Double = 0, left: Double = 0
+        for frame in frames(from: range.start - Self.speakerContext, to: range.start + Self.speakerContext) where active(frame) {
+            heard += Double(before[frame])
+            left += Double(linearAfter[frame])
+        }
+        let ratio = speakerRatio(heard: heard, left: left)
+        let span = frames(from: range.start, to: range.end, inclusiveEnd: range.start == range.end)
+        let width = min(Self.loudnessFrames, span.count)
+        var peak: Float?
+        if width > 0, remote[span].allSatisfy({ $0 != nil }) {
+            var sum = after[span.prefix(width)].reduce(0, +), loudest = sum
+            for frame in span.dropFirst(width) {
+                sum += after[frame] - after[frame - width]
+                loudest = max(loudest, sum)
+            }
+            peak = loudest / Float(width)
+        }
+        return WordRun(indices: indices, range: range, playbackNearby: nearby.contains(where: active),
+                       speakerRatio: ratio, peak: peak)
+    }
+
+    private func frames(from start: TimeInterval, to end: TimeInterval, inclusiveEnd: Bool = false) -> Range<Int> {
+        guard frameDuration > 0 else { return 0..<0 }
+        func gridPosition(_ time: TimeInterval) -> Double {
+            let position = time / frameDuration
+            let nearest = position.rounded()
+            return abs(nearest - position) < 1e-9 ? nearest : position
+        }
+        let lower = gridPosition(start).rounded(.down)
+        let position = gridPosition(end)
+        let upper = inclusiveEnd ? position.rounded(.down) + 1 : position.rounded(.up)
+        let first = Int(min(Double(before.count), max(0, lower)))
+        let last = Int(min(Double(before.count), max(Double(first), upper)))
+        return first..<last
     }
 
     /// `other` placed `time` seconds in; the gap before it counts as no echo.
     public func appending(_ other: EchoProfile, at time: TimeInterval) -> EchoProfile {
-        let gap = [Float](repeating: 0, count: max(0, Int((time / frameDuration).rounded()) - before.count))
-        return EchoProfile(frameDuration: frameDuration,
-                           before: before + gap + other.before, after: after + gap + other.after)
+        let count = max(0, Int((time / frameDuration).rounded()) - before.count)
+        let gap = [Float](repeating: 0, count: count)
+        return EchoProfile(frameDuration: frameDuration, before: before + gap + other.before,
+                           after: after + gap + other.after,
+                           remoteFrames: remote + .init(repeating: nil, count: count) + other.remote,
+                           linearAfter: linearAfter + gap + other.linearAfter)
     }
 }
 
@@ -144,6 +306,13 @@ public enum PlaybackMic {
 
 public protocol Diarizer: Sendable {
     func diarize(track: URL) async throws -> Diarization
+    func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization
+}
+
+extension Diarizer {
+    public func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization {
+        try await diarize(track: track)
+    }
 }
 
 /// Voice vectors for speaker turns another source segmented, so voiceprints still match
@@ -179,6 +348,7 @@ public enum TranscriptionSource: String, Codable, Sendable, CaseIterable {
     case selfHosted
     case cloud
     case local
+    case mm2t
 }
 
 /// The language of the speech, as a hint to every transcription source.
@@ -246,6 +416,27 @@ public protocol TranscriptionProvider: Sendable {
     /// Throws `TranscriptionError.unreachable` on connection failure so the chain can fall through.
     /// `labelSpeakers` is true only for the remote track; a provider that cannot diarize ignores it.
     func transcribe(audio: URL, hints: [String], labelSpeakers: Bool) async throws -> TranscribedWords
+    /// The meeting's tracks are both transcribed; a metered provider closes what it held open for them.
+    func finishSession(meeting: String) async
+}
+
+extension TranscriptionProvider {
+    public func finishSession(meeting: String) async {}
+}
+
+/// Which meeting and track a `transcribe` call belongs to, for providers that meter per meeting.
+/// Absent for one-off transcriptions such as voiceprint enrollment.
+public struct TranscriptionContext: Sendable, Hashable {
+    public let meeting: String
+    public let track: Track
+    public let recordingOffset: Int?
+    public init(meeting: String, track: Track, recordingOffset: Int? = nil) {
+        self.recordingOffset = recordingOffset
+        self.meeting = meeting
+        self.track = track
+    }
+
+    @TaskLocal public static var current: TranscriptionContext?
 }
 
 // MARK: LLM
@@ -259,10 +450,21 @@ public struct LLMUtterance: Hashable, Sendable {
     public let isHighlighted: Bool
 }
 
+package enum MeetingOutputLanguage: Hashable, Sendable {
+    case english, traditionalChinese
+
+    static var current: Self {
+        let locale = InterfaceLanguage.locale ?? Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        return locale.language.languageCode == .chinese ? .traditionalChinese : .english
+    }
+}
+
 public struct LLMTranscript: Hashable, Sendable {
     public let utterances: [LLMUtterance]
     /// The user's vocabulary and known names: the spelling to prefer when speech recognition wrote a sound-alike.
     public var glossary: [String] = []
+    /// The UI language for the summary and per-person digests produced in this generation.
+    package var outputLanguage: MeetingOutputLanguage = .current
 }
 
 public struct NameInferenceRequest: Hashable, Sendable {

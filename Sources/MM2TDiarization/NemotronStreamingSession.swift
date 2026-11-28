@@ -106,10 +106,10 @@ actor NemotronStreamingSession: StreamingDiarizationSession {
         }
         var diarizations: [Track: Diarization] = [:]
         var processed: [Track: TimeInterval] = [:]
-        for (track, turns, seconds, cache, samples) in captured {
+        for (track, capturedTurns, seconds, cache, samples) in captured {
             try Task.checkCancellation()
             processed[track] = seconds
-            let segments = SpeakerTurns.bridgingGaps(turns, shorterThan: NemotronDiarizer.gapBridging)
+            var turns = capturedTurns
             var kept: [ClusterID: [Embedding]] = [:]
             var brief: [ClusterID: [Embedding]] = [:]
             if samples > 0 {
@@ -118,11 +118,19 @@ actor NemotronStreamingSession: StreamingDiarizationSession {
                 guard audio.sampleCount >= (final ? samples : Int((seconds * 16_000).rounded())) else {
                     throw StreamingDiarizationError.incompleteAudio(track)
                 }
+                if final, track == .remote {
+                    // A whole-track gain is only knowable after capture. Warm snapshots use the live turns.
+                    let gain = try RemoteDiarizationGain.measure(in: audio)
+                    if gain > 1, let model = states[track]?.model {
+                        turns = try NemotronDiarizer.turns(of: audio, with: model, gain: gain)
+                    }
+                }
                 let result = try await embedder.incrementalVoiceprints(audio: audio, segments: turns, cache: cache)
                 kept = result.kept
                 brief = result.brief
                 states[track]?.cache = result.cache
             }
+            let segments = SpeakerTurns.bridgingGaps(turns, shorterThan: NemotronDiarizer.gapBridging)
             diarizations[track] = Diarization(segments: segments, overlaps: SpeakerTurns.overlaps(segments),
                                              embeddings: kept, briefEmbeddings: brief)
         }

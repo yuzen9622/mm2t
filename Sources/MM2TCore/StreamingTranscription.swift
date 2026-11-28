@@ -36,10 +36,26 @@ public protocol StreamingTranscriptionSession: Sendable {
     /// Mono samples in -1...1 at the request's rate.
     func send(_ samples: [Float]) async throws
     func close() async
+    /// The consumer has cleared its display and will discard all remaining events.
+    func discard() async
+}
+
+public extension StreamingTranscriptionSession {
+    func discard() async { await close() }
 }
 
 /// Opens streaming sessions. Its text is for display only and never becomes the record.
 public protocol StreamingTranscriptionProvider: Sendable {
-    /// Throws `TranscriptionError` like `TranscriptionProvider`: `.unreachable` to try again later, `.failed` to give up.
+    /// Throws `.ineligible` to skip silently, `.unreachable` to try again later, or `.failed` to give up.
     func open(_ request: StreamingTranscriptionRequest) async throws -> any StreamingTranscriptionSession
+    /// Releases recording-scoped resources or hands them to the saved meeting's transcription.
+    func stop(retainingLeaseFor meeting: MeetingID?) async
+}
+
+public enum StreamingTranscriptionAvailability: Error {
+    case ineligible
+}
+
+public extension StreamingTranscriptionProvider {
+    func stop(retainingLeaseFor meeting: MeetingID?) async {}
 }

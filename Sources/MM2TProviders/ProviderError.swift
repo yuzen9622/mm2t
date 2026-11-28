@@ -2,6 +2,7 @@ import Foundation
 import MM2TCore
 
 public enum Service: String, Sendable, CaseIterable {
+    case mm2tPlan
     case elevenLabs
     case selfHosted
     case gemini
@@ -12,6 +13,7 @@ public enum Service: String, Sendable, CaseIterable {
     /// User-facing text here is looked up in the app's String Catalog (`Bundle.main`), so it shows in the UI language.
     var displayName: String {
         switch self {
+        case .mm2tPlan: String(localized: "mm2t plan", bundle: .main)
         case .elevenLabs: "ElevenLabs"
         case .selfHosted: String(localized: "the self-hosted transcription server", bundle: .main)
         case .gemini: "Gemini"
@@ -27,7 +29,7 @@ public enum Service: String, Sendable, CaseIterable {
         case .selfHosted: String(localized: "the self-hosted server token", bundle: .main)
         case .gemini: "Gemini API Key"
         case .openAICompatible: String(localized: "the large language model API key", bundle: .main)
-        case .localTranscription, .localLLM: displayName
+        case .mm2tPlan, .localTranscription, .localLLM: displayName
         }
     }
 }
@@ -53,6 +55,22 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
         case meetingTooLong
         /// An on-device model is missing, incomplete, or failed to load.
         case modelUnavailable
+        /// The meeting reached the plan's length for one meeting; what was transcribed so far is kept.
+        case sessionLimitReached
+        /// Another Mac on the same account is transcribing with the plan.
+        case sessionActive
+        /// The plan's AI allowance for this purpose is used up.
+        case aiQuotaExceeded(AIQuotaScope)
+    }
+
+    /// Which allowance the backend says is used up (`ai_quota_exceeded.scope`).
+    public enum AIQuotaScope: String, Sendable {
+        /// Free plan questions and rewrites.
+        case asks
+        /// Summaries after a meeting, earned by the plan's transcription minutes.
+        case auto
+        case daily
+        case monthly
     }
 
     public let service: Service
@@ -69,6 +87,12 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
     public var errorDescription: String? { description }
 
     public var description: String {
+        if service == .mm2tPlan {
+            if kind == .invalidCredential { return String(localized: "Sign in to use your mm2t plan.", bundle: .main) }
+            if kind == .outOfCredit { return String(localized: "Your mm2t plan has no minutes left this month.", bundle: .main) }
+            if kind == .permissionDenied { return String(localized: "Your mm2t plan is suspended for this account.", bundle: .main) }
+            if kind == .rateLimited { return String(localized: "Too many mm2t plan requests at once. Try again in a minute.", bundle: .main) }
+        }
         let name = service.displayName
         let key = service.keyName
         let text = switch kind {
@@ -102,6 +126,18 @@ public struct ProviderError: Error, Equatable, Sendable, CustomStringConvertible
             String(localized: "This meeting is longer than \(name) can process at once.", bundle: .main)
         case .modelUnavailable:
             String(localized: "\(name) isn't fully downloaded or couldn't load. Download the model again in Settings.", bundle: .main)
+        case .sessionLimitReached:
+            String(localized: "This meeting reached the length your mm2t plan transcribes per meeting. The recording is kept.", bundle: .main)
+        case .sessionActive:
+            String(localized: "Another Mac on this account is transcribing with the mm2t plan. Try again when it finishes.", bundle: .main)
+        case .aiQuotaExceeded(.asks):
+            String(localized: "This month's mm2t plan AI requests are used up.", bundle: .main)
+        case .aiQuotaExceeded(.auto):
+            String(localized: "Summaries with the mm2t plan come with the plan's transcription minutes, and none are left for this meeting.", bundle: .main)
+        case .aiQuotaExceeded(.daily):
+            String(localized: "Today's mm2t plan AI usage is used up. It resets tomorrow.", bundle: .main)
+        case .aiQuotaExceeded(.monthly):
+            String(localized: "This month's mm2t plan AI usage is used up.", bundle: .main)
         }
         // Service names are lowercase so they read well mid-sentence; a sentence still starts with a capital.
         return text.prefix(1).uppercased() + text.dropFirst()

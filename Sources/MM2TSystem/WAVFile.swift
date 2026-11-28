@@ -34,6 +34,10 @@ public final class WAVWriter {
         }
     }
 
+    package func appendPCM(_ samples: [Int16]) {
+        samples.withUnsafeBytes { pending.append(contentsOf: $0) } // macOS is little-endian.
+    }
+
     public func appendSilence(frames: Int) {
         pending.append(Data(count: frames * 2))
     }
@@ -101,8 +105,9 @@ public enum WAVFormat {
     /// pieces. `frames` is clamped to what is on disk.
     public static func read(_ url: URL, frames: Range<Int>) throws -> WAVAudio {
         let (layout, available) = try growing(url)
-        let range = max(0, frames.lowerBound) ..< min(available, frames.upperBound)
-        guard !range.isEmpty else { return WAVAudio(sampleRate: layout.sampleRate, samples: []) }
+        let lower = max(0, frames.lowerBound), upper = min(available, frames.upperBound)
+        guard lower < upper else { return WAVAudio(sampleRate: layout.sampleRate, samples: []) }
+        let range = lower..<upper
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(layout.dataOffset + range.lowerBound * 2))
@@ -110,6 +115,22 @@ public enum WAVFormat {
         let samples = data.prefix(data.count / 2 * 2)
             .withUnsafeBytes { Array($0.bindMemory(to: Int16.self)).map(Int16.init(littleEndian:)) }
         return WAVAudio(sampleRate: layout.sampleRate, samples: samples)
+    }
+
+    /// Scans PCM in bounded chunks. An unreadable track is not assumed to be silent.
+    public static func isDigitalSilence(_ url: URL) -> Bool {
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let layout = try parse(try handle.read(upToCount: 4096) ?? Data())
+            try handle.seek(toOffset: UInt64(layout.dataOffset))
+            while let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty {
+                if data.contains(where: { $0 != 0 }) { return false }
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     public static func write(_ audio: WAVAudio, to url: URL) throws {

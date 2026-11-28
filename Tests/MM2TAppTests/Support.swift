@@ -79,10 +79,13 @@ enum Script {
 
     static let remoteWords = [
         TimedWord("大家好", 0.5, 1.5), TimedWord("今天", 1.6, 2.2), TimedWord("討論預算", 2.2, 3.5),
-        TimedWord("小明", 4.5, 5), TimedWord("你覺得呢", 5, 6),
+        TimedWord("小明", 4.5, 5), TimedWord("你覺得呢", 5, 6.5),
         TimedWord("我同意", 20.5, 21.5),
     ]
     static let micWords = [TimedWord("那就這樣", 30, 31), TimedWord("決定", 31, 31.5)]
+    static let micDiarization = Diarization(
+        segments: [.init(cluster: ClusterID("mic"), range: TimeRange(start: 30, end: 32))],
+        overlaps: [], embeddings: [:])
 }
 
 struct FakeSTT: TranscriptionProvider {
@@ -130,6 +133,12 @@ final class FakeStreamingSession: StreamingTranscriptionSession, @unchecked Send
     private let continuation: AsyncThrowingStream<StreamingTranscriptEvent, Error>.Continuation
     let sent = Box<[[Float]]>([])
     let closed = Box(false)
+    let discardGate = Box<Gate<Bool>?>(nil)
+
+    func discard() async {
+        if let gate = discardGate.get { _ = await gate.wait() }
+        await close()
+    }
 
     init() { (events, continuation) = AsyncThrowingStream.makeStream() }
 
@@ -160,6 +169,8 @@ struct FakeLLMError: Error, CustomStringConvertible {
 struct FakeLLM: LLMProvider, StructuredGenerator {
     let decisions = Box([assistantDecision("search_meetings", query: "預算"), assistantDecision("read_meeting"), assistantDecision("answer")])
     let generationInputs = Box<[String]>([])
+    let requestGroups = Box<[UUID?]>([])
+    let scopeDirective = Box("keep")
     let memoryJSON = Box(#"{"preference":null}"#)
     let answerChunks = Box(["Answer [m1] [m1.u1] [m99]"])
     let resumedAnswerChunks = Box<[String]>([])
@@ -167,9 +178,12 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let streamCancelled = Box(false)
     let holdsStream = Box(false)
     let failsStream = Box(false)
+    let providerStreamError = Box<ProviderError?>(nil)
     let lateAfterCancellation = Box<[String]>([])
     var service: Service { .gemini }
     func generate(system: String, input: String, schema: JSON) async throws -> String {
+        requestGroups.update { $0.append(HostedRequestGroup.current) }
+        if system.hasPrefix("Scope of referenced meetings:") { return "{\"choice\":\"\(scopeDirective.get)\"}" }
         if system.hasPrefix("Memory intent:") { return memoryJSON.get }
         generationInputs.update { $0.append(input) }
         try await record("plan")
@@ -178,6 +192,7 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
         return result
     }
     func streamText(system: String, input: String) -> AsyncThrowingStream<String, Error> {
+        requestGroups.update { $0.append(HostedRequestGroup.current) }
         answerInputs.update { $0.append(input) }
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -190,7 +205,8 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
                         streamCancelled.set(true)
                     }
                 }
-                if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
+                if let error = providerStreamError.get { continuation.finish(throwing: error) }
+                else if failsStream.get { continuation.finish(throwing: FakeLLMError()) }
                 else { continuation.finish() }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -205,12 +221,18 @@ struct FakeLLM: LLMProvider, StructuredGenerator {
     let holds = Box<[String: Gate<Bool>]>([:])
 
     private func record(_ task: String) async throws {
+        if task != "plan" { requestGroups.update { $0.append(HostedRequestGroup.current) } }
         calls.update { $0.append(task) }
         if let gate = holds.get[task] { _ = await gate.wait() }
         if failNext.get.contains(task) {
             failNext.update { $0.remove(task) }
             throw FakeLLMError()
         }
+    }
+
+    func rewrite(_ text: String, instruction: String) async throws -> String {
+        try await record("rewrite")
+        return "\(instruction): \(text)"
     }
 
     func vocabularyCorrections(from old: String, to new: String) async throws -> [VocabularyCorrection] {
@@ -263,9 +285,14 @@ struct LocalModelError: Error {}
 
 struct ScriptedDiarizer: Diarizer {
     let fails = Box(false)
-    func diarize(track: URL) async throws -> Diarization {
+    func diarize(track: URL, on channel: VoiceChannel) async throws -> Diarization {
         if fails.get { throw LocalModelError() }
         return Script.diarization
+    }
+
+    func diarize(track: URL) async throws -> Diarization {
+        if fails.get { throw LocalModelError() }
+        return Script.micDiarization
     }
 }
 
@@ -282,14 +309,15 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     let cloud = FakeSTT()
     let llm = FakeLLM()
     let diarizer = ScriptedDiarizer()
+    let recordingDiarizer = Box<(any Diarizer)?>(nil)
     let modelsDownloaded = Box(true)
     let onDeviceSTT = FakeSTT()
-    let onDeviceLLM = FakeLLM()
-    let offlineDownloaded: [OfflineModel: Box<Bool>] = [.transcription: Box(false), .llm: Box(false)]
+    let offlineDownloaded: [OfflineModel: Box<Bool>] = Dictionary(uniqueKeysWithValues: OfflineModel.allCases.map { ($0, Box(false)) })
     let keysUsed = Box<[String]>([])
     let selfHostedURLs = Box<[URL]>([])
     let languagesUsed = Box<[TranscriptionLanguage]>([])
     let openAIEndpoints = Box<[String]>([])
+    let hostedLLMSession = Box<URLSession?>(nil)
 
     func cloudTranscription(apiKey: Secret, language: TranscriptionLanguage) -> any TranscriptionProvider {
         keysUsed.update { $0.append("stt:" + apiKey.revealed) }
@@ -315,9 +343,15 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
         return selfHostedStreaming
     }
 
+    let hostedStreaming = FakeStreamingSTT()
+    let makeHostedCaptions = Box<(@Sendable (URL, HostedAuthorization, Bool) -> any StreamingTranscriptionProvider)?>(nil)
+    func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, meeting: String?) -> any StreamingTranscriptionProvider {
+        makeHostedCaptions.get?(url, authorization, traditionalChinese) ?? hostedStreaming
+    }
+
     let localStreaming = FakeStreamingSTT()
-    func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
-        offlineDownloaded[.transcription]!.get ? localStreaming : nil
+    func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)? {
+        offlineDownloaded[OfflineModel(model)]!.get ? localStreaming : nil
     }
 
     func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
@@ -331,22 +365,30 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
     }
 
     func localSpeakerModels() -> LocalSpeakerModels? {
-        modelsDownloaded.get ? LocalSpeakerModels(diarizer: diarizer, embedder: ScriptedEmbedder()) : nil
+        modelsDownloaded.get ? LocalSpeakerModels(diarizer: recordingDiarizer.get ?? diarizer, embedder: ScriptedEmbedder()) : nil
     }
 
-    func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
+    func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
         languagesUsed.update { $0.append(language) }
-        return offlineDownloaded[.transcription]!.get ? onDeviceSTT : nil
+        return offlineDownloaded[OfflineModel(model)]!.get ? onDeviceSTT : nil
     }
 
-    func localLLM() -> (any LLMProvider)? {
-        offlineDownloaded[.llm]!.get ? onDeviceLLM : nil
+    func hostedTranscription(url: URL, authorization: HostedAuthorization, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        keysUsed.update { $0.append("hosted-stt:" + authorization.stored.revealed) }
+        return selfHostedTranscription(url: url, token: authorization.stored, language: language)
+    }
+
+    func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider {
+        if let session = hostedLLMSession.get {
+            return OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", session: session, authorization: authorization)
+        }
+        return openAICompatibleLLM(baseURL: url, apiKey: authorization.stored, model: "mm2t")
     }
 
     let translator = FakeTranslator()
     let translationDownloaded = Box(false)
     let translatorTargets = Box<[CaptionTarget]>([])
-    func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
+    func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) -> (any CaptionTranslator)? {
         translatorTargets.update { $0.append(target) }
         return translationDownloaded.get ? translator : nil
     }
@@ -355,7 +397,7 @@ final class FakeCatalog: ProviderCatalog, @unchecked Sendable {
 
     var providerCalls: Int {
         selfHosted.calls.get.count + cloud.calls.get.count + llm.calls.get.count
-            + onDeviceSTT.calls.get.count + onDeviceLLM.calls.get.count
+            + onDeviceSTT.calls.get.count
     }
 }
 
@@ -443,6 +485,7 @@ struct FakeValidator: KeyValidating {
     func validate(_ request: KeyValidation) async -> KeyCheck {
         requests.update { $0.append(request) }
         if case .gemini(let key) = request, key.revealed == "bad" { return .rejected("Gemini API Key 無效") }
+        if case .gemini(let key) = request, key.revealed == "timeout" { return .inconclusive("Could not reach Gemini") }
         return .valid
     }
 }
@@ -463,7 +506,7 @@ actor FakeSession: RecordingSession {
         (events, continuation) = AsyncStream.makeStream()
         try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
         try RecordingManifest(title: configuration.title, startedAt: Date(), platform: configuration.platform,
-                              targetBundleID: configuration.targetBundleID).write(to: configuration.directory)
+                              targetBundleID: configuration.systemAudio.appBundleID).write(to: configuration.directory)
     }
 
     nonisolated func send(_ event: RecorderEvent) { continuation.yield(event) }
@@ -489,21 +532,28 @@ actor FakeSession: RecordingSession {
         return highlight
     }
 
+    private var suppliedTrackDuration: TimeInterval?
+    func useSuppliedTracks(duration: TimeInterval) { suppliedTrackDuration = duration }
+
     func stop() throws -> Recording {
         continuation.finish()
         audio?.finish()
         let directory = configuration.directory
-        for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
-            let writer = try WAVWriter(url: directory.appending(path: name), sampleRate: 16_000)
-            writer.appendSilence(frames: 16_000)
-            try writer.close()
+        if suppliedTrackDuration == nil {
+            for name in [RecordingManifest.micFile, RecordingManifest.remoteFile] {
+                let isRemote = name == RecordingManifest.remoteFile
+                // Distinguish digital silence from a signal too quiet to trigger echo removal.
+                let hasSignal = isRemote == (configuration.systemAudio != .off)
+                let audio = WAVAudio(sampleRate: 16_000, samples: [Int16](repeating: hasSignal ? 1 : 0, count: 16_000))
+                try WAVFormat.write(audio, to: directory.appending(path: name))
+            }
         }
         return Recording(
             micTrack: directory.appending(path: RecordingManifest.micFile),
             remoteTrack: directory.appending(path: RecordingManifest.remoteFile),
             highlights: highlights,
             metadata: MeetingMetadata(title: configuration.title, startedAt: Date(timeIntervalSince1970: 1_800_000_000),
-                                      duration: 35, platform: configuration.platform))
+                                      duration: suppliedTrackDuration ?? 35, platform: configuration.platform))
     }
 }
 
@@ -566,10 +616,16 @@ struct World {
     let app: AppController
 
     /// `endCountdown` is zero unless a test is about the countdown, so a meeting ending stops at once.
-    init(keys: Bool = true, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
-         endCountdown: Duration = .zero) throws {
+    init(keys: Bool = true, storedSettings: Data? = nil, machine: MachineProfile = MachineProfile(isAppleSilicon: true, memoryBytes: 16 << 30),
+         endCountdown: Duration = .zero, setupValidator: (any KeyValidating)? = nil,
+         collabConfiguration: CollabConfiguration? = nil, collabSession: URLSession = .shared) throws {
         root = try temporaryDirectory()
         defaults = UserDefaults(suiteName: "mm2t-tests-\(UUID().uuidString)")!
+        var settings = AppSettings()
+        settings.transcriptionService = .elevenLabs
+        settings.initializeCaptionSources(for: .elevenLabs)
+        settings.summaryService = .gemini
+        defaults.set(try storedSettings ?? JSONEncoder().encode(settings), forKey: SettingsStore.key)
         if keys {
             try credentials.save("eleven-key", for: .elevenLabsAPIKey)
             try credentials.save("gemini-key", for: .geminiAPIKey)
@@ -584,8 +640,11 @@ struct World {
             paths: AppPaths(root: root), defaults: defaults, credentials: credentials, catalog: catalog,
             recorder: recorder, permissions: permissions, installer: speakerInstaller,
             offlineInstallers: offlineInstallers,
-            translationInstaller: { _ in translation },
-            machine: machine, validator: validator, now: { now.get }, endCountdown: endCountdown)
+            translationInstaller: { _, _ in translation },
+            machine: machine, validator: setupValidator ?? validator, now: { now.get }, endCountdown: endCountdown,
+            collabConfiguration: collabConfiguration, collabSession: collabSession)
+        app.settings.settings.translationEnabled = true
+        app.settings.settings.captionEngine = .firefox
     }
 
     var capture: CaptureController { app.capture }

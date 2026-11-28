@@ -8,10 +8,11 @@ import SwiftUI
 @MainActor
 final class FloatingPanelController {
     private let app: AppController
-    private let panel: NSPanel
+    private let panel: TopEdgePanel
     private let host: NSHostingController<FloatingContent>
     private let banner = JobBanner()
     private let notch = NotchModel()
+    private var previousApp: NSRunningApplication?
     /// Room for the widest island plus its tooltips, which hang below it.
     private static let size = NSSize(width: 760, height: 240)
 
@@ -58,6 +59,28 @@ final class FloatingPanelController {
     }
 
     private func update() {
+        let wantsKey = switch app.capture.state {
+        case .recording, .paused: app.capture.collaboration?.wantsKeyboard == true
+        default: false
+        }
+        if wantsKey != panel.acceptsKeyboard {
+            if wantsKey {
+                let front = NSWorkspace.shared.frontmostApplication
+                previousApp = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
+                panel.acceptsKeyboard = true
+                NSApp.activate()
+                panel.makeKeyAndOrderFront(nil)
+            } else {
+                let hadKeyboardFocus = panel.isKeyWindow
+                panel.resignKey()
+                panel.acceptsKeyboard = false
+                if let previousApp, hadKeyboardFocus, NSApp.isActive {
+                    NSApp.yieldActivation(to: previousApp)
+                    previousApp.activate()
+                }
+                previousApp = nil
+            }
+        }
         if FloatingContent.isShown(app: app, banner: banner) {
             place()
             panel.orderFrontRegardless()
@@ -78,10 +101,11 @@ final class FloatingPanelController {
     }
 }
 
-/// A panel AppKit leaves where it is put, even over the menu bar, and that never takes focus.
+/// A panel AppKit leaves where it is put, even over the menu bar, and that only takes focus for the command row.
 private final class TopEdgePanel: NSPanel {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
-    override var canBecomeKey: Bool { false }
+    var acceptsKeyboard = false
+    override var canBecomeKey: Bool { acceptsKeyboard }
     override var canBecomeMain: Bool { false }
 }
 

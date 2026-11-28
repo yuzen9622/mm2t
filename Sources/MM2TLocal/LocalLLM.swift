@@ -83,7 +83,7 @@ public struct LocalLLM: LLMProvider, StructuredGenerator, AssistantInputLimiting
         } catch {
             throw ProviderError(.localLLM, .malformedResponse)
         }
-        return try await engine.generate(prompt: model.format(system, input), grammar: grammar)
+        return try await engine.generate(prompt: model.format(system, input), using: .structured(grammar: grammar))
     }
 }
 
@@ -93,7 +93,6 @@ final class LlamaEngine: @unchecked Sendable {
     private let path: URL
     private let contextTokens: Int32
     private let queue = DispatchQueue(label: "mm2t.llama", qos: .userInitiated)
-    private let cancelled = Flag()
     private var model: OpaquePointer?
     private var context: OpaquePointer?
 
@@ -112,12 +111,17 @@ final class LlamaEngine: @unchecked Sendable {
         llama_backend_init()
     }()
 
-    func generate(prompt: String, grammar: String) async throws -> String {
-        cancelled.set(false)
+    enum Generation: Sendable {
+        case structured(grammar: String)
+        case hyTranslation
+    }
+
+    func generate(prompt: String, using generation: Generation) async throws -> String {
+        let cancelled = Flag()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async {
-                    continuation.resume(with: Result { try self.run(prompt: prompt, grammar: grammar) })
+                    continuation.resume(with: Result { try self.run(prompt: prompt, generation: generation, cancelled: cancelled) })
                 }
             }
         } onCancel: {
@@ -148,12 +152,15 @@ final class LlamaEngine: @unchecked Sendable {
         return (model, context)
     }
 
-    private func run(prompt: String, grammar: String) throws -> String {
+    private func run(prompt: String, generation: Generation, cancelled: Flag) throws -> String {
+        if cancelled.get { throw CancellationError() }
         let (model, context) = try load()
         let vocab = llama_model_get_vocab(model)
         llama_memory_clear(llama_get_memory(context), true)
 
-        let tokens = try tokenize(prompt, vocab: vocab)
+        // Hy's rendered template already includes its beginning-of-sentence token.
+        let addSpecial: Bool = switch generation { case .structured: true; case .hyTranslation: false }
+        let tokens = try tokenize(prompt, vocab: vocab, addSpecial: addSpecial)
         let capacity = Int(llama_n_ctx(context))
         // An answer needs room; a prompt that leaves none is treated like an answer that hit the cap.
         guard tokens.count + 256 < capacity else { throw OutputTruncated() }
@@ -171,7 +178,7 @@ final class LlamaEngine: @unchecked Sendable {
             start = end
         }
 
-        guard let sampler = Self.sampler(vocab: vocab, grammar: grammar) else {
+        guard let sampler = Self.sampler(vocab: vocab, generation: generation) else {
             throw ProviderError(.localLLM, .malformedResponse)
         }
         defer { llama_sampler_free(sampler) }
@@ -193,7 +200,16 @@ final class LlamaEngine: @unchecked Sendable {
 
     /// Grammar first so every later stage only ever sees tokens that keep the JSON valid. A low
     /// temperature with a fixed seed stays close to greedy while avoiding its repetition loops.
-    private static func sampler(vocab: OpaquePointer?, grammar: String) -> UnsafeMutablePointer<llama_sampler>? {
+    private static func sampler(vocab: OpaquePointer?, generation: Generation) -> UnsafeMutablePointer<llama_sampler>? {
+        guard case .structured(let grammar) = generation else {
+            let chain = llama_sampler_chain_init(llama_sampler_chain_default_params())
+            llama_sampler_chain_add(chain, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, 1.05, 0, 0))
+            llama_sampler_chain_add(chain, llama_sampler_init_top_k(20))
+            llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.6, 1))
+            llama_sampler_chain_add(chain, llama_sampler_init_temp(0.7))
+            llama_sampler_chain_add(chain, llama_sampler_init_dist(42))
+            return chain
+        }
         guard let constrained = llama_sampler_init_grammar(vocab, grammar, "root") else { return nil }
         let chain = llama_sampler_chain_init(llama_sampler_chain_default_params())
         llama_sampler_chain_add(chain, constrained)
@@ -204,13 +220,13 @@ final class LlamaEngine: @unchecked Sendable {
         return chain
     }
 
-    private func tokenize(_ text: String, vocab: OpaquePointer?) throws -> [llama_token] {
+    private func tokenize(_ text: String, vocab: OpaquePointer?, addSpecial: Bool) throws -> [llama_token] {
         let length = Int32(text.utf8.count)
         var tokens = [llama_token](repeating: 0, count: Int(length) + 8)
-        var count = llama_tokenize(vocab, text, length, &tokens, Int32(tokens.count), true, true)
+        var count = llama_tokenize(vocab, text, length, &tokens, Int32(tokens.count), addSpecial, true)
         if count < 0 {
             tokens = [llama_token](repeating: 0, count: Int(-count))
-            count = llama_tokenize(vocab, text, length, &tokens, Int32(tokens.count), true, true)
+            count = llama_tokenize(vocab, text, length, &tokens, Int32(tokens.count), addSpecial, true)
         }
         guard count >= 0 else { throw ProviderError(.localLLM, .meetingTooLong) }
         return Array(tokens.prefix(Int(count)))

@@ -33,8 +33,15 @@ public struct SelfHostedTranscription: TranscriptionProvider {
             return .unlabeled(try await post(upload.data, filename: upload.filename, mimeType: upload.mimeType,
                                              hints: hints, languageCode: languageCode))
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
+    }
+
+    private func transcriptionError(_ error: ProviderError) -> TranscriptionError {
+        if error.kind == .unreachable, let host = baseURL.host() {
+            return .unreachable(String(localized: "Couldn't reach your transcription server (\(host)).", bundle: .main))
+        }
+        return error.asTranscriptionError
     }
 
     private func post(_ audio: Data, filename: String, mimeType: String, hints: [String], languageCode: String?) async throws -> [TimedWord] {
@@ -52,7 +59,9 @@ public struct SelfHostedTranscription: TranscriptionProvider {
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = form.finished()
         let response = try await session.send(request, for: .selfHosted)
-        guard response.status == 200 else { throw ProviderError(.selfHosted, Self.failure(response)) }
+        guard response.status == 200 else {
+            throw ProviderError(.selfHosted, Self.failure(response))
+        }
         return try Self.parse(response.body)
     }
 
@@ -69,8 +78,10 @@ public struct SelfHostedTranscription: TranscriptionProvider {
                     ? String(localized: "The server requires a token. Enter the server's MM2T_SERVER_TOKEN in Settings.", bundle: .main)
                     : ProviderError(.selfHosted, .invalidCredential).description)
             }
-            return .valid
+            if (200..<300).contains(response.status) || response.status == 405 { return .valid }
+            return .from(ProviderError(.selfHosted, Self.failure(response)))
         } catch let error as ProviderError {
+            if error.kind == .unreachable { return .inconclusive(transcriptionError(error).description) }
             return .from(error)
         } catch {
             return .inconclusive(ProviderError(.selfHosted, .unreachable).description)
@@ -126,9 +137,9 @@ public struct SelfHostedTranscription: TranscriptionProvider {
     }
 
     /// Whisper words carry a leading space ("␠hello"); the core joins tokens itself.
-    static func parse(_ body: Data) throws -> [TimedWord] {
+    static func parse(_ body: Data, service: Service = .selfHosted) throws -> [TimedWord] {
         guard let response = try? JSONDecoder().decode(Response.self, from: body) else {
-            throw ProviderError(.selfHosted, .malformedResponse)
+            throw ProviderError(service, .malformedResponse)
         }
         var words: [TimedWord] = []
         var previousEnd = 0.0
@@ -154,7 +165,7 @@ extension SelfHostedTranscription: ClipTranscriber {
         do {
             try await checkHealth()
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
     }
 
@@ -164,7 +175,7 @@ extension SelfHostedTranscription: ClipTranscriber {
                                        hints: request.hints, languageCode: request.languageCode)
             return Alignment.joined(words)
         } catch let error as ProviderError {
-            throw error.asTranscriptionError
+            throw transcriptionError(error)
         }
     }
 }

@@ -9,12 +9,13 @@ extension Copy {
         case .search: String(localized: "Searched")
         case .read: String(localized: "Read")
         case .tasks: String(localized: "Checked assignments")
+        case .filing: String(localized: "Reviewed meeting folders")
         case .answer: String(localized: "Answer")
         }
     }
     static func assistantDetail(_ step: AssistantStep) -> String {
         switch step.kind {
-        case .plan, .answer: return ""
+        case .plan, .answer, .filing: return ""
         case .search:
             let args = step.arguments
             let filters = (args.people + [args.dateFrom, args.dateTo].compactMap { $0 }).joined(separator: " · ")

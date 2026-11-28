@@ -1,12 +1,13 @@
 import AppKit
 import MM2TApp
 import MM2TCore
+import MM2TLocal
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct MeetingDetailView: View {
     let app: AppController
     let back: () -> Void
+    let todoKey: String?
     let utterance: UtteranceID?
     @State private var openedAtUtterance = false
     @State private var model: MeetingDetailModel
@@ -14,13 +15,17 @@ struct MeetingDetailView: View {
     @State private var showSpeakers = true
     @State private var renaming = false
     @State private var newTitle = ""
+    @State private var showsTranslation = true
+    @State private var translationSheet = false
+    @State private var waitingForTranslationSettings = false
     @State private var copied = false
     @State private var playhead = Playhead()
     @State private var confirmRegenerate = false
 
-    init(app: AppController, id: MeetingID, utterance: UtteranceID? = nil, back: @escaping () -> Void) {
+    init(app: AppController, id: MeetingID, utterance: UtteranceID? = nil, todoKey: String? = nil, back: @escaping () -> Void) {
         self.app = app
         self.utterance = utterance
+        self.todoKey = todoKey
         self.back = back
         _model = State(initialValue: app.detail(id, labels: Copy.presentationLabels, playback: TwoTrackPlayer()))
     }
@@ -29,6 +34,12 @@ struct MeetingDetailView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             ScreenHeader(title: Text(verbatim: model.meeting?.metadata.title ?? ""), back: back) {
+                if model.canOpenRoom {
+                    PillButton("Open Room", icon: "external-link") {
+                        Task { await model.openRoom { NSWorkspace.shared.open($0) } }
+                    }
+                    .disabled(model.openingRoom)
+                }
                 IconButton("Rename…", icon: "pencil") {
                     newTitle = model.meeting?.metadata.title ?? ""
                     renaming = true
@@ -37,6 +48,22 @@ struct MeetingDetailView: View {
                 IconButton("Regenerate Views…", icon: "sparkles") { confirmRegenerate = true }
                     .disabled(!model.canEditSpeakers)
                 IconButton(copied ? "Copied" : "Copy", icon: copied ? "check" : "copy", isOn: copied, action: copy)
+                if model.selectedView == .cleaned, let done = model.translationProgress {
+                    ProgressView(value: Double(done), total: Double(model.translationTotal)).frame(width: 64)
+                    Text(verbatim: "\(done)/\(model.translationTotal)").font(Typo.caption).monospacedDigit()
+                } else if model.selectedView == .cleaned {
+                    if model.meeting?.currentTranslation != nil {
+                        IconButton(showsTranslation ? "Show original" : "Show translation", icon: "language", isOn: showsTranslation) {
+                            showsTranslation.toggle()
+                        }
+                        .contextMenu {
+                            Button("Replace translation") { translationSheet = true }.disabled(!model.canEditSpeakers)
+                        }
+                    } else {
+                        IconButton("Translate transcript", icon: "language") { translationSheet = true }
+                            .disabled(!model.canEditSpeakers || model.presentation?.cleaned?.isEmpty != false)
+                    }
+                }
                 ExportMenu(model: model)
                 IconButton("Speakers", icon: "users", isOn: showSpeakers) { showSpeakers.toggle() }
             }
@@ -45,20 +72,25 @@ struct MeetingDetailView: View {
                     banners
                     Segmented(options: TranscriptView.allCases, selection: $model.selectedView) { Copy.view(for: $0) }
                     if let presentation = model.presentation {
-                        TranscriptContent(model: model, presentation: presentation, playhead: playhead)
-                            .overlay(alignment: .bottom) {
-                                if let playback = model.playback {
-                                    TransportBar(playhead: playhead, status: playback.status, toggle: {
-                                        playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
-                                        sample()
-                                    }, seek: { time in
-                                        playback.seek(to: time)
-                                        sample()
-                                    })
-                                    .frame(maxWidth: 560)
-                                    .padding(.bottom, 16)
+                        if let kind = model.selectedView.document {
+                            MeetingDocumentPage(kind: kind, model: model, presentation: presentation, todoKey: todoKey)
+                                .id(kind)
+                        } else {
+                            TranscriptContent(model: model, presentation: presentation, playhead: playhead, showsTranslation: showsTranslation)
+                                .overlay(alignment: .bottom) {
+                                    if let playback = model.playback {
+                                        TransportBar(playhead: playhead, status: playback.status, toggle: {
+                                            playback.isPlaying ? playback.pause() : playback.play(from: playback.currentTime)
+                                            sample()
+                                        }, seek: { time in
+                                            playback.seek(to: time)
+                                            sample()
+                                        })
+                                        .frame(maxWidth: 560)
+                                        .padding(.bottom, 16)
+                                    }
                                 }
-                            }
+                        }
                     } else {
                         Spacer()
                     }
@@ -75,6 +107,7 @@ struct MeetingDetailView: View {
             .motion(Motion.page, value: showSpeakers)
         }
         .task(id: app.queue.revision) {
+            if !openedAtUtterance, todoKey != nil { model.selectedView = .summary }
             await model.load(at: openedAtUtterance ? nil : utterance)
             if !Task.isCancelled { openedAtUtterance = true }
             sample()
@@ -88,8 +121,41 @@ struct MeetingDetailView: View {
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+        .onChange(of: model.selectedView) { _, view in
+            if view.document != nil { model.playback?.pause() }
+        }
         .onChange(of: model.playback?.duration) { sample() }
         .onChange(of: model.playback?.status) { sample() }
+        .disabled(translationSheet)
+        .accessibilityHidden(translationSheet)
+        .overlay {
+            if translationSheet {
+                ZStack {
+                    Color.black.opacity(0.28).onTapGesture { translationSheet = false }
+                    TranscriptTranslationSheet(app: app, replacing: model.meeting?.translation != nil, cancel: { translationSheet = false }, openSettings: {
+                        translationSheet = false
+                        waitingForTranslationSettings = true
+                        MainNavigation.shared.settingsSection = .general
+                        MainNavigation.shared.settingsOpen = true
+                    }) { target, engine in
+                        translationSheet = false
+                        Task {
+                            await model.translate(target: target, engine: engine, catalog: app.translationCatalog)
+                            if model.translationError == nil { showsTranslation = true }
+                        }
+                    }
+                }
+                .dropdownLayer()
+            }
+        }
+        .onChange(of: MainNavigation.shared.settingsOpen) { _, open in
+            guard !open, waitingForTranslationSettings else { return }
+            waitingForTranslationSettings = false
+            translationSheet = app.settings.settings.translationEnabled
+        }
+        .alert("Couldn't translate transcript", isPresented: .init(get: { model.translationError != nil }, set: { if !$0 { model.translationError = nil } })) {
+            Button("OK") { model.translationError = nil }
+        } message: { Text(model.translationError ?? "") }
         .onDisappear { model.playback?.pause() }
         .alert("Couldn't change speakers", isPresented: .init(get: { model.errorMessage != nil }, set: { if !$0 { model.dismissError() } })) {
         } message: {
@@ -102,8 +168,9 @@ struct MeetingDetailView: View {
         }
         .confirmationDialog("Regenerate the cleaned transcript, summary and notes?", isPresented: $confirmRegenerate) {
             Button("Regenerate") { Task { await model.regenerate() } }
+                .disabled(!model.canRegenerate)
         } message: {
-            Text("Corrections you made to the cleaned transcript will be replaced.")
+            Text("Regenerating replaces your edits to the cleaned transcript, summary, and by-person notes.")
         }
         .confirmationDialog("Separate speakers again?", isPresented: $confirmReseparate) {
             Button("Separate Again", role: .destructive) { Task { await model.reseparate() } }
@@ -127,7 +194,9 @@ struct MeetingDetailView: View {
 
     /// Puts the view on screen on the clipboard as plain text.
     private func copy() {
-        guard let text = model.export(model.selectedView, as: .plainText) else { return }
+        let document = model.selectedView.document != nil
+        guard let exported = model.export(model.selectedView, as: document ? .markdown : .plainText) else { return }
+        let text = document ? MeetingMarkdown.attributed(exported).string : exported
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
@@ -138,6 +207,9 @@ struct MeetingDetailView: View {
     }
 
     @ViewBuilder private var banners: some View {
+        if model.canOpenRoom, model.openRoomFailed {
+            Banner(icon: "alert-triangle", tone: .danger) { Text("Couldn’t open the host page.") }
+        }
         if let job = model.job, job != .completed {
             Banner(icon: "refresh", tone: .info) {
                 Text(Copy.job(job))
@@ -167,8 +239,8 @@ struct MeetingDetailView: View {
             Banner(icon: "refresh", tone: .info) {
                 Text("Speakers changed since the generated views were written.")
                 Spacer()
-                PillButton("Regenerate") { Task { await model.regenerate() } }
-                    .disabled(model.isProcessing)
+                PillButton("Regenerate") { confirmRegenerate = true }
+                    .disabled(!model.canRegenerate)
             }
         }
         if let failure = model.separationFailure {
@@ -204,44 +276,87 @@ struct Banner<Content: View>: View {
     }
 }
 
-struct ExportMenu: View {
-    let model: MeetingDetailModel
+private struct TranscriptTranslationSheet: View {
+    let app: AppController
+    let replacing: Bool
+    let cancel: () -> Void
+    let openSettings: () -> Void
+    let start: (CaptionTarget, CaptionEngine) -> Void
+    @State private var targets: [CaptionTarget] = []
+    @State private var target: CaptionTarget?
+
+    @State private var appleLanguages: [AppleCaptionLanguage] = []
+    @State private var revision = 0
+    @State private var preparing = false
+    @State private var downloadFailed = false
+
+    private var enabled: Bool { app.settings.settings.translationEnabled }
+    private var engine: CaptionEngine { app.settings.settings.captionEngine }
+    private var missingPack: AppleCaptionLanguage? {
+        appleLanguages.first { engine == .apple && $0.target == target && !$0.missingSources.isEmpty }
+    }
 
     var body: some View {
-        Menu {
-            ForEach(TranscriptView.allCases, id: \.self) { view in
-                Section(Copy.view(for: view)) {
-                    Button("Markdown…") { save(view, .markdown) }
-                    Button("Plain Text…") { save(view, .plainText) }
-                    if view == .raw || view == .cleaned { Button("Subtitles (.srt)…") { saveSubtitles(view) } }
+        VStack(alignment: .leading, spacing: 14) {
+            Text(enabled ? LocalizedStringKey("Translate transcript") : "Set up translation model").font(Typo.title)
+            if enabled {
+                HStack {
+                    Text("Target language")
+                    Spacer()
+                    Dropdown(label: "Target language", options: targets.map {
+                        DropdownOption(id: Optional($0), leading: $0.flag, title: $0.name)
+                    }, selection: $target, placeholder: String(localized: "Checking…"))
+                    .disabled(preparing)
+                }
+                if let missingPack, #available(macOS 26, *) {
+                    AppleModelDownload(language: missingPack) { revision += 1 }.id(missingPack.identifier)
                 }
             }
-        } label: {
-            Icon("upload", size: 17).frame(width: 32, height: 32).contentShape(Circle())
+            if downloadFailed { Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.danger) }
+            HStack(spacing: 8) {
+                if preparing { ProgressView().controlSize(.small) }
+                Spacer()
+                PillButton("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                if enabled {
+                    PillButton(replacing ? "Replace translation" : "Translate transcript", kind: .primary) { preparing = true }
+                        .keyboardShortcut(.defaultAction).disabled(preparing || target == nil || missingPack != nil)
+                } else {
+                    PillButton("Open Settings", kind: .primary, action: openSettings).keyboardShortcut(.defaultAction)
+                }
+            }
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Export")
+        .padding(22).frame(width: 340)
+        .background(Palette.window, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .shadow(color: Palette.shadow, radius: 30, y: 12)
+        .task(id: enabled ? engine : nil) { await loadTargets() }
+        .task(id: revision) { if revision > 0 { await loadTargets() } }
+        .task(id: preparing) {
+            guard preparing, enabled, let target else { return }
+            let chosen = engine
+            let ready = await app.setup.prepareTranscriptModel(engine: chosen, target: target)
+            guard !Task.isCancelled else { return }
+            preparing = false
+            downloadFailed = !ready
+            if ready, enabled, engine == chosen { start(target, chosen) }
+        }
     }
 
-    private func save(_ view: TranscriptView, _ format: ExportFormat) {
-        guard let text = model.export(view, as: format) else { return }
-        write(text, view, format == .markdown ? UTType(filenameExtension: "md") ?? .plainText : .plainText)
-    }
-
-    private func saveSubtitles(_ view: TranscriptView) {
-        guard let text = model.subtitles(view) else { return }
-        write(text, view, UTType(filenameExtension: "srt") ?? .plainText)
-    }
-
-    private func write(_ text: String, _ view: TranscriptView, _ type: UTType) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [type]
-        panel.nameFieldStringValue = "\(model.meeting?.metadata.title ?? "mm2t") - \(Copy.view(for: view))"
-        WindowSharing.exclude(panel)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+    private func loadTargets() async {
+        let preferred = target ?? app.settings.settings.captionTranslation.target ?? .english
+        targets = []
+        target = nil
+        appleLanguages = []
+        downloadFailed = false
+        guard enabled else { return }
+        switch engine {
+        case .apple:
+            let languages = await AppleCaptionTranslator.languages()
+            guard !Task.isCancelled else { return }
+            appleLanguages = languages
+            targets = languages.map(\.target)
+        case .firefox: targets = CaptionTarget.all
+        case .hyMT2: targets = CaptionTarget.hyTargets
+        }
+        target = targets.first(where: { $0 == preferred }) ?? targets.first
     }
 }

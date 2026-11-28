@@ -4,9 +4,9 @@ import SwiftUI
 
 enum SidebarItem: Hashable, CaseIterable {
     case home
-    case meetings
     case people
     case vocabulary
+    case meetings
     case settings
 
     var icon: String {
@@ -22,7 +22,7 @@ enum SidebarItem: Hashable, CaseIterable {
     var title: LocalizedStringKey {
         switch self {
         case .home: "Home"
-        case .meetings: "Meetings"
+        case .meetings: "Unfiled"
         case .people: "People"
         case .vocabulary: "Vocabulary"
         case .settings: "Settings"
@@ -30,7 +30,7 @@ enum SidebarItem: Hashable, CaseIterable {
     }
 
     /// The places the sidebar lists; settings opens as a dialog from the sidebar's foot instead.
-    static let destinations: [SidebarItem] = [.home, .meetings, .people, .vocabulary]
+    static let destinations: [SidebarItem] = [.home, .people, .vocabulary]
 }
 
 /// Where the main window should go next, asked for from outside it, such as the menu bar.
@@ -40,6 +40,7 @@ final class MainNavigation {
         let section: SidebarItem
         var meeting: MeetingID?
         var utterance: UtteranceID?
+        var settingsSection: SettingsSection = .general
     }
 
     static let shared = MainNavigation()
@@ -56,9 +57,26 @@ final class MainNavigation {
     var liveFrontmost = false
 
     /// Opens the main window on `section`, or on one meeting. `.settings` opens the settings dialog.
-    func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
-        request = Request(section: section, meeting: meeting, utterance: utterance)
+    func open(_ section: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil,
+              settingsSection: SettingsSection = .general) {
+        request = Request(section: section, meeting: meeting, utterance: utterance, settingsSection: settingsSection)
         WindowOpener.open(WindowID.main)
+    }
+
+    var translationSetupRequest: MeetingID?
+
+    func openTranslationSettings(for meeting: MeetingID) {
+        translationSetupRequest = meeting
+        open(.settings)
+    }
+
+    private(set) var collaborationRequest = 0
+
+    func openCollaboration() {
+        searchOpen = false
+        settingsOpen = false
+        collaborationRequest += 1
+        openLive()
     }
 
     /// Opens the main window on the recording in progress.
@@ -91,23 +109,28 @@ enum ContentColumn {
 
 struct MainWindow: View {
     let app: AppController
+    @State private var foldersExpanded = true
+    @State private var filingDrag = FilingDragState()
+    @State private var addingFolder = false
+    @State private var editingFolder: MeetingFolders.Folder?
+    @State private var expandedFolderIDs: Set<UUID?> = []
     @State private var assistant: AssistantModel
     @State private var section = SidebarItem.home
     @State private var meeting: MeetingID?
     @State private var utterance: UtteranceID?
+    @State private var todoKey: String?
     @State private var destinationID = UUID()
     @State private var vocabularyEditor: VocabularyView.Editor?
     /// Whether the last section change went up the sidebar, so the title rolls the way the selection moved.
     @State private var movedUp = false
     @Namespace private var sidebarSpace
-    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduce
     /// Setup or the app, or the window on its way from one to the other.
     @State private var stage: WindowStage
     /// During a change of stage, whether the arriving side has started to show.
     @State private var arriving = false
 
-    static let sidebarWidth: CGFloat = 220
+    static let sidebarWidth: CGFloat = 264
     static let setupSize = CGSize(width: 600, height: 580)
     static let appMinimum = CGSize(width: 820, height: 540)
 
@@ -148,6 +171,7 @@ struct MainWindow: View {
                maxWidth: stage == .setup ? Self.setupSize.width : .infinity,
                minHeight: stage == .app ? Self.appMinimum.height : Self.setupSize.height,
                maxHeight: stage == .setup ? Self.setupSize.height : .infinity)
+        .task(id: app.shouldPrepareBreeze, priority: .utility) { await app.preparePreferredBreeze() }
         .onChange(of: app.showsSetup) { _, setup in travel(toSetup: setup) }
         .onChange(of: navigation.setupRequested, initial: true) {
             guard navigation.setupRequested else { return }
@@ -167,11 +191,21 @@ struct MainWindow: View {
             show(.meetings)
         }
         .onChange(of: app.capture.state.isCapturing) { _, capturing in
-            if !capturing { navigation.liveOpen = false }
+            if capturing { showSavedMeeting = false }
+            else {
+                showSavedMeeting = navigation.liveOpen
+                navigation.liveOpen = false
+            }
+        }
+        .onChange(of: app.capture.lastSavedMeeting) { _, id in
+            if showSavedMeeting, let id {
+                showSavedMeeting = false
+                show(.meetings, meeting: id)
+            }
         }
         .onChange(of: MainNavigation.shared.request, initial: true) { _, request in
             guard let request else { return }
-            show(request.section, meeting: request.meeting, utterance: request.utterance)
+            show(request.section, meeting: request.meeting, utterance: request.utterance, settingsSection: request.settingsSection)
             MainNavigation.shared.request = nil
         }
     }
@@ -246,10 +280,31 @@ struct MainWindow: View {
                 .background(Palette.window)
                 .clipped()
             }
+            .coordinateSpace(name: "meeting-filing")
+            .onPreferenceChange(FilingBounds.self) { filingDrag.bounds = $0 }
+            .overlay(alignment: .topLeading) {
+                if let item = filingDrag.item {
+                    HStack(spacing: 6) { Icon("file-text", size: 14).foregroundStyle(Palette.orange); Text(verbatim: item.title).lineLimit(1).font(Typo.captionStrong) }
+                        .padding(.horizontal, 10).frame(height: 28).background(Palette.panel, in: Capsule()).shadow(color: Palette.shadow, radius: 6, y: 2)
+                        .fixedSize().offset(x: filingDrag.location.x + 8, y: filingDrag.location.y + 8).allowsHitTesting(false)
+                }
+            }
+            .environment(filingDrag)
+            .dropdownLayer()
             .tipLayer()
             .disabled(vocabularyEditor != nil)
             .accessibilityHidden(vocabularyEditor != nil)
             .overlay { vocabularyDialog }
+            .sheet(isPresented: $addingFolder) {
+                FolderNameDialog(save: { name in
+                    if let id = app.folders.create(name) { selectFolder(id); addingFolder = false }
+                }, dismiss: { addingFolder = false })
+            }
+            .sheet(item: $editingFolder) { folder in
+                FolderNameDialog(folder: folder, validate: { app.folders.canRename(folder.id, to: $0) }, save: { name in
+                    if app.folders.rename(folder.id, to: name) { editingFolder = nil }
+                }, dismiss: { editingFolder = nil })
+            }
             .overlay { settings(isOpen: navigation.settingsOpen) }
         }
         .disabled(navigation.searchOpen)
@@ -262,6 +317,8 @@ struct MainWindow: View {
     }
 
     /// The live page shows only while a recording runs.
+    @State private var showSavedMeeting = false
+
     private var showsLive: Bool { MainNavigation.shared.liveOpen && app.capture.state.isCapturing }
 
     /// A floating panel on the window's ground, set apart by tone and a soft shadow, never by a line.
@@ -278,21 +335,26 @@ struct MainWindow: View {
             .padding(.horizontal, 6)
             .padding(.bottom, 18)
 
-            RecordButton(capture: app.capture, openLive: { MainNavigation.shared.openLive() })
+            RecordButton(capture: app.capture, mode: Binding(
+                get: { app.settings.settings.recordingMode },
+                set: { app.settings.settings.recordingMode = $0 }), openLive: { MainNavigation.shared.openLive() })
                 .padding(.bottom, 18)
 
             VStack(alignment: .leading, spacing: 3) {
-                ForEach(SidebarItem.destinations, id: \.self) { row($0) }
+                ForEach(SidebarItem.destinations, id: \.self) { item in
+                    SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
+                }
             }
             // One highlight that travels to the selected row. Drawing it per row made the old one
             // fade out while the new one faded in, which read as a shadow passing rather than a move.
             .background {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Palette.selected)
+                    .fill(section == .meetings ? .clear : Palette.selected)
                     .matchedGeometryEffect(id: section, in: sidebarSpace, isSource: false)
             }
             .motion(Motion.select, value: section)
 
+            folderSection
             Spacer(minLength: 12)
             if let update = app.voiceprintUpdate {
                 VoiceprintUpdateStatus(update: update)
@@ -300,11 +362,7 @@ struct MainWindow: View {
                     .padding(.bottom, 12)
                     .transition(.opacity)
             }
-            HStack(spacing: 2) {
-                IconButton("Settings", icon: "settings") { show(.settings) }
-                IconButton("Help", icon: "help-circle") { openURL(AppLinks.help) }
-                Spacer(minLength: 0)
-            }
+            AccountMenuButton(app: app)
         }
         .padding(.horizontal, 12)
         .padding(.top, 40)
@@ -360,12 +418,84 @@ struct MainWindow: View {
         .motion(Motion.reveal, value: vocabularyEditor != nil)
     }
 
-    private func row(_ item: SidebarItem) -> some View {
-        SidebarRow(item: item, isSelected: section == item, space: sidebarSpace) { show(item) }
+    private func selectFolder(_ id: UUID?, expand: Bool = true) {
+        if expand { foldersExpanded = true; expandedFolderIDs.insert(id) }
+        DropdownState.shared.open = nil
+        assistant.isActive = false
+        app.folders.selected = id
+        show(.meetings)
     }
 
-    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil) {
+    private var folderSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Button { foldersExpanded.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Icon("chevron-right", size: 11).rotationEffect(.degrees(foldersExpanded ? 90 : 0))
+                        Text("My Folders").font(Typo.captionStrong)
+                    }.foregroundStyle(Palette.secondary).padding(.horizontal, 8).frame(height: 32).contentShape(Rectangle())
+                }.buttonStyle(Pressable())
+                Spacer()
+                IconButton("New Folder", icon: "plus") { addingFolder = true }
+            }
+            if foldersExpanded {
+                GeometryReader { viewport in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            folderBranch(nil)
+                            ForEach(app.folders.folders) { folder in folderBranch(folder) }
+                        }
+                    }
+                    .transformPreference(FilingBounds.self) { bounds in
+                        let visible = viewport.frame(in: .named("meeting-filing"))
+                        bounds = bounds.mapValues { $0.intersection(visible) }
+                    }
+                }.entrance(from: .top, distance: 6)
+            }
+        }.padding(.top, 12)
+        .motion(Motion.reveal, value: foldersExpanded)
+        .motion(Motion.reveal, value: expandedFolderIDs)
+    }
+
+    @ViewBuilder private func folderBranch(_ folder: MeetingFolders.Folder?) -> some View {
+        let id = folder?.id
+        let expanded = expandedFolderIDs.contains(id)
+        let selected = section == .meetings && app.folders.selected == id
+        let target = FilingTarget.folder(id)
+        VStack(alignment: .leading, spacing: 2) {
+            FolderSidebarRow(name: folder?.name ?? String(localized: "Unfiled"), icon: "folder", expanded: expanded,
+                selected: selected, accepting: filingDrag.hovered == target, received: filingDrag.received == target) {
+                    if expanded && selected && meeting == nil { expandedFolderIDs.remove(id) }
+                    else { expandedFolderIDs.insert(id) }
+                    selectFolder(id, expand: false)
+                }
+                .contextMenu {
+                    if let folder {
+                        Button("Edit Folder") { editingFolder = folder }
+                        Divider()
+                        Button("Delete Folder", role: .destructive) { expandedFolderIDs.remove(id); app.folders.delete(folder.id) }
+                    }
+                }
+            if expanded {
+                VStack(spacing: 1) {
+                    ForEach(app.meetings.rows.filter { app.folders.folder(of: $0.id) == id }) { row in
+                        FolderSidebarRow(name: row.title, icon: "file-text", selected: meeting == row.id) {
+                            app.folders.selected = id; show(.meetings, meeting: row.id)
+                        }
+                        .simultaneousGesture(filingDrag.gesture(for: row, folders: app.folders))
+                    }
+                }.padding(.leading, 20).entrance(from: .top, distance: 5)
+            }
+        }
+        .background(expanded && filingDrag.hovered == target ? Palette.orangeSoft : .clear,
+                    in: RoundedRectangle(cornerRadius: Radius.control))
+        .filingTarget(target)
+    }
+
+    private func show(_ item: SidebarItem, meeting: MeetingID? = nil, utterance: UtteranceID? = nil, todoKey: String? = nil,
+                      settingsSection: SettingsSection = .general) {
         if item == .settings {
+            MainNavigation.shared.settingsSection = settingsSection
             MainNavigation.shared.settingsOpen = true
             return
         }
@@ -379,12 +509,20 @@ struct MainWindow: View {
         section = item
         self.meeting = meeting
         self.utterance = utterance
+        self.todoKey = todoKey
         destinationID = UUID()
     }
 
     /// The section's name stays in place and its characters roll to the next name, the way a
     /// changing number does; only the panel under it fades. A meeting's own header replaces it.
-    private var title: some View {
+    @ViewBuilder private var title: some View {
+        if section == .meetings && meeting == nil {
+            Dropdown<UUID?>(label: "Folders", options: [DropdownOption(id: nil, title: String(localized: "Unfiled"))] + app.folders.folders.map { DropdownOption(id: $0.id, title: $0.name) }, selection: Binding(get: { app.folders.selected }, set: { selectFolder($0) }))
+                .padding(.leading, 24).frame(height: 60)
+        } else { sectionTitle }
+    }
+
+    private var sectionTitle: some View {
         Text(section.title)
             .font(Typo.title)
             .lineLimit(1)
@@ -402,10 +540,10 @@ struct MainWindow: View {
         ZStack {
             switch section {
             case .home, .settings:
-                HomeView(app: app, open: { show(.meetings, meeting: $0) }).transition(.opacity)
+                HomeView(app: app, open: { show(.meetings, meeting: $0, todoKey: $1) }).transition(.opacity)
             case .meetings:
                 if let meeting {
-                    MeetingDetailView(app: app, id: meeting, utterance: utterance, back: { self.meeting = nil })
+                    MeetingDetailView(app: app, id: meeting, utterance: utterance, todoKey: todoKey, back: { self.meeting = nil })
                         .id(destinationID)
                         .entrance(from: .trailing, distance: 28)
                 } else {
@@ -718,34 +856,50 @@ struct EmptyState: View {
 /// While one runs it opens the live page.
 private struct RecordButton: View {
     let capture: CaptureController
+    @Binding var mode: RecordingMode
     let openLive: () -> Void
     @State private var hovering = false
 
     var body: some View {
         let idle = capture.state == .idle
-        Button {
-            if capture.state.isCapturing { openLive() } else { Task { await capture.startNow(title: String(localized: "Recording")) } }
-        } label: {
-            HStack(spacing: 8) {
-                if idle {
-                    Icon("microphone", size: 16)
-                } else {
-                    Circle().fill(.white).frame(width: 7, height: 7)
+        HStack(spacing: 0) {
+            Button {
+                if capture.state.isCapturing { openLive() }
+                else { Task { await capture.startNow(title: String(localized: "Recording")) } }
+            } label: {
+                HStack(spacing: 8) {
+                    if idle {
+                        Icon(mode == .online ? "video" : "users", size: 16)
+                    } else {
+                        Circle().fill(.white).frame(width: 7, height: 7)
+                    }
+                    Text(idle ? "Start Recording" : "Recording").font(Typo.bodyStrong)
+                    Spacer(minLength: 0)
                 }
-                Text(idle ? "Start Recording" : "Recording").font(Typo.bodyStrong)
-                Spacer(minLength: 0)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .frame(height: 38)
-            .background(Palette.orange.opacity(hovering && idle ? 0.88 : 1),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .buttonStyle(SegmentPress(hovering: hovering && idle))
+            .disabled(!idle && !capture.state.isCapturing)
+            .onHover { hovering = $0 }
+            .motion(Motion.touch, value: hovering)
+
+            if idle {
+                Rectangle().fill(.white.opacity(0.28))
+                    .frame(width: 1)
+                    .padding(.vertical, 9)
+                    .accessibilityHidden(true)
+                Dropdown(label: "Meeting type", options: [
+                    DropdownOption(id: .online, title: String(localized: "Online meeting")),
+                    DropdownOption(id: .inPerson, title: String(localized: "In-person meeting")),
+                ], selection: $mode, trigger: .recordingChevron)
+            }
         }
-        .buttonStyle(Pressable())
-        .disabled(!idle && !capture.state.isCapturing)
-        .onHover { hovering = $0 }
-        .motion(Motion.touch, value: hovering)
+        .frame(height: 38)
+        .background(Palette.orange, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }
 

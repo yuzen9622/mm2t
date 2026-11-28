@@ -17,7 +17,8 @@ extension StubServer.Request {
     /// Utterance ids in the transcript lines of the prompt, in order.
     var utteranceIDs: [String] {
         // Lines before "逐字稿：" are the glossary and the read-only context, not what the model must clean.
-        let transcript = geminiInput.range(of: "逐字稿：\n", options: .backwards).map { geminiInput[$0.upperBound...] } ?? Substring(geminiInput)
+        let data = geminiInput.components(separatedBy: "</data>").first ?? geminiInput
+        let transcript = data.range(of: "逐字稿：\n", options: .backwards).map { data[$0.upperBound...] } ?? Substring(data)
         return transcript.split(separator: "\n").compactMap { line in
             guard let open = line.firstIndex(of: "["), let close = line.firstIndex(of: "]") else { return nil }
             return String(line[line.index(after: open)..<close])
@@ -59,11 +60,181 @@ extension StubServer.Request {
         let request = try #require(server.requests.first)
 
         #expect(request.geminiSystem.contains("{{speaker:代號}}"))
-        #expect(request.geminiSystem.contains("sources"))
-        #expect(request.geminiSystem.contains("繁體中文"))
-        #expect(request.geminiSystem.contains("精簡但不摘要"))
+        #expect(request.geminiInput.contains("sources"))
+        #expect(request.geminiInput.contains("保留它的原始語言"))
+        #expect(request.geminiInput.contains("精簡但不摘要"))
         #expect(request.geminiInput.contains("[u2] {{speaker:r1}} 00:00:05 對我覺得禮拜三"))
         #expect(request.geminiInput.contains("(重點) [u2]"))
+    }
+
+    @Test(arguments: [false, true])
+    func translatedParagraphGetsOneIsolatedRepair(repairSucceeds: Bool) async throws {
+        let english = "So how should we think about these findings? What does this all mean?"
+        let mixed = "他這個翻譯真的不太 specific。"
+        let translated = "那麼我們該如何看待這些發現？這一切意味著什麼？"
+        let repaired = "How should we think about these findings? What does this all mean?"
+        let lines = [utterance("u15", "r1", 187, english), utterance("u16", "me", 200, mixed)]
+        let server = StubServer { request in
+            let data: [[String: Any]] = request.utteranceIDs.map { id in
+                if id == "u16" { return ["sources": [id], "speaker": "me", "text": mixed] }
+                let fixed = repairSucceeds && request.utteranceIDs == ["u15"]
+                return ["sources": [id], "speaker": "r1", "text": fixed ? repaired : translated]
+            }
+            let json = try! JSONSerialization.data(withJSONObject: ["paragraphs": data])
+            return .status(200, Fixture.gemini(String(decoding: json, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(server.requests.map(\.utteranceIDs) == [["u15", "u16"], ["u15"]])
+        #expect(result.paragraphs.map(\.text) == [repairSucceeds ? repaired : english, mixed])
+        #expect(result.paragraphs.flatMap(\.sources) == lines.map(\.id))
+    }
+
+    @Test(arguments: ["missing", "uncited", "otherSpeaker"])
+    func unreliableSourcesAreRebuiltBySpeaker(_ failure: String) async throws {
+        let english = "What does this discovery mean for the rest of the study?"
+        let mixed = "他這個翻譯真的不太 specific。"
+        let lines = [utterance("u1", "r1", 0, english), utterance("u2", "me", 4, mixed)]
+        let server = StubServer { request in
+            let ids = request.utteranceIDs
+            let sources: [String]
+            if ids.count == 1 { sources = ids }
+            else if failure == "missing" { sources = ["u1"] }
+            else if failure == "uncited" { sources = [] }
+            else { sources = ids }
+            let mic = ids == ["u2"]
+            let row: [String: Any] = ["speaker": mic ? "me" : "r1", "sources": sources, "text": mic ? mixed : english]
+            let json = try! JSONSerialization.data(withJSONObject: ["paragraphs": [row]])
+            return .status(200, Fixture.gemini(String(decoding: json, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(server.requests.map(\.utteranceIDs) == [["u1", "u2"], ["u1"], ["u2"]])
+        #expect(result.paragraphs.map(\.speaker) == lines.map(\.speaker))
+        #expect(result.paragraphs.map(\.text) == [english, mixed])
+    }
+
+    @Test(arguments: [true, false])
+    func preservesMultilingualShortTurnsWhenCleanupCollapsesThem(citesEverything: Bool) async throws {
+        let texts = ["どうぞよろしくお願いします。", "等一下。", "他為什麼？", "Hello。到了。", "なんで？"]
+        let lines = texts.enumerated().map { index, text in utterance("u\(index + 1)", "me", Double(index), text) }
+        let server = StubServer { request in
+            let row: [String: Any] = ["speaker": "me", "sources": citesEverything ? request.utteranceIDs : [],
+                                      "text": "好的，請多指教。"]
+            let json = try! JSONSerialization.data(withJSONObject: ["paragraphs": [row]])
+            return .status(200, Fixture.gemini(String(decoding: json, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == texts)
+        #expect(result.paragraphs.flatMap(\.sources) == lines.map(\.id))
+        #expect(server.requests.count == 2)
+    }
+
+    @Test func keepsEditedRetryWhenOnlyAnIsolatedFillerWasOmitted() async throws {
+        let lines = [utterance("u1", "me", 0, "うん。どうぞよろしくお願いします。"),
+                     utterance("u2", "me", 3, "等一下。"), utterance("u3", "me", 5, "嗯。")]
+        let server = StubServer { request in
+            let output = request.geminiInput.contains("本次僅編輯所附原句")
+                ? #"{"paragraphs":[{"speaker":"me","text":"どうぞよろしくお願いします。","sources":["u1"]},{"speaker":"me","text":"等一下。","sources":["u2"]}]}"#
+                : #"{"paragraphs":[{"speaker":"me","text":"好的。","sources":[]}]}"#
+            return .status(200, Fixture.gemini(output))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == ["どうぞよろしくお願いします。", "等一下。"])
+        for request in server.requests {
+            let prompt = request.geminiSystem + "\n" + request.geminiInput
+            let tags = prompt.split(separator: "\n").filter { $0.hasPrefix("<") }
+            #expect(tags == ["<role>", "</role>", "<context>", "</context>", "<data>", "</data>",
+                             "<task>", "</task>", "<constraints>", "</constraints>", "<output_format>", "<reference>", "</reference>", "</output_format>"])
+            let data = try #require(request.geminiInput.components(separatedBy: "</data>").first)
+            #expect(data.contains("うん。どうぞよろしくお願いします。"))
+        }
+        #expect(server.requests.count == 2)
+    }
+
+    @Test func repairCanResolveASRWithPrecedingContextAndDropAnOrphanedPreposition() async throws {
+        let english = "She showed her boarding pass at the gate."
+        let repaired = "她在登機門出示了登機證。"
+        let lines = [utterance("u1", "r1", 0, english), utterance("u2", "me", 4, "她在登機門出示了登記證。In")]
+        let server = StubServer { request in
+            let ids = request.utteranceIDs
+            let mic = ids == ["u2"]
+            let row: [String: Any] = ["speaker": mic ? "me" : "r1", "text": mic ? repaired : english,
+                                      "sources": ids.count > 1 ? [] : ids]
+            let json = try! JSONSerialization.data(withJSONObject: ["paragraphs": [row]])
+            return .status(200, Fixture.gemini(String(decoding: json, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        let retry = try #require(server.requests.first { $0.utteranceIDs == ["u2"] })
+        #expect(retry.geminiInput.components(separatedBy: "逐字稿：\n").first?.contains(english) == true)
+        #expect(result.paragraphs.map(\.text) == [english, repaired])
+    }
+
+    @Test func overlappingTracksCanUseContextWithoutReassigningTheOtherSpeakersWords() async throws {
+        let lines = [utterance("u1", "r1", 0, "She showed her boarding pass at the gate."),
+                     utterance("u2", "me", 1, "登記證她在登機門出示，pass、passes。In")]
+        let server = StubServer { request in
+            let output = request.geminiInput.contains("唯一要編輯的發言：")
+                ? #"{"text":"她在登機門出示了 boarding pass。"}"#
+                : #"{"paragraphs":[{"speaker":"r1","text":"She showed her boarding pass at the gate.","sources":["u1"]},{"speaker":"me","text":"登記證她在登機門出示，pass、passes。In","sources":["u2"]}]}"#
+            return .status(200, Fixture.gemini(output))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        let polish = try #require(server.requests.last)
+        #expect(polish.geminiInput.contains("唯一要編輯的發言：登記證她在登機門出示，pass、passes。\n"))
+        #expect(server.requests.count == 2)
+        #expect(result.paragraphs.map(\.sources) == [[lines[0].id], [lines[1].id]])
+        #expect(result.paragraphs.map(\.text) == [lines[0].text, "她在登機門出示了 boarding pass。"])
+    }
+
+    @Test func reviewsAnUnclearTailUsingBothNeighboursWithoutLosingTheQuestion() async throws {
+        let original = "要改期嗎？我們先約星期三下午兩點。哦雨霸一"
+        let lines = [utterance("u1", "r1", 0, "你們星期三下午有空嗎？"),
+                     utterance("u2", "me", 5, original),
+                     utterance("u3", "r1", 10, "兩點我可以。")]
+        let expected = "要改期嗎？我們先約星期三下午兩點。〔辨識不清〕"
+        let server = StubServer { request in
+            if request.geminiInput.contains("待判定的尾句：") {
+                return .status(200, Fixture.gemini(#"{"status":"unclear"}"#))
+            }
+            let rows = lines.map { ["speaker": $0.speaker.rawValue, "text": $0.text, "sources": [$0.id.rawValue]] as [String: Any] }
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": rows])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == [lines[0].text, expected, lines[2].text])
+        let review = try #require(server.requests.last)
+        #expect(review.geminiInput.contains(lines[0].text))
+        #expect(review.geminiInput.contains(lines[2].text))
+    }
+
+    @Test func repairingANumberCanTrimTheClosingFillerButPreservesASeparateReply() async throws {
+        let lines = [utterance("u1", "me", 0, "呃，前後側至少都有三，最少都有三十二位。好。"),
+                     utterance("u2", "r1", 8, "好。")]
+        let server = StubServer { request in
+            if request.geminiInput.contains("唯一要編輯的發言：") {
+                return .status(200, Fixture.gemini(#"{"text":"前後測至少都有三十二位。"}"#))
+            }
+            let rows = lines.map { ["speaker": $0.speaker.rawValue, "text": $0.text, "sources": [$0.id.rawValue]] as [String: Any] }
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": rows])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs.map(\.text) == ["前後測至少都有三十二位。", "好。"])
+    }
+
+    @Test(arguments: [true, false])
+    func countHomophoneDependsOnRetrievalContext(retrieving: Bool) async throws {
+        let question = retrieving ? "這些資料抓下來要多久？" : "手寫要寫多久？"
+        let answer = "要看你的筆速吧。"
+        let lines = [utterance("u1", "r1", 0, question), utterance("u2", "me", 5, answer),
+                     utterance("u3", "me", 10, "處理六百筆要十幾分鐘。")]
+        let server = StubServer { _ in
+            let rows = lines.map { ["speaker": $0.speaker.rawValue, "text": $0.text, "sources": [$0.id.rawValue]] as [String: Any] }
+            let data = try! JSONSerialization.data(withJSONObject: ["paragraphs": rows])
+            return .status(200, Fixture.gemini(String(decoding: data, as: UTF8.self)))
+        }
+        let result = try await gemini(server).cleanTranscript(.init(utterances: lines))
+        #expect(result.paragraphs[1].text == (retrieving ? "要看你的筆數吧。" : answer))
+        #expect(result.paragraphs.map(\.sources) == lines.map { [$0.id] })
     }
 
     @Test func rewriteSendsTheInstructionAndReturnsTheRewrittenText() async throws {
@@ -197,32 +368,27 @@ extension StubServer.Request {
         #expect(guesses.isEmpty && server.requests.isEmpty)
     }
 
-    static let englishDirective = "Output language: English"
-
-    @Test func anEnglishMeetingIsAnsweredInEnglishByEveryTask() async throws {
-        let english = LLMTranscript(utterances: [
-            utterance("u1", "me", 0, "Okay, so the remote control has to be under twenty five euros."),
-            utterance("u2", "r1", 6, "Right, and I think we should drop the LCD screen to save cost."),
-            utterance("u3", "r2", 14, "I'll send the market research before the next meeting."),
-        ])
-        let server = StubServer(status: 200, body: Fixture.gemini(#"{"paragraphs":[],"digests":[],"guesses":[],"title":"t","terms":[],"headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
+    @Test(arguments: [MeetingOutputLanguage.traditionalChinese, .english])
+    func summariesAndDigestsUseTheAppLanguageAndCleanupPreservesEachSource(_ language: MeetingOutputLanguage) async throws {
+        let source = language == .traditionalChinese ? "The deadline is Friday." : "交件日期是週五。"
+        let input = LLMTranscript(utterances: [
+            utterance("u1", "me", 0, source),
+            utterance("u2", "r1", 6, "予算の確認 and shipping dates"),
+        ], outputLanguage: language)
+        let server = StubServer(status: 200, body: Fixture.gemini(#"{"paragraphs":[],"digests":[],"title":"t","headline":"h","decisions":[],"discussionPoints":[],"actionItems":[]}"#))
         let llm = gemini(server)
-        _ = try await llm.cleanTranscript(english)
-        _ = try await llm.digestPerPerson(english)
-        _ = try? await llm.summarize(SummaryRequest(transcript: english, prioritized: []))
-        _ = try? await llm.inferNames(NameInferenceRequest(transcript: english, unnamedSpeakers: [SpeakerID("r1")], knownNames: [:]))
+        _ = try await llm.cleanTranscript(input)
+        _ = try await llm.digestPerPerson(input)
+        _ = try await llm.summarize(SummaryRequest(transcript: input, prioritized: []))
 
-        #expect(server.requests.count == 4)
-        for request in server.requests {
-            #expect(request.geminiSystem.contains(Self.englishDirective))
-        }
-    }
-
-    @Test func aMandarinMeetingFullOfEnglishTermsStaysInTraditionalChinese() async throws {
-        let server = StubServer(status: 200, body: Fixture.gemini(#"{"digests":[]}"#))
-        _ = try await gemini(server).digestPerPerson(transcript)
-        let request = try #require(server.requests.first)
-        #expect(!request.geminiSystem.contains(Self.englishDirective))
+        let directive = language == .traditionalChinese ? "輸出語言：繁體中文" : "Output language: English"
+        let requests = server.requests
+        try #require(requests.count == 3)
+        #expect(requests[0].geminiInput.contains("保留它的原始語言"))
+        #expect(!requests[0].geminiSystem.contains(directive))
+        #expect(requests[0].geminiInput.contains("予算の確認 and shipping dates"))
+        #expect(requests[1].geminiSystem.contains(directive))
+        #expect(requests[2].geminiSystem.contains(directive))
     }
 
     @Test func digestsFollowFirstSpeakingOrder() async throws {

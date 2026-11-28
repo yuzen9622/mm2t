@@ -19,7 +19,7 @@ public protocol RecordingSession: AnyObject, Sendable {
     func resume() async
     func markHighlight() async throws -> Highlight
     func stop() async throws -> Recording
-    /// Both tracks mixed to mono at the recording's rate as they are captured, for live captions.
+    /// Mono audio for live captions: system audio for online meetings, microphone for in-person meetings.
     func audioStream() async -> AsyncStream<[Float]>
 }
 
@@ -78,6 +78,8 @@ extension ModelInstalling {
 
 extension DiarizationModels: ModelInstalling {}
 
+extension HyTranslationModels: ModelInstalling {}
+
 extension TranslationModels: ModelInstalling {
     public func download(progress: @escaping @Sendable (Double) -> Void) async throws {
         try await download(configuration: .default, progress: progress)
@@ -96,21 +98,29 @@ extension ModelSnapshot: ModelInstalling {
 
 public final class LiveProviderCatalog: ProviderCatalog {
     public let models: DiarizationModels
+    private let parakeet: ParakeetTranscription
     public let transcriptionModel: LocalTranscriptionModel
-    public let llmModel: LocalLLMModel
     public let translationModels: TranslationModels
     private let speakerModels: LocalSpeakerModels
-    private let transcription: LocalTranscription
+    private let cpu: WhisperCPU
+    private let coreML: LocalTranscription
+    private let machine: MachineProfile
+    private let transcription: BreezeMLX
+    /// One for the app's lifetime, so a retried meeting reuses its lease and the pieces already sent.
+    private let hostedLeases = HostedLeases(
+        recall: { UserDefaults.standard.stringArray(forKey: "hostedPlanLeases") ?? [] },
+        keep: { UserDefaults.standard.set($0, forKey: "hostedPlanLeases") })
 
-    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel, llmModel: LocalLLMModel,
-                translationModels: TranslationModels) {
+    public init(models: DiarizationModels, transcriptionModel: LocalTranscriptionModel,
+                translationModels: TranslationModels, machine: MachineProfile = .current) {
+        self.machine = machine
+        self.parakeet = ParakeetTranscription(directory: LocalSpeechModel.parakeet.snapshot(in: models.directory).directory)
         self.models = models
         self.transcriptionModel = transcriptionModel
-        self.llmModel = llmModel
         self.translationModels = translationModels
-        // Kept for the app's lifetime like the diarizer: preparing the speech model for the Neural
-        // Engine takes minutes, so it happens once per launch, on the first offline transcription.
-        transcription = LocalTranscription(model: transcriptionModel)
+        cpu = WhisperCPU(folder: LocalSpeechModel.whisperCPU.snapshot(in: models.directory).directory)
+        coreML = LocalTranscription(model: .breeze(in: models.directory))
+        transcription = BreezeMLX(folder: transcriptionModel.snapshot.directory)
         let embedder = VoiceprintEmbedder(models: models)
         // One diarizer for the app's lifetime so the CoreML models load once, not per meeting.
         speakerModels = LocalSpeakerModels(diarizer: NemotronDiarizer(models: models, embedder: embedder), embedder: embedder)
@@ -122,6 +132,15 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public func selfHostedTranscription(url: URL, token: Secret?, language: TranscriptionLanguage) -> any TranscriptionProvider {
         SelfHostedTranscription(baseURL: url, token: token, languageCode: language.code)
     }
+    public func hostedTranscription(url: URL, authorization: HostedAuthorization, language: TranscriptionLanguage) -> any TranscriptionProvider {
+        HostedTranscription(baseURL: url, authorization: authorization, languageCode: language.code, leases: hostedLeases)
+    }
+    public func hostedLLM(url: URL, authorization: HostedAuthorization) -> any LLMProvider {
+        OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", authorization: authorization)
+    }
+    public func hostedCaptions(url: URL, authorization: HostedAuthorization, traditionalChinese: Bool, meeting: String?) -> any StreamingTranscriptionProvider {
+        HostedCaptions(url: url, authorization: authorization, traditionalChinese: traditionalChinese, leases: hostedLeases, meeting: meeting)
+    }
     public func streamingTranscription(apiKey: Secret) -> any StreamingTranscriptionProvider {
         ElevenLabsRealtime(apiKey: apiKey)
     }
@@ -129,30 +148,62 @@ public final class LiveProviderCatalog: ProviderCatalog {
     public func selfHostedStreamingTranscription(url: URL, token: Secret?) -> any StreamingTranscriptionProvider {
         WindowedStreamingTranscription(SelfHostedTranscription(baseURL: url, token: token, probeTimeout: 3, timeout: 30))
     }
-    public func localStreamingTranscription() -> (any StreamingTranscriptionProvider)? {
-        transcriptionModel.snapshot.isDownloaded ? WindowedStreamingTranscription(transcription) : nil
+    public func localStreamingTranscription(model: LocalSpeechModel, alongsideBreeze: Bool) -> (any StreamingTranscriptionProvider)? {
+        guard model.isSupported(on: machine) else { return nil }
+        switch model {
+        case .whisperCPU: return model.snapshot(in: models.directory).isDownloaded ? WindowedStreamingTranscription(cpu) : nil
+        case .breezeCoreML:
+            return model.snapshot(in: models.directory).isDownloaded ? WindowedStreamingTranscription(coreML) : nil
+        case .breeze:
+            return transcriptionModel.snapshot.isDownloaded ? WindowedStreamingTranscription(transcription) : nil
+        case .parakeet:
+            guard model.snapshot(in: models.directory).isDownloaded else { return nil }
+            return WindowedStreamingTranscription(parakeet)
+        case .nemotron:
+            let snapshot = model.snapshot(in: models.directory)
+            return snapshot.isDownloaded ? NemotronTranscription(directory: snapshot.directory, cpuOnly: alongsideBreeze) : nil
+        }
     }
     public func llm(apiKey: Secret) -> any LLMProvider { GeminiLLM(apiKey: apiKey) }
     public func openAICompatibleLLM(baseURL: URL, apiKey: Secret?, model: String) -> any LLMProvider {
         OpenAICompatibleLLM(baseURL: baseURL, apiKey: apiKey, model: model)
     }
     public func localSpeakerModels() -> LocalSpeakerModels? { models.isDownloaded ? speakerModels : nil }
-    public func localTranscription(language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
-        transcriptionModel.snapshot.isDownloaded ? transcription.speaking(language) : nil
+    public func localTranscription(model: LocalSpeechModel, language: TranscriptionLanguage) -> (any TranscriptionProvider)? {
+        guard model.isSupported(on: machine) else { return nil }
+        switch model {
+        case .whisperCPU: return model.snapshot(in: models.directory).isDownloaded ? cpu.speaking(language) : nil
+        case .breezeCoreML: return model.snapshot(in: models.directory).isDownloaded ? coreML.speaking(language) : nil
+        case .breeze: return transcriptionModel.snapshot.isDownloaded ? transcription.speaking(language) : nil
+        case .parakeet:
+            guard model.snapshot(in: models.directory).isDownloaded else { return nil }
+            return parakeet
+        case .nemotron:
+            let snapshot = model.snapshot(in: models.directory)
+            return snapshot.isDownloaded ? NemotronTranscription(directory: snapshot.directory, language: language.code) : nil
+        }
     }
-    /// A fresh provider per pipeline: the LLM loads in seconds, so it holds its gigabytes only
-    /// while a meeting is being processed rather than while the app idles in the menu bar.
-    public func localLLM() -> (any LLMProvider)? { llmModel.snapshot.isDownloaded ? LocalLLM(model: llmModel) : nil }
     /// A fresh translator per recording, so its model is freed when the recording's captions end.
-    public func captionTranslator(for target: CaptionTarget) -> (any CaptionTranslator)? {
-        let needed = translationModels.for(target)
-        return needed.isDownloaded ? BergamotTranslator(models: needed) : nil
+    public func captionTranslator(for target: CaptionTarget, engine: CaptionEngine, source: CaptionLanguage?) async -> (any CaptionTranslator)? {
+        switch engine {
+        case .apple:
+            guard await AppleCaptionTranslator.isInstalled(for: target, source: source) else { return nil }
+            return AppleCaptionTranslator()
+        case .firefox:
+            let needed = translationModels.for(target)
+            return CaptionTarget.all.contains(target) && needed.isDownloaded ? BergamotTranslator(models: needed) : nil
+        case .hyMT2:
+            let hy = HyTranslationModels(in: models.directory)
+            return CaptionTarget.hyTargets.contains(target) && hy.isDownloaded ? HyCaptionTranslator(models: hy) : nil
+        }
     }
     public var thresholds: MatchThresholds { .campPlus }
 }
 
 /// One "verify" press; the self-hosted token can only be checked against a configured server.
 public enum KeyValidation: Hashable, Sendable {
+    case hostedTranscription(url: URL, token: Secret)
+    case hostedSummaries(url: URL, token: Secret)
     case elevenLabs(Secret)
     case gemini(Secret)
     case selfHosted(url: URL, token: Secret)
@@ -165,9 +216,25 @@ public protocol KeyValidating: Sendable {
 }
 
 public struct LiveKeyValidator: KeyValidating {
-    public init() {}
+    private let session: URLSession
+    private let account: CollabService?
+
+    public init(session: URLSession = .shared, account: CollabService? = nil) {
+        self.session = session
+        self.account = account
+    }
+
+    private func authorization(_ token: Secret) -> HostedAuthorization {
+        account.map { HostedAuthorization(stored: token, account: $0) } ?? .fixed(token)
+    }
+
     public func validate(_ request: KeyValidation) async -> KeyCheck {
         switch request {
+        case .hostedTranscription(let url, let token):
+            await HostedTranscription.validateKey(baseURL: url, authorization: authorization(token), session: session)
+        case .hostedSummaries(let url, let token):
+            await OpenAICompatibleLLM(baseURL: url, apiKey: nil, model: "mm2t", session: session,
+                                      authorization: authorization(token)).validateKey()
         case .elevenLabs(let key): await ElevenLabsScribe(apiKey: key).validateKey()
         case .gemini(let key): await GeminiLLM(apiKey: key).validateKey()
         case .selfHosted(let url, let token): await SelfHostedTranscription(baseURL: url, token: token).validateKey()

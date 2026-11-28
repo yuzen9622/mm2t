@@ -12,7 +12,9 @@ public struct TodoRow: Hashable, Sendable, Identifiable {
     public let meeting: MeetingID
     public let meetingTitle: String
     public let date: Date
-    public let isDone: Bool
+    public var isDone: Bool
+    public var isMine = false
+    public let key: String
     public var anchor: String? = nil
 }
 
@@ -67,8 +69,16 @@ public struct CalendarSourceState: Hashable, Sendable, Identifiable {
 public final class DashboardModel {
     /// Every to-do with its done state as it is now.
     public var todos: [TodoRow] {
-        loadedTodos.map { TodoRow(id: $0.id, text: $0.text, owner: $0.owner, meeting: $0.meeting, meetingTitle: $0.meetingTitle,
-                                  date: $0.date, isDone: status.isDone($0.id), anchor: $0.anchor) }
+        loadedTodos.compactMap { original -> TodoRow? in
+            var row = original
+            guard status.marks[row.key]?.contains(.deleted) != true else { return nil }
+            row.isDone = status.isDone(row.id)
+            return row
+        }.sorted { lhs, rhs in
+            let a = status.marks[lhs.key]?.contains(.pinned) == true
+            let b = status.marks[rhs.key]?.contains(.pinned) == true
+            return a != b ? a : !lhs.isDone && rhs.isDone
+        }
     }
     private var loadedTodos: [TodoRow] = []
     public private(set) var stats = DashboardStats()
@@ -95,7 +105,7 @@ public final class DashboardModel {
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let calendars: [any CalendarSource]
     @ObservationIgnored private var calendarLoad = 0
-    @ObservationIgnored private let status: TodoStatus
+    @ObservationIgnored public let status: TodoStatus
     @ObservationIgnored private let now: () -> Date
 
     public init(library: MeetingLibrary, voiceprints: VoiceprintStore, settings: SettingsStore,
@@ -117,7 +127,7 @@ public final class DashboardModel {
         let names = await voiceprints.names()
         let meetings = ((try? await library.list()) ?? []).filter { $0.status == .completed }
         let vocabulary = settings.settings.vocabulary
-        let snapshot = Self.snapshot(meetings, names: names, vocabulary: vocabulary, done: status.done, me: meLabel, today: now())
+        let snapshot = Self.snapshot(meetings, names: names, vocabulary: vocabulary, done: status.done, me: meLabel, today: now(), user: await voiceprints.user()?.id)
         loadedTodos = snapshot.todos
         stats = snapshot.stats
         activity = snapshot.activity
@@ -259,7 +269,7 @@ public final class DashboardModel {
 
     /// `meetings` are completed ones, newest first.
     static func snapshot(_ meetings: [Meeting], names: [PersonID: String], vocabulary: [String],
-                         done: Set<String>, me: String, today: Date) -> Snapshot {
+                         done: Set<String>, me: String, today: Date, user: PersonID? = nil) -> Snapshot {
         var result = Snapshot()
         var talk: [String: (name: String, seconds: TimeInterval, meetings: Int)] = [:]
         var mine: TimeInterval = 0, alongsideMe: TimeInterval = 0
@@ -272,10 +282,12 @@ public final class DashboardModel {
             let name = { (id: SpeakerID) in meeting.resolve(id) == .me ? me : renderer.displayName(id) }
             for (index, item) in (meeting.outputs.summary?.actionItems ?? []).enumerated() {
                 let id = "\(meeting.id)#\(index)"
+                let mine = AssistantTaskRef.isPersonal(owner: item.owner, in: meeting, user: user)
+                let anchor = AssistantTaskRef.fingerprint(item)
                 result.todos.append(TodoRow(
                     id: id, text: SpeakerMention.substitute(in: item.text, name: name), owner: item.owner.map(name),
                     meeting: meeting.id, meetingTitle: meeting.metadata.title, date: meeting.metadata.startedAt,
-                    isDone: done.contains(id), anchor: AssistantTaskRef.fingerprint(item)))
+                    isDone: done.contains(id), isMine: mine, key: AssistantTaskRef.markKey(in: meeting, at: index, fingerprint: anchor), anchor: anchor))
             }
 
             result.stats.meetings += 1

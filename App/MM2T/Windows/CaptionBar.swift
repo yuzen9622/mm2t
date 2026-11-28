@@ -49,6 +49,14 @@ final class CaptionBarController {
 
         model.drag = { [weak self] in self?.dragged() }
         model.dragEnded = { [weak self] in self?.dragEnded() }
+        model.toggleTranslation = { [weak app] in
+            Task { @MainActor in
+                if let app, let meeting = app.capture.captions.translationSession,
+                   await app.toggleLiveTranslation(), app.capture.captions.translationSession == meeting {
+                    MainNavigation.shared.openTranslationSettings(for: meeting)
+                }
+            }
+        }
         model.hide = { [weak app] in app?.capture.captions.isBarHidden = true }
 
         NotificationCenter.default.addObserver(
@@ -150,6 +158,7 @@ final class CaptionBarModel {
     var width = CaptionBarController.width
     @ObservationIgnored var drag: () -> Void = {}
     @ObservationIgnored var dragEnded: () -> Void = {}
+    @ObservationIgnored var toggleTranslation: () -> Void = {}
     @ObservationIgnored var hide: () -> Void = {}
 }
 
@@ -186,6 +195,7 @@ struct CaptionBarView: View {
         .onChange(of: captions.awaitingTranslation) { refresh() }
         .onChange(of: captions.provisionalTranslations) { refresh() }
         .onChange(of: model.width) { refresh() }
+        .onChange(of: hovering) { refresh() }
         .task(id: captions.lastActivity) {
             quiet = false
             try? await Task.sleep(for: .seconds(8))
@@ -201,6 +211,7 @@ struct CaptionBarView: View {
 
     private var bar: some View {
         content
+            .padding(.trailing, controlInset)
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
             .frame(width: model.width, alignment: .leading)
@@ -218,9 +229,11 @@ struct CaptionBarView: View {
                     HStack(spacing: 6) {
                         GlassControl("Open Live Page", icon: "maximize") { MainNavigation.shared.openLive() }
                         GlassControl("Hide Captions", icon: "x", action: model.hide)
+                        GlassControl(isTranslating || captions.preparingTranslation ? "Turn off live translation" : "Turn on live translation",
+                                     icon: "language", isOn: isTranslating || captions.preparingTranslation,
+                                     action: model.toggleTranslation)
                     }
                     .padding(.trailing, 12)
-                    .transition(.opacity)
                 }
             }
             .animation(.easeOut(duration: 0.12), value: hovering)
@@ -352,10 +365,12 @@ struct CaptionBarView: View {
         }
     }
 
+    private var controlInset: CGFloat { hovering ? 100 : 0 }
+
     private func refresh() {
         // With translation on, the main text is the translation (or the last one while the next is out).
         var next = layout
-        let breaker = CaptionLineBreaker(width: model.width - 40)
+        let breaker = CaptionLineBreaker(width: model.width - 40 - controlInset)
         next.update(segments: captions.displaySegments, partial: captions.partialMainText, now: Date(),
                     breakLines: breaker.counts)
         // A new line pushes the older one up by one line; under Reduce Motion it just appears.
@@ -368,10 +383,12 @@ struct GlassControl: View {
     let title: LocalizedStringKey
     let icon: String
     let action: () -> Void
+    let isOn: Bool
     @State private var hovering = false
 
-    init(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) {
+    init(_ title: LocalizedStringKey, icon: String, isOn: Bool = false, action: @escaping () -> Void) {
         self.title = title
+        self.isOn = isOn
         self.icon = icon
         self.action = action
     }
@@ -379,7 +396,7 @@ struct GlassControl: View {
     var body: some View {
         Button(action: action) {
             Icon(icon, size: 14)
-                .foregroundStyle(Palette.text)
+                .foregroundStyle(isOn ? Palette.orange : Palette.text)
                 .frame(width: 30, height: 30)
                 .background(hovering ? Palette.selected : Palette.field, in: Circle())
                 .contentShape(Circle())
@@ -390,5 +407,6 @@ struct GlassControl: View {
         .motion(Motion.touch, value: hovering)
         .tip(title, show: hovering)
         .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }

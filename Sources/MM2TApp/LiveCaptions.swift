@@ -51,10 +51,16 @@ public final class LiveCaptions {
     /// it while it was still a partial. Kept after a failure, so a shown translation never goes away.
     public private(set) var provisionalTranslations: [Int: String] = [:]
 
+    @ObservationIgnored var onFinalized: ((Segment) -> Void)?
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var partialStarted: Date?
+    @ObservationIgnored private var fixedTranslationSource: CaptionLanguage?
     @ObservationIgnored private var translation: LiveTranslation?
+    @ObservationIgnored private var translationRevision = UUID()
+    public internal(set) var translationSession: MeetingID?
+    @ObservationIgnored var translationOverride: Bool?
+    public private(set) var preparingTranslation = false
 
     public init(now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
@@ -100,6 +106,7 @@ public final class LiveCaptions {
             provisionalTranslations = provisionalTranslations.filter { kept.contains($0.key) }
         }
         translation?.finished(segment)
+        onFinalized?(segment)
     }
 
     /// A session ended mid-segment: its unfinished words stay as they were last heard, since the
@@ -122,23 +129,52 @@ public final class LiveCaptions {
         status = .off
         lastActivity = nil
         isBarHidden = false
-        translation?.stop()
-        translation = nil
-        translationTarget = nil
-        awaitingTranslation = []
-        partialTranslation = nil
-        provisionalTranslations = [:]
+        translationSession = nil
+        translationOverride = nil
+        resetTranslation()
     }
 
     // MARK: Translation
 
-    /// Translates this recording's captions into `target` from here on. Called once per recording,
-    /// after `clear()`; the translator, and the model it holds, goes with the next `clear()`.
-    func translate(with translator: any CaptionTranslator, to target: CaptionTarget,
+    private func resetTranslation() {
+        translationRevision = UUID()
+        preparingTranslation = false
+        translation?.stop()
+        translation = nil
+        fixedTranslationSource = nil
+        translationTarget = nil
+        awaitingTranslation = []
+        partialTranslation = nil
+        provisionalTranslations = [:]
+        for index in segments.indices where segments[index].translation != nil { segments[index].translation = nil }
+    }
+
+    /// Resolve just the translator. The audio stream and the caption segment identities stay live.
+    func configureTranslation(settings: AppSettings, catalog: any ProviderCatalog, prepare: () async -> Void = {}) async {
+        resetTranslation()
+        let revision = translationRevision
+        let target = settings.captionTranslation.target
+        let wantsTranslation = translationSession != nil && (translationOverride ?? settings.translationEnabled) && target != nil
+        preparingTranslation = wantsTranslation
+        await prepare()
+        guard revision == translationRevision else { return }
+        defer { if revision == translationRevision { preparingTranslation = false } }
+        guard wantsTranslation, let target else { return }
+        let engine = settings.captionEngine
+        let source = engine == .apple ? settings.transcriptionLanguage.fixedCaptionSource : nil
+        guard let translator = await catalog.captionTranslator(for: target, engine: engine, source: source),
+              revision == translationRevision, !Task.isCancelled else { return }
+        translate(with: translator, to: target, engine: engine, source: source)
+        translation?.partialChanged()
+    }
+
+    /// Translates this recording's captions into `target` from here on. The translation queue belongs to this target and engine.
+    func translate(with translator: any CaptionTranslator, to target: CaptionTarget, engine: CaptionEngine = .firefox, source: CaptionLanguage? = nil,
                    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         translation?.stop()
+        fixedTranslationSource = source
         translationTarget = target
-        translation = LiveTranslation(captions: self, translator: translator, target: target, now: now, sleep: sleep)
+        translation = LiveTranslation(captions: self, translator: translator, target: target, engine: engine, source: source, now: now, sleep: sleep)
     }
 
     /// The id the unfinished partial will have once it settles.
@@ -147,7 +183,7 @@ public final class LiveCaptions {
     /// The text needs translating: translation is on and it is in the other language.
     func needsTranslation(_ text: String) -> Bool {
         guard let target = translationTarget, let language = CaptionLanguage.of(text) else { return false }
-        return target.route(from: language) != .none
+        return target.route(from: fixedTranslationSource ?? language) != .none
     }
 
     /// The translation a surface shows for a finished segment: its own, or until that arrives the

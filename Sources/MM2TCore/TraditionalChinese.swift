@@ -1,14 +1,14 @@
 import Foundation
 
-/// Cloud speech services and language models may write Mandarin in Simplified characters; the app's
-/// reader is in Taiwan, so everything they return passes through here before it is stored.
+/// Cloud speech services and language models may write Mandarin in Simplified characters; these helpers
+/// normalize speech recognition and generated Traditional Chinese text for the app's reader.
 public enum TraditionalChinese {
     /// Converts the words as one text so context picks the right character (后面 -> 後面, 皇后 stays),
     /// then cuts it back into the same words. The conversion is character for character; if it ever
     /// is not, each word is converted on its own instead.
-    static func convert(_ words: [String]) -> [String] {
-        let converted = Array(convert(words.joined()))
-        guard converted.count == words.reduce(0, { $0 + $1.count }) else { return words.map(convert) }
+    package static func convert(_ words: [String], using transform: (String) -> String = convert) -> [String] {
+        let converted = Array(transform(words.joined()))
+        guard converted.count == words.reduce(0, { $0 + $1.count }) else { return words.map(transform) }
         var start = 0
         return words.map { word in
             defer { start += word.count }
@@ -23,14 +23,6 @@ public enum TraditionalChinese {
     /// The reverse, for the one place Simplified is asked for: live captions translated into 简体中文.
     public static func simplified(_ text: String) -> String {
         text.applyingTransform(StringTransform("Hant-Hans"), reverse: false) ?? text
-    }
-}
-
-extension CleanedTranscript {
-    var inTraditionalChinese: CleanedTranscript {
-        CleanedTranscript(paragraphs: paragraphs.map {
-            .init(speaker: $0.speaker, text: TraditionalChinese.convert($0.text), sources: $0.sources)
-        })
     }
 }
 

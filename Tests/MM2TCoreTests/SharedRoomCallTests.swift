@@ -11,8 +11,8 @@ import Testing
     static func mic(other: [Embedding], brief: [Embedding] = []) -> Diarization {
         let user = ClusterID("m1"), neighbour = ClusterID("m2")
         return Diarization(
-            segments: [.init(cluster: user, range: TimeRange(start: 50, end: 50.5)),
-                       .init(cluster: neighbour, range: TimeRange(start: 50.5, end: 51))],
+            segments: [.init(cluster: user, range: TimeRange(start: 48.5, end: 50.5)),
+                       .init(cluster: neighbour, range: TimeRange(start: 50.5, end: 52.5))],
             overlaps: [],
             embeddings: other.isEmpty ? [user: [Embedding(me)]] : [user: [Embedding(me)], neighbour: other],
             briefEmbeddings: brief.isEmpty ? [:] : [neighbour: brief])
@@ -58,8 +58,8 @@ import Testing
         // and the one too short for any vector stays the user's.
         let talker = ClusterID("m1"), quiet = ClusterID("m2")
         let world = try await world(mic: Diarization(
-            segments: [.init(cluster: quiet, range: TimeRange(start: 50, end: 50.5)),
-                       .init(cluster: talker, range: TimeRange(start: 50.5, end: 51)),
+            segments: [.init(cluster: quiet, range: TimeRange(start: 48.5, end: 50.5)),
+                       .init(cluster: talker, range: TimeRange(start: 50.5, end: 52.5)),
                        .init(cluster: talker, range: TimeRange(start: 52, end: 58))],
             overlaps: [], embeddings: [talker: [Embedding([0.7, 0.1, 0.7])]]))
         let meeting = try await world.processed()
@@ -68,18 +68,19 @@ import Testing
         #expect(meeting.speakers.count == 4)
     }
 
-    @Test func withoutAnEnrolledUserTheMicIsNotSeparated() async throws {
+    @Test func withoutAnEnrolledUserTwoMicClustersAreNotAssumedToBeMe() async throws {
         let world = try await World()
         world.diarizer.micOnCall.update { $0 = Self.mic(other: [Embedding(bob)]) }
         let meeting = try await world.processed()
 
-        #expect(meeting.utterances.last?.speaker == .me)
-        #expect(world.diarizer.calls.get == 1)
+        #expect(meeting.utterances.suffix(2).allSatisfy { $0.speaker != .me })
+        #expect(meeting.utterances.suffix(2).map(\.text) == ["Thanks", "all"])
+        #expect(world.diarizer.calls.get == 1 && world.diarizer.micCalls.get == 1)
     }
 
     @Test func wordsTheMicOnlyHeardFromTheSpeakersAreDropped() async throws {
         let world = try await world(mic: Self.mic(other: [Embedding(bob)]))
-        world.micCleaner.update { $0 = ScriptedCleaner(echo: TimeRange(start: 50.4, end: 51.2)) }
+        world.micCleaner.update { $0 = ScriptedCleaner(echo: TimeRange(start: 50.5, end: 52.5)) }
         let meeting = try await world.processed()
 
         #expect(meeting.transcription?.me.words.map(\.text) == ["Thanks"])
@@ -96,18 +97,20 @@ import Testing
         let world = try await World()
         // Too short a stretch for the word around it to count as echo by itself.
         let played = TimeRange(start: 50.5, end: 50.9)
-        world.micCleaner.update { $0 = ScriptedCleaner(echo: played) }
+        let laterEcho = TimeRange(start: 53, end: 55)
+        world.micCleaner.update { $0 = ScriptedCleaner(echo: played, additionalEcho: laterEcho) }
         world.diarizer.micOnCall.update {
             $0 = Diarization(
-                segments: [.init(cluster: ClusterID("m1"), range: TimeRange(start: 50, end: 50.5)),
-                           .init(cluster: ClusterID("m2"), range: played)],
+                segments: [.init(cluster: ClusterID("m1"), range: TimeRange(start: 48.5, end: 50.5)),
+                           .init(cluster: ClusterID("m2"), range: played),
+                           .init(cluster: ClusterID("m2"), range: laterEcho)],
                 overlaps: [], embeddings: [:])
         }
         let meeting = try await world.processed()
 
         #expect(meeting.transcription?.me.words.map(\.text) == ["Thanks"])
-        #expect(meeting.utterances.last?.text == "Thanks" && meeting.utterances.last?.speaker == .me)
-        #expect(meeting.speakers.count == 3 && meeting.micSegments == nil)
+        #expect(meeting.utterances.last?.text == "Thanks" && meeting.utterances.last?.speaker != .me)
+        #expect(meeting.speakers.count == 4 && meeting.micSegments != nil)
     }
 
     @Test func micWordsThatRepeatTheRemoteTrackAreTheCallHeardTwice() {
