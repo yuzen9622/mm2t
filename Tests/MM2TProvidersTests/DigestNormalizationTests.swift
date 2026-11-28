@@ -22,7 +22,7 @@ import Testing
     func completedTimeReferencesReachFullAndIncrementalDigests(_ hasPreviousDigest: Bool) async throws {
         let clean = self.clean, early = self.early, final = self.final, delta = self.delta
         let server = StubServer { request in
-            let result = request.geminiSystem.contains("怎麼整理：") ? clean
+            let result = request.geminiSystem.hasPrefix(LLMPrompts.cleanSystem) ? clean
                 : request.geminiSystem.contains("更新前次依人彙整") ? delta
                 : request.geminiInput.contains("辨識正規化參考（") ? final : early
             return .status(200, Fixture.gemini(result))
@@ -47,7 +47,7 @@ import Testing
     @Test func anotherRecordingAndAnIncompatibleGlossaryCannotBorrowTimeReferences() async throws {
         let clean = self.clean, early = self.early, final = self.final
         let server = StubServer { request in
-            .status(200, Fixture.gemini(request.geminiSystem.contains("怎麼整理：") ? clean
+            .status(200, Fixture.gemini(request.geminiSystem.hasPrefix(LLMPrompts.cleanSystem) ? clean
                 : request.geminiInput.contains("辨識正規化參考（") ? final : early))
         }
         let base = GeminiLLM(apiKey: "test", session: server.session)

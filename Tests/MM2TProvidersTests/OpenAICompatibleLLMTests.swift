@@ -236,7 +236,7 @@ extension Fixture {
                 : .status(200, Fixture.chatCompletion(#"{"paragraphs":[]}"#))
         }
         let cleaned = try await llm(server).cleanTranscript(transcript)
-        #expect(cleaned.paragraphs.isEmpty)
+        #expect(cleaned.paragraphs.map(\.text) == transcript.utterances.map(\.text))
         #expect(server.requests.count == 2)
         let retry = try #require(server.requests.last)
         #expect((retry.json["response_format"] as? [String: Any])?["type"] as? String == "json_object")
