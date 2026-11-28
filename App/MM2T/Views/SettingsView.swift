@@ -148,6 +148,7 @@ struct SettingsGroup: Identifiable {
 struct SettingsDialog: View {
     let app: AppController
     @State private var query = ""
+    @State private var translationSetupMeeting: MeetingID?
     @State private var showLicenses = false
 
     private var navigation: MainNavigation { MainNavigation.shared }
@@ -157,7 +158,14 @@ struct SettingsDialog: View {
         HStack(spacing: 0) {
             sectionList
             Group {
-                if showLicenses {
+                if let meeting = translationSetupMeeting, meeting == app.capture.captions.translationSession {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text("Translation").font(Typo.title)
+                        CaptionTranslationRow(app: app, setupMeeting: meeting).card()
+                        Spacer()
+                    }
+                    .padding(28)
+                } else if showLicenses {
                     // The notices open in place of the page, not in a window of their own.
                     VStack(alignment: .leading, spacing: 0) {
                         IconButton("Back", icon: "chevron-left") { showLicenses = false }
@@ -193,6 +201,17 @@ struct SettingsDialog: View {
         .background(Palette.window)
         .tipLayer()
         .onAppear { app.setup.recheck() }
+        .onChange(of: navigation.translationSetupRequest, initial: true) { _, meeting in
+            guard let meeting else { return }
+            translationSetupMeeting = meeting
+            navigation.translationSetupRequest = nil
+        }
+        .onChange(of: app.capture.captions.translationTarget) { _, target in
+            if target != nil, let translationSetupMeeting, translationSetupMeeting == app.capture.captions.translationSession {
+                navigation.settingsOpen = false
+            }
+        }
+        .onChange(of: query) { translationSetupMeeting = nil }
         .onChange(of: app.settings.settings) { app.setup.recheck() }
         .onChange(of: searching) { if searching { showLicenses = false } }
     }
@@ -203,6 +222,7 @@ struct SettingsDialog: View {
             SearchField(text: $query).padding(.top, 14).padding(.bottom, 16)
             ForEach(SettingsSection.allCases.filter { app.collabAccount != nil || $0 != .account }) { section in
                 SettingsSectionRow(section: section, isSelected: !searching && !showLicenses && navigation.settingsSection == section) {
+                    translationSetupMeeting = nil
                     query = ""
                     showLicenses = false
                     navigation.settingsSection = section

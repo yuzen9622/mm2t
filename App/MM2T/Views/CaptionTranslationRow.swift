@@ -20,6 +20,8 @@ struct TranslationEnableRow: View {
 
 struct CaptionTranslationRow: View {
     let app: AppController
+    var setupMeeting: MeetingID?
+    private var showsTargets: Bool { setupMeeting != nil || app.settings.settings.translationEnabled }
     @State private var appleLanguages: [AppleCaptionLanguage]?
     @State private var refresh = 0
     @State private var appleRequest: UUID?
@@ -49,15 +51,15 @@ struct CaptionTranslationRow: View {
                 Text("Apple Translation requires macOS 26 or later.")
                     .font(Typo.caption).foregroundStyle(Palette.secondary)
             }
-            if app.settings.settings.translationEnabled {
+            if showsTargets {
                 HStack {
                     Text("Translate captions")
                     Spacer()
                     Dropdown(label: "Translate captions", options: targetOptions,
                              selection: Binding(get: { choice }, set: { new in
                                  Task {
-                                     await app.setCaptionTranslation(new)
-                                     if engine == .apple { appleRequest = new == .off ? nil : UUID() }
+                                     await app.setCaptionTranslation(new, forRecording: setupMeeting)
+                                     if engine == .apple, choice == new { appleRequest = new == .off ? nil : UUID() }
                                  }
                              }),
                              placeholder: engine == .apple && appleLanguages == nil ? String(localized: "Checking…") : String(localized: "Unavailable"),
@@ -66,9 +68,22 @@ struct CaptionTranslationRow: View {
                 }
             }
             if engine == .apple {
-                if app.settings.settings.translationEnabled, let language = appleLanguages?.first(where: { $0.target == choice.target }),
-                   !language.missingSources.isEmpty, let appleRequest, #available(macOS 26, *) {
-                    AppleModelDownload(language: language) { refresh += 1 }.id(appleRequest)
+                if showsTargets, let language = appleLanguages?.first(where: { $0.target == choice.target }),
+                   !language.missingSources.isEmpty, #available(macOS 26, *) {
+                    if let appleRequest {
+                        AppleModelDownload(language: language) {
+                            refresh += 1
+                            guard engine == .apple, choice.target == language.target else { return }
+                            Task { await app.appleCaptionModelReady(for: language.target, meeting: setupMeeting) }
+                        }.id(appleRequest)
+                    } else {
+                        Button("Download") {
+                            Task {
+                                if let setupMeeting { await app.setCaptionTranslation(choice, forRecording: setupMeeting) }
+                                appleRequest = UUID()
+                            }
+                        }
+                    }
                 } else if appleLanguages?.isEmpty == true, AppleCaptionTranslator.isAvailable {
                     Text("No system translation languages available.").font(Typo.caption).foregroundStyle(Palette.secondary)
                 }
@@ -76,8 +91,8 @@ struct CaptionTranslationRow: View {
                 modelDownload
             }
         }
-        .task(id: CatalogRequest(engine: app.settings.settings.translationEnabled ? engine : nil, revision: refresh, source: app.settings.settings.transcriptionLanguage.fixedCaptionSource)) {
-            if app.settings.settings.translationEnabled && engine == .apple { await loadAppleLanguages() } else { appleLanguages = nil }
+        .task(id: CatalogRequest(engine: showsTargets ? engine : nil, revision: refresh, source: app.settings.settings.transcriptionLanguage.fixedCaptionSource)) {
+            if showsTargets && engine == .apple { await loadAppleLanguages() } else { appleLanguages = nil }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if engine == .apple { refresh += 1 }
@@ -119,12 +134,16 @@ struct CaptionTranslationRow: View {
     }
 
     @ViewBuilder private var modelDownload: some View {
-        switch app.setup.translationModels {
+        let state = setupMeeting.flatMap { _ in choice.target }.map { app.setup.translationModelState(engine: engine, target: $0) }
+        switch state ?? app.setup.translationModels {
         case .downloading(let fraction):
             Text("Downloading translation model… \(Int(fraction * 100))%")
                 .font(Typo.caption).foregroundStyle(Palette.muted).monospacedDigit()
         case .failed:
-            Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.muted)
+            HStack {
+                Text("Couldn't download the translation model.").font(Typo.caption).foregroundStyle(Palette.muted)
+                Button("Retry") { Task { await app.setCaptionTranslation(choice, forRecording: setupMeeting) } }
+            }
         case .notDownloaded, .downloaded: EmptyView()
         }
     }

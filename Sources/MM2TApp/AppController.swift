@@ -248,12 +248,8 @@ public final class AppController {
             makeCaptions: { captions, meeting in
                 let current = settings.settings
                 guard current.liveCaptions, let provider = pipelineSetup.buildCaptions(current, accountURL: accountURL, hostedMeeting: current.transcriptionService == .mm2t ? meeting.description : nil) else { return nil }
-                // Translation on this Mac, only once its models are downloaded.
-                let source = current.captionEngine == .apple ? current.transcriptionLanguage.fixedCaptionSource : nil
-                if current.translationEnabled, let target = current.captionTranslation.target, let translator = await catalog.captionTranslator(for: target, engine: current.captionEngine, source: source) {
-                    guard !Task.isCancelled else { return nil }
-                    captions.translate(with: translator, to: target, engine: current.captionEngine, source: source)
-                }
+                captions.translationSession = meeting
+                await captions.configureTranslation(settings: current, catalog: catalog)
                 let names = await voiceprints.spokenNames()
                 return CaptionStream(
                     provider: provider,
@@ -423,12 +419,12 @@ public final class AppController {
         startMonitorIfReady()
     }
 
-    /// Live caption translation: the models the chosen language needs download when it is first
-    /// chosen; other languages' models stay on disk. It applies from the next recording.
+    /// Explicit changes in Settings also control this recording, including after a bar override.
     public func setTranslationEnabled(_ enabled: Bool) async {
         settings.settings.translationEnabled = enabled
         setup.refreshTranslation()
-        if enabled { await setup.downloadTranslationModels() }
+        capture.captions.translationOverride = nil
+        await refreshCaptionTranslation(preparingModels: enabled)
     }
 
     public func setCaptionEngine(_ engine: CaptionEngine) async {
@@ -441,13 +437,58 @@ public final class AppController {
         }
         settings.settings = current
         setup.refreshTranslation()
-        await setup.downloadTranslationModels()
+        await refreshCaptionTranslation(preparingModels: true)
     }
 
-    public func setCaptionTranslation(_ choice: CaptionTranslation) async {
+    public func setCaptionTranslation(_ choice: CaptionTranslation, forRecording meeting: MeetingID? = nil) async {
+        if let meeting {
+            guard capture.captions.translationSession == meeting else { return }
+            capture.captions.translationOverride = choice != .off
+        }
         settings.settings.captionTranslation = choice
         setup.refreshTranslation()
-        if choice != .off { await setup.downloadTranslationModels() }
+        await refreshCaptionTranslation(preparingModels: choice != .off)
+    }
+
+    public func appleCaptionModelReady(for target: CaptionTarget, meeting: MeetingID?) async {
+        let captions = capture.captions
+        guard settings.settings.captionEngine == .apple, settings.settings.captionTranslation.target == target,
+              let active = captions.translationSession, meeting == nil || meeting == active,
+              captions.translationOverride ?? settings.settings.translationEnabled else { return }
+        await refreshCaptionTranslation(preparingModels: false)
+    }
+
+    private func refreshCaptionTranslation(preparingModels: Bool) async {
+        let current = settings.settings
+        let captions = capture.captions
+        await captions.configureTranslation(settings: current, catalog: pipelineSetup.catalog) {
+            guard preparingModels else { return }
+            if captions.translationOverride == true, !current.translationEnabled, let target = current.captionTranslation.target {
+                await self.setup.prepareCaptionModel(engine: current.captionEngine, target: target)
+            } else {
+                await self.setup.downloadTranslationModels()
+            }
+        }
+    }
+
+    /// Returns true when the bar needs to open translation settings.
+    public func toggleLiveTranslation() async -> Bool {
+        let captions = capture.captions
+        guard let meeting = captions.translationSession else { return false }
+        guard let target = settings.settings.captionTranslation.target else {
+            return true
+        }
+        let enable = captions.translationTarget == nil && !captions.preparingTranslation
+        captions.translationOverride = enable
+        let engine = settings.settings.captionEngine
+        await captions.configureTranslation(settings: settings.settings, catalog: pipelineSetup.catalog) {
+            if enable { await self.setup.prepareCaptionModel(engine: engine, target: target) }
+        }
+        let needsSetup = enable && captions.translationSession == meeting && captions.translationOverride == true
+            && !captions.preparingTranslation && captions.translationTarget == nil
+            && settings.settings.captionEngine == engine && settings.settings.captionTranslation.target == target
+        if needsSetup { captions.translationOverride = nil }
+        return needsSetup
     }
 
     /// Marks setup finished and leaves it; from here the app watches for meetings.

@@ -63,6 +63,13 @@ final class MainNavigation {
         WindowOpener.open(WindowID.main)
     }
 
+    var translationSetupRequest: MeetingID?
+
+    func openTranslationSettings(for meeting: MeetingID) {
+        translationSetupRequest = meeting
+        open(.settings)
+    }
+
     private(set) var collaborationRequest = 0
 
     func openCollaboration() {

@@ -56,7 +56,8 @@ final class LiveTranslation {
         captions?.willTranslate(segment.id)
         run { [weak self] in
             let result = await self?.translated(segment.text, along: route)
-            self?.captions?.attach(result, to: segment.id)
+            guard let self, !self.isStopped else { return }
+            self.captions?.attach(result, to: segment.id)
         }
     }
 

@@ -57,6 +57,10 @@ public final class LiveCaptions {
     @ObservationIgnored private var partialStarted: Date?
     @ObservationIgnored private var fixedTranslationSource: CaptionLanguage?
     @ObservationIgnored private var translation: LiveTranslation?
+    @ObservationIgnored private var translationRevision = UUID()
+    public internal(set) var translationSession: MeetingID?
+    @ObservationIgnored var translationOverride: Bool?
+    public private(set) var preparingTranslation = false
 
     public init(now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
@@ -125,6 +129,16 @@ public final class LiveCaptions {
         status = .off
         lastActivity = nil
         isBarHidden = false
+        translationSession = nil
+        translationOverride = nil
+        resetTranslation()
+    }
+
+    // MARK: Translation
+
+    private func resetTranslation() {
+        translationRevision = UUID()
+        preparingTranslation = false
         translation?.stop()
         translation = nil
         fixedTranslationSource = nil
@@ -132,12 +146,29 @@ public final class LiveCaptions {
         awaitingTranslation = []
         partialTranslation = nil
         provisionalTranslations = [:]
+        for index in segments.indices where segments[index].translation != nil { segments[index].translation = nil }
     }
 
-    // MARK: Translation
+    /// Resolve just the translator. The audio stream and the caption segment identities stay live.
+    func configureTranslation(settings: AppSettings, catalog: any ProviderCatalog, prepare: () async -> Void = {}) async {
+        resetTranslation()
+        let revision = translationRevision
+        let target = settings.captionTranslation.target
+        let wantsTranslation = translationSession != nil && (translationOverride ?? settings.translationEnabled) && target != nil
+        preparingTranslation = wantsTranslation
+        await prepare()
+        guard revision == translationRevision else { return }
+        defer { if revision == translationRevision { preparingTranslation = false } }
+        guard wantsTranslation, let target else { return }
+        let engine = settings.captionEngine
+        let source = engine == .apple ? settings.transcriptionLanguage.fixedCaptionSource : nil
+        guard let translator = await catalog.captionTranslator(for: target, engine: engine, source: source),
+              revision == translationRevision, !Task.isCancelled else { return }
+        translate(with: translator, to: target, engine: engine, source: source)
+        translation?.partialChanged()
+    }
 
-    /// Translates this recording's captions into `target` from here on. Called once per recording,
-    /// after `clear()`; the translator, and the model it holds, goes with the next `clear()`.
+    /// Translates this recording's captions into `target` from here on. The translation queue belongs to this target and engine.
     func translate(with translator: any CaptionTranslator, to target: CaptionTarget, engine: CaptionEngine = .firefox, source: CaptionLanguage? = nil,
                    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         translation?.stop()

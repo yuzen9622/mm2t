@@ -244,7 +244,7 @@ public final class SetupModel {
                                            target: settings.settings.captionEngine == .hyMT2 ? nil : $0) }
     }
     @ObservationIgnored private var downloadTasks: [DownloadKey: Task<Void, Never>] = [:]
-    @ObservationIgnored private var downloadStates: [DownloadKey: ModelDownloadState] = [:]
+    private var downloadStates: [DownloadKey: ModelDownloadState] = [:]
     @ObservationIgnored private var lastDownload: Task<Void, Never>?
     public func offlineModelBytes(_ model: OfflineModel) -> Int64 { offlineInstallers[model]?.downloadBytes ?? 0 }
 
@@ -435,6 +435,13 @@ public final class SetupModel {
         translationModels = installer.isDownloaded ? .downloaded : downloadStates[key] ?? .notDownloaded
     }
 
+    /// A caption-bar setup can prepare a language without enabling translation globally.
+    public func translationModelState(engine: CaptionEngine, target: CaptionTarget) -> ModelDownloadState {
+        guard let installer = translationInstaller(engine, target) else { return .notDownloaded }
+        let key = DownloadKey(engine: engine, target: engine == .hyMT2 ? nil : target)
+        return installer.isDownloaded ? .downloaded : downloadStates[key] ?? .notDownloaded
+    }
+
     public func downloadTranslationModels() async {
         guard let key = downloadKey, let installer = selectedInstaller else { return }
         await download(key, installer: installer)
@@ -442,6 +449,11 @@ public final class SetupModel {
 
     public func prepareTranscriptModel(engine: CaptionEngine, target: CaptionTarget) async -> Bool {
         guard settings.settings.translationEnabled else { return false }
+        return await prepareCaptionModel(engine: engine, target: target)
+    }
+
+    @discardableResult
+    func prepareCaptionModel(engine: CaptionEngine, target: CaptionTarget) async -> Bool {
         if engine == .apple { return true } // Language packs are prepared by the system translation session.
         guard let installer = translationInstaller(engine, target) else { return false }
         await download(DownloadKey(engine: engine, target: engine == .hyMT2 ? nil : target), installer: installer)
