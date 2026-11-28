@@ -37,7 +37,14 @@ public enum ProcessingOperation: Sendable {
 /// Runs pipeline jobs one at a time, since each loads the on-device models and uploads audio.
 @MainActor @Observable
 public final class ProcessingQueue {
+    public enum Outcome: Equatable, Sendable {
+        case completed(MeetingID, title: String)
+        case failed(MeetingID, reason: String)
+    }
+
     public private(set) var jobs: [MeetingID: JobState] = [:]
+    /// The final result and its revision let observers present it once, even if queue changes coalesce.
+    public private(set) var lastResult: (revision: Int, outcome: Outcome)?
     /// Bumped whenever a meeting document may have changed, so open views reload.
     public private(set) var revision = 0
 
@@ -183,6 +190,12 @@ public final class ProcessingQueue {
     }
 
     private func execute(_ operation: ProcessingOperation, on id: MeetingID, using prepared: MeetingProcessingPipeline?) async {
+        lastResult = nil
+        defer {
+            if case .failed(_, let reason) = jobs[id] {
+                lastResult = (revision, .failed(id, reason: reason))
+            }
+        }
         let pipeline: MeetingProcessingPipeline
         if case .resumeDeferredAI = operation {
             guard let ready = readyWithAI() else {
@@ -223,6 +236,7 @@ public final class ProcessingQueue {
             }
             switch meeting.status {
             case .completed:
+                lastResult = (revision, .completed(meeting.id, title: meeting.metadata.title))
                 jobs[id] = .completed
                 onCompleted?(meeting)
                 // Sign-in may have happened while this job was finishing without an LLM.

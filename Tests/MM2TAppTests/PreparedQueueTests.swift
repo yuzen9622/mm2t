@@ -43,7 +43,8 @@ import Testing
         var finished = 0
         queue.onJobFinished = { finished += 1 }
         await queue.run(.process, on: id)
-        guard case .failed = queue.jobs[id] else { Issue.record("expected pipeline failure"); return }
+        guard case .failed(_, let reason) = queue.jobs[id] else { Issue.record("expected pipeline failure"); return }
+        #expect(queue.lastResult?.outcome == .failed(id, reason: reason))
         #expect(finished == 1)
     }
 
@@ -99,6 +100,7 @@ import Testing
         #expect(oldLLM.calls.get.isEmpty, "none of the queued meeting may be sent to the obsolete provider")
         #expect(Set(latestLLM.calls.get) == ["inferNames", "cleanTranscript", "digestPerPerson", "summarize"])
         let result = try await world.library.meeting(second.id)
+        #expect(queue.lastResult?.outcome == .completed(second.id, title: result.metadata.title))
         #expect(result.status == .completed)
         #expect(result.outputs.cleaned != nil && result.outputs.digests != nil && result.outputs.summary != nil)
     }
