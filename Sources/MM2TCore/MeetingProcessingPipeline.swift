@@ -363,6 +363,7 @@ public struct MeetingProcessingPipeline: Sendable {
             let names = await voiceprints.spokenNames()
             transcript.glossary = names + vocabulary.filter { !names.contains($0) }
             meeting.outputs.cleaned = try await llm.cleanTranscript(transcript)
+            meeting.joinCleanedFragments()
 
         case .digestPerPerson:
             guard let llm else { return }
@@ -469,6 +470,7 @@ public struct MeetingProcessingPipeline: Sendable {
             meeting.speakers = [RemoteSpeaker(id: id, label: Self.label(0), person: nil, embeddings: [])]
             meeting.remoteSegments = [SpeakerSegment(speaker: id, range: TimeRange(start: first.range.start, end: last.range.end))]
         }
+        meeting.pendingPlaybackWords = nil
         meeting.micSegments = nil
         if track == .remote, !transcription.me.words.isEmpty {
             if let mic = recorded?[.me] {
@@ -499,10 +501,15 @@ public struct MeetingProcessingPipeline: Sendable {
 
     private func applyMic(_ diarization: Diarization, audio: URL, echo: EchoProfile?, energy: SpeechEnergy? = nil,
                           to meeting: inout Meeting) async {
-        guard let transcription = meeting.transcription, !diarization.segments.isEmpty else { return }
+        guard let transcription = meeting.transcription else { return }
+        if let echo {
+            let repeats = PlaybackTranscript.echoes(mic: transcription.me.words, remote: transcription.remote.words, profile: echo)
+            if !repeats.isEmpty { meeting.pendingPlaybackWords = repeats }
+        }
+        guard !diarization.segments.isEmpty else { return }
         let heard = removingDeletedSpeech(from: diarization, on: .me, in: meeting)
         let enrollment = await voiceprints.user()?.embeddings ?? []
-        let energy = energy ?? speechEnergy(at: audio, for: heard)
+        let energy = energy ?? (try? SpeechEnergy(reading: audio, through: transcription.me.words.last?.range.end))
         let gate = SpeakerGate()
         let decisions: [SpeakerGate.Destination]
         if enrollment.isEmpty {
@@ -564,7 +571,18 @@ public struct MeetingProcessingPipeline: Sendable {
             return true
         }
         let cleaned = Diarization(segments: retained.map(\.0), overlaps: heard.overlaps, embeddings: kept, briefEmbeddings: brief)
-        let mic = apply(cleaned, decisions: retained.map(\.1), micUser: mine, mixed: mixed, channel: .room, to: &meeting)
+        var mic = apply(cleaned, decisions: retained.map(\.1), micUser: mine, mixed: mixed, channel: .room, to: &meeting)
+        if let energy, let words = meeting.transcription?.me.words {
+            let gaps = gate.quietMicGaps(words: words, turns: heard.segments.map(\.range), energy: energy)
+            var next = (meeting.speakers.compactMap { Int($0.id.rawValue.dropFirst()) }.max() ?? 0) + 1
+            for gap in gaps {
+                let id = SpeakerID.remote(next)
+                next += 1
+                meeting.speakers.append(RemoteSpeaker(id: id, label: Self.label(meeting.speakers.count), person: nil, embeddings: []))
+                meeting.pendingBackgroundSpeakerIDs?.append(id)
+                mic.append(SpeakerSegment(speaker: id, range: gap, requiresOverlap: true))
+            }
+        }
         meeting.micSegments = mic.contains { $0.speaker != .me } ? mic : nil
     }
 
@@ -657,8 +675,10 @@ public struct MeetingProcessingPipeline: Sendable {
     private func align(_ meeting: inout Meeting) {
         guard let transcription = meeting.transcription else { preconditionFailure("align before transcribe") }
         let separatesMic = meeting.separatedTrack == .me
+        let mic = separatesMic ? [] : Alignment.dropping(repeatsOf: transcription.remote.words, from: transcription.me.words)
+        let playback = meeting.pendingPlaybackWords ?? []
         meeting.utterances = Alignment.utterances(
-            me: separatesMic ? [] : Alignment.dropping(repeatsOf: transcription.remote.words, from: transcription.me.words),
+            me: mic.filter { !playback.contains($0) },
             remote: separatesMic ? transcription.me.words : transcription.remote.words,
             segments: meeting.remoteSegments,
             overlaps: meeting.attribution?.overlaps ?? [],
@@ -673,6 +693,7 @@ public struct MeetingProcessingPipeline: Sendable {
         meeting.utterances.removeAll { background.contains($0.speaker) }
         meeting.speakers.removeAll { background.contains($0.id) || silent.contains($0.id) }
         meeting.suggestions.items.removeAll { silent.contains($0.speaker) }
+        meeting.pendingPlaybackWords = nil
         meeting.pendingBackgroundSpeakerIDs = nil
         meeting.relabelSpeakers()
     }

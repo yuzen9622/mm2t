@@ -54,6 +54,8 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
     /// Who spoke when on the mic track of a call where it heard more than the user: the user as
     /// `.me`, anyone else in the room as one of `speakers`. nil when every mic word is the user's.
     public internal(set) var micSegments: [SpeakerSegment]?
+    /// Acoustic and text matches needed if processing resumes between separation and alignment.
+    var pendingPlaybackWords: Set<TimedWord>?
     public internal(set) var attribution: SpeakerAttribution?
     public internal(set) var transcription: Transcription?
     public internal(set) var utterances: [Utterance] = []
@@ -90,7 +92,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, room, metadata, audio, highlights, speakers, mergedSpeakers, remoteSegments, separatedTrack
-        case micSegments, attribution, transcription, utterances, suggestions, translation
+        case pendingPlaybackWords, micSegments, attribution, transcription, utterances, suggestions, translation
         case summaryMarkdown, perPersonMarkdown, outputs, status, deferredAIStep
         case backgroundSpeakers, backgroundUtterances, pendingBackgroundSpeakerIDs, deletedSpeakerRanges, deletedSpeakerSharedRanges
     }
@@ -111,6 +113,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
         mergedSpeakers = try box.decode([SpeakerID: SpeakerID].self, forKey: .mergedSpeakers)
         remoteSegments = try box.decode([SpeakerSegment].self, forKey: .remoteSegments)
         separatedTrack = try box.decodeIfPresent(Track.self, forKey: .separatedTrack)
+        pendingPlaybackWords = try box.decodeIfPresent(Set<TimedWord>.self, forKey: .pendingPlaybackWords)
         micSegments = try box.decodeIfPresent([SpeakerSegment].self, forKey: .micSegments)
         attribution = try box.decodeIfPresent(SpeakerAttribution.self, forKey: .attribution)
         transcription = try box.decodeIfPresent(Transcription.self, forKey: .transcription)
@@ -122,6 +125,7 @@ public struct Meeting: Codable, Hashable, Sendable, Identifiable {
         outputs = try box.decode(LLMOutputs.self, forKey: .outputs)
         status = try box.decode(ProcessingStatus.self, forKey: .status)
         deferredAIStep = try box.decodeIfPresent(ProcessingStep.self, forKey: .deferredAIStep)
+        joinCleanedFragments()
     }
 
     mutating func relabelSpeakers() {
@@ -270,6 +274,8 @@ public enum SpeakerAttribution: Codable, Hashable, Sendable {
 public struct SpeakerSegment: Codable, Hashable, Sendable {
     public let speaker: SpeakerID
     public let range: TimeRange
+    /// Inferred from unattributed words. Never extend this assignment to a neighbour.
+    var requiresOverlap: Bool? = nil
 }
 
 public struct Transcription: Codable, Hashable, Sendable {

@@ -360,6 +360,22 @@ import Testing
         #expect(meeting.backgroundUtterances.flatMap(\.words).map(\.text) == ["First", "Second"])
     }
 
+    @Test func quietMicWordsWithoutATurnStayRestorableAndDoNotBorrowTheNextVoice() async throws {
+        let world = try await World()
+        try await world.voiceprints.enrollUser(name: "Me", embeddings: [Embedding([1, 0, 0])])
+        let mic = Diarization(segments: [turn(a, 0, 4), turn(a, 8, 12), turn(a, 12, 16)],
+                              overlaps: [], embeddings: [a: [Embedding([1, 0, 0])]])
+        let words = transcript(mic: [TimedWord("Near", 2, 3), TimedWord("Quiet", 4.5, 5.5),
+                                     TimedWord("aside", 6, 7), TimedWord("Soft reply", 8.2, 9),
+                                     TimedWord("Next", 13, 15)], remote: [TimedWord("Call", 1, 2)])
+        let record = try await world.record()
+        try await world.pipeline.attachRecording(words, diarizations: [.me: mic], echo: nil, to: record.id,
+            micEnergy: try #require(syntheticEnergy([0.2, 0.001, 0.001, 0.2])))
+        let saved = try await world.library.meeting(record.id)
+        #expect(saved.backgroundUtterances.flatMap(\.words).map(\.text) == ["Quiet", "aside"])
+        #expect(saved.utterances.filter { $0.speaker == .me }.flatMap(\.words).map(\.text) == ["Near", "Soft reply", "Next"])
+    }
+
     private func writeMic(_ amplitudes: [Float], to url: URL) throws {
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
         let frames: AVAudioFrameCount = 64_000

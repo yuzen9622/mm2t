@@ -174,6 +174,10 @@ public struct EchoProfile: Hashable, Sendable {
         return runs
     }
 
+    func hasActivePlayback(during range: TimeRange) -> Bool {
+        frames(from: range.start - Self.margin, to: range.end + Self.margin).contains(where: active)
+    }
+
     private func active(_ frame: Int) -> Bool { (remote[frame] ?? 0) >= Self.activePlayback }
 
     private func speakerRatio(heard: Double, left: Double) -> Float? {

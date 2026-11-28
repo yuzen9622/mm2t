@@ -193,6 +193,39 @@ public struct SpeakerGate: Sendable {
         }
     }
 
+    /// STT can hear distant voices in gaps where the diarizer heard no speaker.
+    /// Compare those words to this recording's detected turns, keeping quiet detected speech intact.
+    func quietMicGaps(words: [TimedWord], turns: [TimeRange], energy: SpeechEnergy) -> [TimeRange] {
+        let ordered = turns.sorted { $0.start < $1.start }
+        let levels = ordered.compactMap { energy.level(in: $0) }
+        guard let reference = percentile(levels, Self.referencePercentile), reference.isFinite else { return [] }
+        var gaps: [TimeRange] = []
+        var run: TimeRange?
+        var index = 0
+        func finish() {
+            if let run, run.duration >= minForegroundSpeech { gaps.append(run) }
+            run = nil
+        }
+        for word in words.sorted(by: { $0.range.start < $1.range.start }) {
+            let range = word.range
+            while index < ordered.count && ordered[index].end < range.start { index += 1 }
+            if let run, range.start - run.end > Alignment.maxPause { finish() }
+            if index < ordered.count && ordered[index].start <= range.end {
+                finish()
+                continue
+            }
+            // Include the immediate syllable around point timestamps and sub-frame word boundaries.
+            let window = TimeRange(start: max(0, range.start - EchoProfile.margin), end: range.end + EchoProfile.margin)
+            guard let level = energy.voicedMedian(in: [window]), level.db < reference - callMicDrop else {
+                finish()
+                continue
+            }
+            run = TimeRange(start: run?.start ?? range.start, end: max(run?.end ?? range.end, range.end))
+        }
+        finish()
+        return gaps
+    }
+
     private func percentile(_ levels: [SpeechEnergy.Level], _ fraction: Double) -> Double? {
         let ordered = levels.filter { $0.seconds > 0 }.sorted { $0.db < $1.db }
         let target = ordered.reduce(0) { $0 + $1.seconds } * fraction

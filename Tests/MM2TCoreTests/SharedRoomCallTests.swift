@@ -127,6 +127,32 @@ import Testing
         #expect(Alignment.dropping(repeatsOf: [TimedWord("對", 9, 9.2)], from: agreeing) == agreeing, "one word heard is not four words repeated")
     }
 
+    @Test func playbackWithDifferentTokenBoundariesKeepsSimultaneousLocalSpeech() async throws {
+        let near = [TimedWord("我在講話", 2, 2.1), TimedWord("wait", 2.1, 2.2)]
+        let remote = [TimedWord("The", 0.5, 0.8), TimedWord("J-space", 1, 1.4), TimedWord("after", 1.5, 1.8),
+                      TimedWord("the", 2.3, 2.5), TimedWord("Jacobian", 2.6, 2.9), TimedWord("was", 3, 3.2),
+                      TimedWord("found", 3.3, 3.6)]
+        let mic = [remote[0], TimedWord("J", 1, 1.1), TimedWord("space", 1.2, 1.4), remote[2]] + near
+            + [remote[3], TimedWord("Jacobi", 2.6, 2.9), remote[5], remote[6]]
+        let power = [Float](repeating: 0.1, count: 100)
+        var cleaned = power
+        for frame in 15..<33 { cleaned[frame] /= 10 }
+        let echo = EchoProfile(frameDuration: 0.05, before: power, after: cleaned, remote: power)
+        let headphones = EchoProfile(frameDuration: 0.05, before: power, after: power, remote: power)
+        #expect(PlaybackTranscript.echoes(mic: mic, remote: remote, profile: headphones).isEmpty)
+        let world = try await World()
+        let record = try await world.record()
+        let tracks = Transcription(me: TrackTranscript(source: .local, content: .unlabeled(mic)),
+                                   remote: TrackTranscript(source: .local, content: .unlabeled(remote)))
+        let turns = Diarization(segments: [.init(cluster: ClusterID("near"), range: TimeRange(start: 0, end: 4))],
+                                overlaps: [], embeddings: [:])
+        try await world.pipeline.attachRecording(tracks, diarizations: [.me: turns, .remote: turns], echo: echo, to: record.id)
+        let saved = try await world.library.meeting(record.id)
+        #expect(saved.utterances.filter { $0.speaker == .me }.flatMap(\.words) == near)
+        #expect(saved.utterances.filter { $0.speaker != .me }.flatMap(\.words) == remote)
+        #expect(saved.transcription?.me.words == mic)
+    }
+
     @Test func mergingARoomSpeakerMovesTheirMicSegments() async throws {
         let world = try await world(mic: Self.mic(other: [Embedding(bob)]))
         let meeting = try await world.processed()

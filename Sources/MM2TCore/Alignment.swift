@@ -99,7 +99,9 @@ public enum Alignment {
     }
 
     static func speaker(for range: TimeRange, in segments: [SpeakerSegment], preferUserOnTie: Bool = false) -> SpeakerID? {
-        segments.min { a, b in
+        segments.lazy.filter { segment in
+            segment.requiresOverlap != true || (segment.range.start <= range.end && range.start <= segment.range.end)
+        }.min { a, b in
             let overlapA = a.range.overlap(with: range), overlapB = b.range.overlap(with: range)
             if overlapA != overlapB { return overlapA > overlapB }
             // A voiceprint-confirmed local turn is stronger evidence than cluster order.

@@ -114,10 +114,10 @@ public struct SpeakerEditing: Sendable {
             meeting.utterances[index].speaker = into.id
         }
         meeting.remoteSegments = meeting.remoteSegments.map {
-            $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range) : $0
+            $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range, requiresOverlap: $0.requiresOverlap) : $0
         }
         meeting.micSegments = meeting.micSegments?.map {
-            $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range) : $0
+            $0.speaker == from.id ? SpeakerSegment(speaker: into.id, range: $0.range, requiresOverlap: $0.requiresOverlap) : $0
         }
         meeting.suggestions.items.removeAll { $0.speaker == from.id || (person != nil && $0.speaker == into.id) }
         meeting.suggestions.isStale = true
@@ -147,10 +147,10 @@ public struct SpeakerEditing: Sendable {
             meeting.utterances[index].speaker = .me
         }
         meeting.remoteSegments = meeting.remoteSegments.map {
-            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range) : $0
+            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range, requiresOverlap: $0.requiresOverlap) : $0
         }
         meeting.micSegments = meeting.micSegments?.map {
-            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range) : $0
+            $0.speaker == claimed.id ? SpeakerSegment(speaker: .me, range: $0.range, requiresOverlap: $0.requiresOverlap) : $0
         }
         meeting.suggestions.items.removeAll { $0.speaker == claimed.id }
         meeting.suggestions.isStale = true
